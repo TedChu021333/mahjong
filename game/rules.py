@@ -263,6 +263,9 @@ def apply_action(state: GameState, action: Action, player: int | None = None) ->
     assert state.last_discard is not None
     assert state.discard_player is not None
     claimed = state.last_discard
+    source_discards = state.players[state.discard_player].discards
+    if not source_discards or source_discards[-1] != claimed:
+        raise ValueError("牌河最後一張與待回應棄牌不一致")
     if action.kind == ActionType.CHOW:
         claimed_tiles = list(action.tiles)
         claimed_tiles.remove(claimed)
@@ -283,6 +286,7 @@ def apply_action(state: GameState, action: Action, player: int | None = None) ->
         return
     else:
         raise ValueError("未知的動作")
+    source_discards.pop()
     state.current_player = actor
     _clear_response(state)
     state.phase = Phase.DISCARD

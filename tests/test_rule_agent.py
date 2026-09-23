@@ -1,6 +1,6 @@
 from random import Random
 
-from agent.rule_agent import choose_discard, choose_rule_action
+from agent.rule_agent import choose_discard, choose_rule_action, visible_tile_counts
 from game.rules import ActionType, GameState, Phase, PlayerState, apply_action, legal_actions
 from game.tiles import parse, to_counts
 
@@ -35,6 +35,7 @@ def test_rule_agent_wins_before_discarding():
 def test_rule_agent_accepts_a_pung_without_worsening_shanten():
     players = [PlayerState() for _ in range(4)]
     players[1].hand = C("111234567m1234567p")
+    players[0].discards = parse("1m")
     state = GameState([], players, current_player=0, phase=Phase.RESPONSE,
                       last_discard=parse("1m")[0], discard_player=0,
                       response_player=1, response_players=[1])
@@ -43,3 +44,22 @@ def test_rule_agent_accepts_a_pung_without_worsening_shanten():
     assert action.kind == ActionType.PUNG
     apply_action(state, action, player)
     assert state.players[1].melds[0].kind == "pung"
+
+
+def test_visible_tiles_are_used_to_weight_effective_draws():
+    hand = [1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 2, 0, 1, 0, 0, 0,
+            1, 0, 2, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0]
+    visible = [2, 2, 2, 4, 0, 3, 1, 3, 1, 0, 0, 0, 0, 1, 4, 1,
+               4, 0, 4, 3, 4, 1, 2, 0, 0, 4, 2, 3, 1, 3, 1, 1, 3, 3]
+    assert choose_discard(hand, rng=Random(1)) == 16
+    assert choose_discard(hand, rng=Random(1), visible_counts=visible) == 8
+
+
+def test_visible_tile_counts_include_hands_discards_and_melds():
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = C("123456789m123456p12z")
+    players[1].discards = parse("1m2m")
+    state = GameState([], players)
+    counts = visible_tile_counts(state)
+    assert counts[parse("1m")[0]] == 2
+    assert counts[parse("2m")[0]] == 2

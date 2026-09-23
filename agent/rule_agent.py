@@ -2,16 +2,22 @@
 from __future__ import annotations
 
 from random import Random
+from typing import Sequence
 
 from .shanten import effective_tiles, shanten
 from game.rules import Action, ActionType, GameState, Phase, legal_actions
 
 
 def choose_discard(hand: list[int], n_open_melds: int = 0,
-                   rng: Random | None = None) -> int:
+                   rng: Random | None = None,
+                   visible_counts: Sequence[int] | None = None) -> int:
     """選一張牌打出：最低向聽優先，再取有效進張最多。"""
     if sum(hand) not in (17 - 3 * n_open_melds, 16 - 3 * n_open_melds):
         raise ValueError("選擇打牌時手牌張數不正確")
+    if visible_counts is not None and (
+        len(visible_counts) != 34 or any(count < 0 or count > 4 for count in visible_counts)
+    ):
+        raise ValueError("可見牌計數必須是長度 34 且每格介於 0-4")
     candidates = []
     for tile, count in enumerate(hand):
         if not count:
@@ -27,11 +33,31 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
     for next_shanten, tile, after_discard in candidates:
         if next_shanten != minimum_shanten:
             continue
-        outs = len(effective_tiles(after_discard, n_open_melds))
+        effective = effective_tiles(after_discard, n_open_melds)
+        if visible_counts is None:
+            outs = len(effective)
+        else:
+            outs = sum(max(0, 4 - visible_counts[tile]) for tile in effective)
         best.append((-outs, tile))
     best_outs = min(score[0] for score in best)
     best_tiles = [tile for outs, tile in best if outs == best_outs]
     return (rng or Random()).choice(best_tiles)
+
+
+def visible_tile_counts(state: GameState) -> list[int]:
+    """統計自己手牌、所有牌河與副露中已知的 34 種牌。"""
+    visible = [0] * 34
+    for player in state.players:
+        for tile, count in enumerate(player.hand):
+            visible[tile] += count
+        for tile in player.discards:
+            visible[tile] += 1
+        for meld in player.melds:
+            for tile in meld.tiles:
+                visible[tile] += 1
+    if any(count > 4 for count in visible):
+        raise ValueError("牌局狀態出現超過 4 張同種牌")
+    return visible
 
 
 def choose_rule_action(state: GameState, rng: Random | None = None) -> tuple[int, Action] | None:
@@ -76,7 +102,8 @@ def choose_rule_action(state: GameState, rng: Random | None = None) -> tuple[int
         return player, win
     if state.phase == Phase.DISCARD:
         tile = choose_discard(state.players[player].hand,
-                              state.players[player].open_melds, rng)
+                              state.players[player].open_melds, rng,
+                              visible_tile_counts(state))
         return player, Action(ActionType.DISCARD, tile=tile)
     action = next((action for action in actions if action.kind == ActionType.DRAW), None)
     return (player, action) if action is not None else None

@@ -39,6 +39,7 @@ def test_discard_actions_include_each_distinct_tile_and_self_draw_win():
 def test_response_actions_for_next_player_include_chow_and_pass():
     players = [PlayerState() for _ in range(4)]
     players[1].hand = C("2356m")
+    players[0].discards = parse("4m")
     state = GameState([], players, phase=Phase.RESPONSE, current_player=0,
                       last_discard=parse("4m")[0], discard_player=0,
                       response_player=1)
@@ -90,6 +91,7 @@ def test_discard_then_pass_advances_to_next_player_draw():
 def test_chow_consumes_two_tiles_and_returns_to_discard():
     players = [PlayerState() for _ in range(4)]
     players[1].hand = C("2356m")
+    players[0].discards = parse("4m")
     state = GameState([], players, phase=Phase.RESPONSE, current_player=0,
                       last_discard=parse("4m")[0], discard_player=0,
                       response_player=1)
