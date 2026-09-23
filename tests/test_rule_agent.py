@@ -1,6 +1,12 @@
 from random import Random
 
-from agent.rule_agent import choose_discard, choose_rule_action, safe_tiles, visible_tile_counts
+from agent.rule_agent import (
+    choose_discard,
+    choose_rule_action,
+    choose_rule_action_for_player,
+    safe_tiles,
+    visible_tile_counts,
+)
 from game.rules import ActionType, GameState, Phase, PlayerState, apply_action, legal_actions
 from game.tiles import parse, to_counts
 
@@ -30,6 +36,16 @@ def test_rule_agent_wins_before_discarding():
     state = GameState([], players, phase=Phase.DISCARD)
     _, action = choose_rule_action(state, Random(1))
     assert action.kind == ActionType.WIN
+
+
+def test_player_policy_returns_only_that_players_action():
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = C("123456789m123456p12z")
+    players[1].hand = C("123456789m123456p11p")
+    state = GameState([0], players, phase=Phase.DISCARD)
+    action = choose_rule_action_for_player(state, 0, Random(1))
+    assert action is not None
+    assert action.kind == ActionType.DISCARD
 
 
 def test_rule_agent_accepts_a_pung_without_worsening_shanten():

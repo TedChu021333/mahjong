@@ -78,50 +78,55 @@ def safe_tiles(state: GameState, player: int) -> set[int]:
     return safe
 
 
-def choose_rule_action(state: GameState, rng: Random | None = None) -> tuple[int, Action] | None:
-    """選擇規則式 AI 動作；胡牌優先，副露不應惡化向聽數。"""
-    if state.phase == Phase.RESPONSE:
-        players = state.response_players or (
-            [state.response_player] if state.response_player is not None else []
-        )
-        for player in players:
-            actions = legal_actions(state, player)
-            win = next((action for action in actions if action.kind == ActionType.WIN), None)
-            if win is not None:
-                return player, win
-        for player in players:
-            actions = legal_actions(state, player)
-            current = state.players[player]
-            baseline = shanten(current.hand, current.open_melds)
-            for action in actions:
-                if action.kind not in {ActionType.CHOW, ActionType.PUNG, ActionType.KONG}:
-                    continue
-                concealed = current.hand.copy()
-                claimed = state.last_discard
-                assert claimed is not None
-                skipped_claimed = False
-                for tile in action.tiles:
-                    if tile == claimed and not skipped_claimed:
-                        skipped_claimed = True
-                        continue
-                    concealed[tile] -= 1
-                if shanten(concealed, current.open_melds + 1) <= baseline:
-                    return player, action
-        if players:
-            pass_action = next(action for action in legal_actions(state, players[0])
-                                if action.kind == ActionType.PASS)
-            return players[0], pass_action
-        return None
-
-    player = state.current_player
+def choose_rule_action_for_player(
+    state: GameState, player: int, rng: Random | None = None
+) -> Action | None:
+    """只替指定玩家做決策，不讀取對手隱藏手牌。"""
+    if not 0 <= player < 4:
+        raise ValueError("player 必須在 0-3 之間")
     actions = legal_actions(state, player)
     win = next((action for action in actions if action.kind == ActionType.WIN), None)
     if win is not None:
-        return player, win
+        return win
+    if state.phase == Phase.RESPONSE:
+        current = state.players[player]
+        baseline = shanten(current.hand, current.open_melds)
+        for action in actions:
+            if action.kind not in {ActionType.CHOW, ActionType.PUNG, ActionType.KONG}:
+                continue
+            concealed = current.hand.copy()
+            claimed = state.last_discard
+            assert claimed is not None
+            skipped_claimed = False
+            for tile in action.tiles:
+                if tile == claimed and not skipped_claimed:
+                    skipped_claimed = True
+                    continue
+                concealed[tile] -= 1
+            if shanten(concealed, current.open_melds + 1) <= baseline:
+                return action
+        return next((action for action in actions if action.kind == ActionType.PASS), None)
     if state.phase == Phase.DISCARD:
         tile = choose_discard(state.players[player].hand,
                               state.players[player].open_melds, rng,
                               visible_tile_counts(state, player), safe_tiles(state, player))
-        return player, Action(ActionType.DISCARD, tile=tile)
+        return Action(ActionType.DISCARD, tile=tile)
     action = next((action for action in actions if action.kind == ActionType.DRAW), None)
-    return (player, action) if action is not None else None
+    return action
+
+
+def choose_rule_action(state: GameState, rng: Random | None = None) -> tuple[int, Action] | None:
+    """模擬器相容的聚合器；實際玩家決策請使用指定座位 API。"""
+    players = state.response_players if state.phase == Phase.RESPONSE else [state.current_player]
+    for player in players:
+        action = choose_rule_action_for_player(state, player, rng)
+        if action is not None and action.kind == ActionType.WIN:
+            return player, action
+    for player in players:
+        action = choose_rule_action_for_player(state, player, rng)
+        if action is not None and action.kind != ActionType.PASS:
+            return player, action
+    if players:
+        action = choose_rule_action_for_player(state, players[0], rng)
+        return (players[0], action) if action is not None else None
+    return None
