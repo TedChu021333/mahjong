@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import sqrt
 from random import Random
 from typing import Callable
 
@@ -84,6 +85,28 @@ class SimulationStats:
     @property
     def win_rate_by_player(self) -> tuple[float, ...]:
         return tuple(wins / self.games for wins in self.wins_by_player)
+
+    @staticmethod
+    def _wilson(successes: int, trials: int) -> tuple[float, float]:
+        if trials == 0:
+            return (0.0, 0.0)
+        z = 1.96
+        rate = successes / trials
+        denominator = 1 + z * z / trials
+        center = (rate + z * z / (2 * trials)) / denominator
+        margin = z * sqrt(rate * (1 - rate) / trials + z * z / (4 * trials * trials)) / denominator
+        return (max(0.0, center - margin), min(1.0, center + margin))
+
+    @property
+    def deal_in_confidence_by_player(self) -> tuple[tuple[float, float], ...]:
+        return tuple(
+            self._wilson(deal_ins, discards)
+            for deal_ins, discards in zip(self.deal_ins_by_player, self.discards_by_player)
+        )
+
+    @property
+    def win_confidence_by_player(self) -> tuple[tuple[float, float], ...]:
+        return tuple(self._wilson(wins, self.games) for wins in self.wins_by_player)
 
 
 def choose_random_action(state: GameState, rng: Random) -> tuple[int, Action] | None:

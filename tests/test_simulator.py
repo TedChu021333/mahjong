@@ -80,3 +80,6 @@ def test_player_policy_can_control_one_seat_against_random_opponents():
     assert sum(stats.self_draw_wins_by_player) == stats.self_draw_wins
     assert sum(stats.discard_wins_by_player) == stats.discard_wins
     assert len(stats.win_rate_by_player) == 4
+    assert len(stats.deal_in_confidence_by_player) == 4
+    assert len(stats.win_confidence_by_player) == 4
+    assert all(0 <= low <= high <= 1 for low, high in stats.win_confidence_by_player)
