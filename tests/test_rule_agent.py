@@ -5,6 +5,7 @@ from agent.rule_agent import (
     choose_rule_action,
     choose_rule_action_for_player,
     safe_tiles,
+    suji_tiles,
     visible_tile_counts,
 )
 from game.rules import ActionType, GameState, Phase, PlayerState, apply_action, legal_actions
@@ -99,3 +100,15 @@ def test_visible_tile_counts_do_not_include_opponent_hidden_hands():
         state = GameState([], players)
         assert parse("1m")[0] in safe_tiles(state, 0)
         assert choose_discard(hand, rng=Random(1), safe_tiles=safe_tiles(state, 0)) == 0
+
+
+    def test_suji_tiles_only_include_suited_tiles_with_discarded_partners():
+        players = [PlayerState() for _ in range(4)]
+        players[1].discards = parse("1m4p9s")
+        state = GameState([], players)
+        suji = suji_tiles(state, 0)
+        assert parse("4m")[0] in suji
+        assert parse("1p")[0] in suji
+        assert parse("6p")[0] in suji
+        assert parse("9s")[0] in suji
+        assert parse("1z")[0] not in suji

@@ -11,7 +11,8 @@ from game.rules import Action, ActionType, GameState, Phase, legal_actions
 def choose_discard(hand: list[int], n_open_melds: int = 0,
                    rng: Random | None = None,
                    visible_counts: Sequence[int] | None = None,
-                   safe_tiles: Sequence[int] = ()) -> int:
+                   safe_tiles: Sequence[int] = (),
+                   suji_tiles: Sequence[int] = ()) -> int:
     """選一張牌打出：最低向聽優先，再取有效進張最多。"""
     if sum(hand) not in (17 - 3 * n_open_melds, 16 - 3 * n_open_melds):
         raise ValueError("選擇打牌時手牌張數不正確")
@@ -33,6 +34,9 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
     safe_set = set(safe_tiles)
     if any(tile < 0 or tile >= 34 for tile in safe_set):
         raise ValueError("安全牌編碼必須在 0-33 之間")
+    suji_set = set(suji_tiles)
+    if any(tile < 0 or tile >= 34 for tile in suji_set):
+        raise ValueError("筋牌編碼必須在 0-33 之間")
     best = []
     for next_shanten, tile, after_discard in candidates:
         if next_shanten != minimum_shanten:
@@ -42,7 +46,8 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
             outs = len(effective)
         else:
             outs = sum(max(0, 4 - visible_counts[tile]) for tile in effective)
-        best.append((-outs, 0 if tile in safe_set else 1, tile))
+        risk = 0 if tile in safe_set else 1 if tile in suji_set else 2
+        best.append((-outs, risk, tile))
     best_score = min((outs, risk) for outs, risk, _ in best)
     best_tiles = [tile for outs, risk, tile in best if (outs, risk) == best_score]
     return (rng or Random()).choice(best_tiles)
@@ -78,6 +83,28 @@ def safe_tiles(state: GameState, player: int) -> set[int]:
     return safe
 
 
+def suji_tiles(state: GameState, player: int) -> set[int]:
+    """回傳筋牌候選；這不是絕對安全牌，僅降低兩面聽風險。"""
+    if not 0 <= player < 4:
+        raise ValueError("player 必須在 0-3 之間")
+    discarded = set()
+    for opponent, opponent_state in enumerate(state.players):
+        if opponent != player:
+            discarded.update(opponent_state.discards)
+    suji = set()
+    for suit_start in (0, 9, 18):
+        for rank in range(1, 10):
+            tile = suit_start + rank - 1
+            partners = []
+            if rank > 3:
+                partners.append(suit_start + rank - 4)
+            if rank <= 6:
+                partners.append(suit_start + rank + 2)
+            if any(partner in discarded for partner in partners):
+                suji.add(tile)
+    return suji
+
+
 def choose_rule_action_for_player(
     state: GameState, player: int, rng: Random | None = None
 ) -> Action | None:
@@ -109,7 +136,8 @@ def choose_rule_action_for_player(
     if state.phase == Phase.DISCARD:
         tile = choose_discard(state.players[player].hand,
                               state.players[player].open_melds, rng,
-                              visible_tile_counts(state, player), safe_tiles(state, player))
+                              visible_tile_counts(state, player), safe_tiles(state, player),
+                              suji_tiles(state, player))
         return Action(ActionType.DISCARD, tile=tile)
     action = next((action for action in actions if action.kind == ActionType.DRAW), None)
     return action
