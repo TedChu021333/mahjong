@@ -3,7 +3,7 @@ from random import Random
 import pytest
 
 from game.rules import Phase
-from game.simulator import format_game_trace, play_game, simulate_games
+from game.simulator import format_game_trace, make_uniform_policy, play_game, simulate_games
 
 
 def test_random_game_reaches_terminal_state():
@@ -75,6 +75,15 @@ def test_player_policy_can_control_one_seat_against_random_opponents():
     stats = simulate_games(5, seed=19, player_policy=policy)
     assert sum(stats.wins_by_player) == stats.wins
     assert stats.total_discards > 0
+
+
+def test_uniform_policy_supports_same_strategy_self_play():
+    from agent.rule_agent import choose_rule_action_for_player
+
+    policy = make_uniform_policy(choose_rule_action_for_player)
+    stats = simulate_games(2, seed=29, player_policy=policy)
+    assert sum(stats.wins_by_player) == stats.wins
+    assert sum(stats.discards_by_player) == stats.total_discards
     assert len(stats.deal_in_rate_by_player) == 4
     assert sum(stats.wins_by_player) == stats.wins
     assert sum(stats.self_draw_wins_by_player) == stats.self_draw_wins

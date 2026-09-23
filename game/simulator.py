@@ -14,6 +14,14 @@ ActionChooser = Callable[[GameState, Random], tuple[int, Action] | None]
 PlayerPolicy = Callable[[GameState, int, Random], Action | None]
 
 
+def make_uniform_policy(policy: PlayerPolicy) -> PlayerPolicy:
+    """建立四家共用同一玩家策略的 self-play policy。"""
+    def uniform_policy(state: GameState, player: int, rng: Random) -> Action | None:
+        return policy(state, player, rng)
+
+    return uniform_policy
+
+
 @dataclass(frozen=True)
 class GameResult:
     state: GameState
