@@ -37,10 +37,17 @@ class SimulationStats:
     wins: int
     draws: int
     total_steps: int
+    discard_wins: int = 0
+    self_draw_wins: int = 0
+    total_tai: int = 0
 
     @property
     def average_steps(self) -> float:
         return self.total_steps / self.games if self.games else 0.0
+
+    @property
+    def average_tai(self) -> float:
+        return self.total_tai / self.wins if self.wins else 0.0
 
 
 def choose_random_action(state: GameState, rng: Random) -> tuple[int, Action] | None:
@@ -146,9 +153,22 @@ def simulate_games(
         raise ValueError("games 不可為負數")
     rng = Random(seed)
     wins = 0
+    discard_wins = 0
+    self_draw_wins = 0
+    total_tai = 0
     total_steps = 0
     for _ in range(games):
         result = play_game(rng, max_steps, choose_action)
         wins += result.winner is not None
+        if result.winner is not None:
+            if result.win_by_discard:
+                discard_wins += 1
+            else:
+                self_draw_wins += 1
+            if result.score is not None:
+                total_tai += result.score.tai
         total_steps += result.steps
-    return SimulationStats(games, wins, games - wins, total_steps)
+    return SimulationStats(
+        games, wins, games - wins, total_steps,
+        discard_wins, self_draw_wins, total_tai,
+    )

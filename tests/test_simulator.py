@@ -21,6 +21,8 @@ def test_many_random_games_are_reproducible_and_do_not_crash():
     assert first.games == 50
     assert first.wins + first.draws == 50
     assert first.total_steps > 0
+    assert first.discard_wins + first.self_draw_wins == first.wins
+    assert first.total_tai >= 0
 
 
 def test_invalid_simulation_arguments_are_rejected():
@@ -48,3 +50,9 @@ def test_game_result_includes_score_when_a_game_is_won():
     assert result.score is not None
     assert result.score.patterns
     assert "基本胡" in result.score.patterns or result.score.tai >= 1
+
+
+def test_simulation_stats_report_win_type_and_average_tai():
+    stats = simulate_games(10, seed=17)
+    assert stats.discard_wins + stats.self_draw_wins == stats.wins
+    assert stats.average_tai >= 0
