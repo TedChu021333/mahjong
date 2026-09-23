@@ -4,6 +4,7 @@ from agent.rule_agent import (
     choose_discard,
     choose_rule_action,
     choose_rule_action_for_player,
+    danger_score,
     safe_tiles,
     suji_tiles,
     opponent_threat_score,
@@ -137,6 +138,17 @@ def test_suji_tiles_only_include_suited_tiles_with_discarded_partners():
     assert parse("7p")[0] in suji
     assert parse("6s")[0] in suji
     assert parse("1z")[0] not in suji
+
+
+def test_danger_score_orders_safe_suji_and_unseen_honor():
+    players = [PlayerState() for _ in range(4)]
+    for player in (1, 2, 3):
+        players[player].discards = parse("1m")
+    players[1].discards += parse("4p")
+    state = GameState([], players)
+    assert danger_score(state, 0, parse("1m")[0]) == 0
+    assert danger_score(state, 0, parse("1p")[0]) == 1
+    assert danger_score(state, 0, parse("1z")[0]) > danger_score(state, 0, parse("5m")[0])
 
 
 def test_defensive_mode_prioritizes_safe_tile_over_attack_score():

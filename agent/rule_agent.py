@@ -6,6 +6,7 @@ from typing import Sequence
 
 from .shanten import effective_tiles, shanten
 from game.rules import Action, ActionType, GameState, Phase, legal_actions
+from game.tiles import is_honor, is_suited
 
 
 def choose_discard(hand: list[int], n_open_melds: int = 0,
@@ -115,6 +116,27 @@ def suji_tiles(state: GameState, player: int) -> set[int]:
             if any(partner in discarded for partner in partners):
                 suji.add(tile)
     return suji
+
+
+def danger_score(state: GameState, player: int, tile: int) -> float:
+    """以公開資訊估計棄牌危險度，分數越低越安全。"""
+    if not 0 <= player < 4 or not 0 <= tile < 34:
+        raise ValueError("player 必須在 0-3 之間，tile 必須在 0-33 之間")
+    safe = safe_tiles(state, player)
+    if tile in safe:
+        return 0.0
+    suji = suji_tiles(state, player)
+    if tile in suji:
+        return 1.0
+    score = 2.0
+    if is_honor(tile):
+        score += 1.0
+    elif is_suited(tile) and tile % 9 in {0, 8}:
+        score += 0.5
+    visible = visible_tile_counts(state, player)[tile]
+    if visible == 0:
+        score += 1.0
+    return score
 
 
 def opponent_threat_score(state: GameState, observer: int, opponent: int) -> int:
