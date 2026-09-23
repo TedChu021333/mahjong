@@ -47,6 +47,9 @@ class SimulationStats:
     deal_in_count: int = 0
     discards_by_player: tuple[int, ...] = (0, 0, 0, 0)
     deal_ins_by_player: tuple[int, ...] = (0, 0, 0, 0)
+    wins_by_player: tuple[int, ...] = (0, 0, 0, 0)
+    self_draw_wins_by_player: tuple[int, ...] = (0, 0, 0, 0)
+    discard_wins_by_player: tuple[int, ...] = (0, 0, 0, 0)
 
     @property
     def average_steps(self) -> float:
@@ -76,6 +79,10 @@ class SimulationStats:
             deal_ins / discards if discards else 0.0
             for deal_ins, discards in zip(self.deal_ins_by_player, self.discards_by_player)
         )
+
+    @property
+    def win_rate_by_player(self) -> tuple[float, ...]:
+        return tuple(wins / self.games for wins in self.wins_by_player)
 
 
 def choose_random_action(state: GameState, rng: Random) -> tuple[int, Action] | None:
@@ -203,10 +210,19 @@ def simulate_games(
     deal_in_count = 0
     discards_by_player = [0, 0, 0, 0]
     deal_ins_by_player = [0, 0, 0, 0]
+    wins_by_player = [0, 0, 0, 0]
+    self_draw_wins_by_player = [0, 0, 0, 0]
+    discard_wins_by_player = [0, 0, 0, 0]
     total_steps = 0
     for _ in range(games):
         result = play_game(rng, max_steps, choose_action)
         wins += result.winner is not None
+        if result.winner is not None:
+            wins_by_player[result.winner] += 1
+            if result.win_by_discard:
+                discard_wins_by_player[result.winner] += 1
+            else:
+                self_draw_wins_by_player[result.winner] += 1
         if result.winner is not None:
             if result.win_by_discard:
                 discard_wins += 1
@@ -225,4 +241,6 @@ def simulate_games(
         games, wins, games - wins, total_steps,
         discard_wins, self_draw_wins, total_tai, total_discards, deal_in_count,
         tuple(discards_by_player), tuple(deal_ins_by_player),
+        tuple(wins_by_player), tuple(self_draw_wins_by_player),
+        tuple(discard_wins_by_player),
     )

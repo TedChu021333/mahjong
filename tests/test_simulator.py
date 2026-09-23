@@ -62,3 +62,7 @@ def test_simulation_stats_report_win_type_and_average_tai():
     assert 0 <= stats.deal_in_game_rate <= 1
     assert 0 <= stats.discard_win_rate <= 1
     assert len(stats.deal_in_rate_by_player) == 4
+    assert sum(stats.wins_by_player) == stats.wins
+    assert sum(stats.self_draw_wins_by_player) == stats.self_draw_wins
+    assert sum(stats.discard_wins_by_player) == stats.discard_wins
+    assert len(stats.win_rate_by_player) == 4
