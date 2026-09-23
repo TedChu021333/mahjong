@@ -60,9 +60,19 @@ def test_visible_tile_counts_include_hands_discards_and_melds():
     players[0].hand = C("123456789m123456p12z")
     players[1].discards = parse("1m2m")
     state = GameState([], players)
-    counts = visible_tile_counts(state)
+    counts = visible_tile_counts(state, 0)
     assert counts[parse("1m")[0]] == 2
     assert counts[parse("2m")[0]] == 2
+
+
+def test_visible_tile_counts_do_not_include_opponent_hidden_hands():
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = C("123456789m123456p12z")
+    players[1].hand = C("111222333m444p55z")
+    state = GameState([], players)
+    counts = visible_tile_counts(state, 0)
+    assert counts[parse("1m")[0]] == 1
+    assert counts[parse("5z")[0]] == 0
 
 
     def test_safe_tiles_prefer_existing_opponent_discards_on_tie():

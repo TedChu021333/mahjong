@@ -48,15 +48,18 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
     return (rng or Random()).choice(best_tiles)
 
 
-def visible_tile_counts(state: GameState) -> list[int]:
-    """統計自己手牌、所有牌河與副露中已知的 34 種牌。"""
+def visible_tile_counts(state: GameState, player: int) -> list[int]:
+    """以個人視角統計自己的手牌、牌河與公開副露。"""
+    if not 0 <= player < 4:
+        raise ValueError("player 必須在 0-3 之間")
     visible = [0] * 34
-    for player in state.players:
-        for tile, count in enumerate(player.hand):
-            visible[tile] += count
-        for tile in player.discards:
+    own = state.players[player]
+    for tile, count in enumerate(own.hand):
+        visible[tile] += count
+    for known_player in state.players:
+        for tile in known_player.discards:
             visible[tile] += 1
-        for meld in player.melds:
+        for meld in known_player.melds:
             for tile in meld.tiles:
                 visible[tile] += 1
     if any(count > 4 for count in visible):
@@ -118,7 +121,7 @@ def choose_rule_action(state: GameState, rng: Random | None = None) -> tuple[int
     if state.phase == Phase.DISCARD:
         tile = choose_discard(state.players[player].hand,
                               state.players[player].open_melds, rng,
-                              visible_tile_counts(state), safe_tiles(state, player))
+                              visible_tile_counts(state, player), safe_tiles(state, player))
         return player, Action(ActionType.DISCARD, tile=tile)
     action = next((action for action in actions if action.kind == ActionType.DRAW), None)
     return (player, action) if action is not None else None
