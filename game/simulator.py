@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from random import Random
+from typing import Callable
 
 from .rules import Action, ActionType, GameState, Phase, apply_action, initial_state, legal_actions
+
+ActionChooser = Callable[[GameState, Random], tuple[int, Action] | None]
 
 
 @dataclass(frozen=True)
@@ -57,16 +60,18 @@ def choose_random_action(state: GameState, rng: Random) -> tuple[int, Action] | 
 def play_game(
     rng: Random | None = None,
     max_steps: int = 10_000,
+    choose_action: ActionChooser | None = None,
 ) -> GameResult:
     """執行一局隨機對局；牌牆耗盡或達到步數上限都視為流局。"""
     if max_steps <= 0:
         raise ValueError("max_steps 必須為正數")
     rng = rng or Random()
+    choose_action = choose_action or choose_random_action
     state = initial_state(rng)
     for steps in range(1, max_steps + 1):
         if state.phase == Phase.ENDED:
             return GameResult(state, steps - 1)
-        selected = choose_random_action(state, rng)
+        selected = choose_action(state, rng)
         if selected is None:
             state.phase = Phase.ENDED
             return GameResult(state, steps - 1)
@@ -89,6 +94,7 @@ def simulate_games(
     games: int,
     seed: int | None = None,
     max_steps: int = 10_000,
+    choose_action: ActionChooser | None = None,
 ) -> SimulationStats:
     """執行多局隨機對局，回傳胡牌與流局統計。"""
     if games < 0:
@@ -97,7 +103,7 @@ def simulate_games(
     wins = 0
     total_steps = 0
     for _ in range(games):
-        result = play_game(rng, max_steps)
+        result = play_game(rng, max_steps, choose_action)
         wins += result.winner is not None
         total_steps += result.steps
     return SimulationStats(games, wins, games - wins, total_steps)
