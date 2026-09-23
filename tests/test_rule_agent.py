@@ -1,7 +1,7 @@
 from random import Random
 
 from agent.rule_agent import choose_discard, choose_rule_action
-from game.rules import ActionType, GameState, Phase, PlayerState
+from game.rules import ActionType, GameState, Phase, PlayerState, apply_action, legal_actions
 from game.tiles import parse, to_counts
 
 
@@ -30,3 +30,16 @@ def test_rule_agent_wins_before_discarding():
     state = GameState([], players, phase=Phase.DISCARD)
     _, action = choose_rule_action(state, Random(1))
     assert action.kind == ActionType.WIN
+
+
+def test_rule_agent_accepts_a_pung_without_worsening_shanten():
+    players = [PlayerState() for _ in range(4)]
+    players[1].hand = C("111234567m1234567p")
+    state = GameState([], players, current_player=0, phase=Phase.RESPONSE,
+                      last_discard=parse("1m")[0], discard_player=0,
+                      response_player=1, response_players=[1])
+    player, action = choose_rule_action(state, Random(1))
+    assert player == 1
+    assert action.kind == ActionType.PUNG
+    apply_action(state, action, player)
+    assert state.players[1].melds[0].kind == "pung"

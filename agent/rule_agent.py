@@ -35,7 +35,7 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
 
 
 def choose_rule_action(state: GameState, rng: Random | None = None) -> tuple[int, Action] | None:
-    """選擇規則式 AI 動作；目前碰吃槓先保守過牌。"""
+    """選擇規則式 AI 動作；胡牌優先，副露不應惡化向聽數。"""
     if state.phase == Phase.RESPONSE:
         players = state.response_players or (
             [state.response_player] if state.response_player is not None else []
@@ -45,6 +45,24 @@ def choose_rule_action(state: GameState, rng: Random | None = None) -> tuple[int
             win = next((action for action in actions if action.kind == ActionType.WIN), None)
             if win is not None:
                 return player, win
+        for player in players:
+            actions = legal_actions(state, player)
+            current = state.players[player]
+            baseline = shanten(current.hand, current.open_melds)
+            for action in actions:
+                if action.kind not in {ActionType.CHOW, ActionType.PUNG, ActionType.KONG}:
+                    continue
+                concealed = current.hand.copy()
+                claimed = state.last_discard
+                assert claimed is not None
+                skipped_claimed = False
+                for tile in action.tiles:
+                    if tile == claimed and not skipped_claimed:
+                        skipped_claimed = True
+                        continue
+                    concealed[tile] -= 1
+                if shanten(concealed, current.open_melds + 1) <= baseline:
+                    return player, action
         if players:
             pass_action = next(action for action in legal_actions(state, players[0])
                                 if action.kind == ActionType.PASS)
