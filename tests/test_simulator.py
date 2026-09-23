@@ -3,7 +3,7 @@ from random import Random
 import pytest
 
 from game.rules import Phase
-from game.simulator import play_game, simulate_games
+from game.simulator import format_game_trace, play_game, simulate_games
 
 
 def test_random_game_reaches_terminal_state():
@@ -28,3 +28,13 @@ def test_invalid_simulation_arguments_are_rejected():
         simulate_games(-1)
     with pytest.raises(ValueError):
         play_game(max_steps=0)
+
+
+def test_game_history_is_optional_and_formatable():
+    without_history = play_game(Random(3))
+    with_history = play_game(Random(3), record_history=True)
+    assert without_history.history == ()
+    assert with_history.history
+    trace = format_game_trace(with_history, limit=3)
+    assert "P" in trace
+    assert "結果：" in trace
