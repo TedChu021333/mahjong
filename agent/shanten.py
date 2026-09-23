@@ -83,20 +83,24 @@ def standard_shanten(counts: Sequence[int], n_open_melds: int = 0) -> int:
     return result + 2
 
 
-def seven_pairs_shanten(counts: Sequence[int]) -> int:
-    """回傳一般七對子的向聽數；此變體限門清 16 張手牌。"""
-    validated = _validate_counts(counts, 0)
-    pairs = sum(count // 2 for count in validated)
-    distinct = sum(count > 0 for count in validated)
+def _seven_pairs_shanten_validated(counts: tuple[int, ...]) -> int:
+    pairs = sum(count // 2 for count in counts)
+    distinct = sum(count > 0 for count in counts)
     return 7 - pairs + max(0, 7 - distinct)
 
 
-@lru_cache(maxsize=100_000)
+def seven_pairs_shanten(counts: Sequence[int]) -> int:
+    """回傳一般七對子的向聽數；此變體限門清 16 張手牌。"""
+    validated = _validate_counts(counts, 0)
+    return _seven_pairs_shanten_validated(validated)
+
+
+@lru_cache(maxsize=1_000_000)
 def _shanten_cached(counts: tuple[int, ...], n_open_melds: int) -> int:
     standard = standard_shanten(counts, n_open_melds)
     if n_open_melds:
         return standard
-    return min(standard, seven_pairs_shanten(counts))
+    return min(standard, _seven_pairs_shanten_validated(counts))
 
 
 def shanten(counts: Sequence[int], n_open_melds: int = 0) -> int:
@@ -105,7 +109,7 @@ def shanten(counts: Sequence[int], n_open_melds: int = 0) -> int:
     return _shanten_cached(validated, n_open_melds)
 
 
-@lru_cache(maxsize=100_000)
+@lru_cache(maxsize=1_000_000)
 def _effective_tiles_cached(counts: tuple[int, ...], n_open_melds: int) -> tuple[int, ...]:
     current = _shanten_cached(counts, n_open_melds)
     mutable = list(counts)
