@@ -10,7 +10,8 @@ from game.rules import Action, ActionType, GameState, Phase, legal_actions
 
 def choose_discard(hand: list[int], n_open_melds: int = 0,
                    rng: Random | None = None,
-                   visible_counts: Sequence[int] | None = None) -> int:
+                   visible_counts: Sequence[int] | None = None,
+                   safe_tiles: Sequence[int] = ()) -> int:
     """選一張牌打出：最低向聽優先，再取有效進張最多。"""
     if sum(hand) not in (17 - 3 * n_open_melds, 16 - 3 * n_open_melds):
         raise ValueError("選擇打牌時手牌張數不正確")
@@ -29,6 +30,9 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
     if not candidates:
         raise ValueError("沒有可打出的牌")
     minimum_shanten = min(candidate[0] for candidate in candidates)
+    safe_set = set(safe_tiles)
+    if any(tile < 0 or tile >= 34 for tile in safe_set):
+        raise ValueError("安全牌編碼必須在 0-33 之間")
     best = []
     for next_shanten, tile, after_discard in candidates:
         if next_shanten != minimum_shanten:
@@ -38,9 +42,9 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
             outs = len(effective)
         else:
             outs = sum(max(0, 4 - visible_counts[tile]) for tile in effective)
-        best.append((-outs, tile))
-    best_outs = min(score[0] for score in best)
-    best_tiles = [tile for outs, tile in best if outs == best_outs]
+        best.append((-outs, 0 if tile in safe_set else 1, tile))
+    best_score = min((outs, risk) for outs, risk, _ in best)
+    best_tiles = [tile for outs, risk, tile in best if (outs, risk) == best_score]
     return (rng or Random()).choice(best_tiles)
 
 
@@ -58,6 +62,17 @@ def visible_tile_counts(state: GameState) -> list[int]:
     if any(count > 4 for count in visible):
         raise ValueError("牌局狀態出現超過 4 張同種牌")
     return visible
+
+
+def safe_tiles(state: GameState, player: int) -> set[int]:
+    """回傳至少一位對手已打過的現物牌。"""
+    if not 0 <= player < 4:
+        raise ValueError("player 必須在 0-3 之間")
+    safe = set()
+    for opponent, opponent_state in enumerate(state.players):
+        if opponent != player:
+            safe.update(opponent_state.discards)
+    return safe
 
 
 def choose_rule_action(state: GameState, rng: Random | None = None) -> tuple[int, Action] | None:
@@ -103,7 +118,7 @@ def choose_rule_action(state: GameState, rng: Random | None = None) -> tuple[int
     if state.phase == Phase.DISCARD:
         tile = choose_discard(state.players[player].hand,
                               state.players[player].open_melds, rng,
-                              visible_tile_counts(state))
+                              visible_tile_counts(state), safe_tiles(state, player))
         return player, Action(ActionType.DISCARD, tile=tile)
     action = next((action for action in actions if action.kind == ActionType.DRAW), None)
     return (player, action) if action is not None else None

@@ -1,6 +1,6 @@
 from random import Random
 
-from agent.rule_agent import choose_discard, choose_rule_action, visible_tile_counts
+from agent.rule_agent import choose_discard, choose_rule_action, safe_tiles, visible_tile_counts
 from game.rules import ActionType, GameState, Phase, PlayerState, apply_action, legal_actions
 from game.tiles import parse, to_counts
 
@@ -63,3 +63,13 @@ def test_visible_tile_counts_include_hands_discards_and_melds():
     counts = visible_tile_counts(state)
     assert counts[parse("1m")[0]] == 2
     assert counts[parse("2m")[0]] == 2
+
+
+    def test_safe_tiles_prefer_existing_opponent_discards_on_tie():
+        hand = [1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 2, 0, 1, 0, 0, 0,
+            1, 0, 2, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0]
+        players = [PlayerState() for _ in range(4)]
+        players[1].discards = parse("1m")
+        state = GameState([], players)
+        assert parse("1m")[0] in safe_tiles(state, 0)
+        assert choose_discard(hand, rng=Random(1), safe_tiles=safe_tiles(state, 0)) == 0
