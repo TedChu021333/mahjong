@@ -61,3 +61,4 @@ def test_simulation_stats_report_win_type_and_average_tai():
     assert stats.total_discards > 0
     assert 0 <= stats.deal_in_game_rate <= 1
     assert 0 <= stats.discard_win_rate <= 1
+    assert len(stats.deal_in_rate_by_player) == 4

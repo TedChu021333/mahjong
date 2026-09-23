@@ -23,6 +23,7 @@ class GameResult:
     score: Score | None = None
     discarder: int | None = None
     discard_count: int = 0
+    discards_by_player: tuple[int, ...] = (0, 0, 0, 0)
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,8 @@ class SimulationStats:
     total_tai: int = 0
     total_discards: int = 0
     deal_in_count: int = 0
+    discards_by_player: tuple[int, ...] = (0, 0, 0, 0)
+    deal_ins_by_player: tuple[int, ...] = (0, 0, 0, 0)
 
     @property
     def average_steps(self) -> float:
@@ -66,6 +69,13 @@ class SimulationStats:
     def discard_win_rate(self) -> float:
         """放銃胡占所有胡牌的比例。"""
         return self.discard_wins / self.wins if self.wins else 0.0
+
+    @property
+    def deal_in_rate_by_player(self) -> tuple[float, ...]:
+        return tuple(
+            deal_ins / discards if discards else 0.0
+            for deal_ins, discards in zip(self.deal_ins_by_player, self.discards_by_player)
+        )
 
 
 def choose_random_action(state: GameState, rng: Random) -> tuple[int, Action] | None:
@@ -108,15 +118,18 @@ def play_game(
     state = initial_state(rng)
     history: list[GameEvent] = []
     discard_count = 0
+    discards_by_player = [0, 0, 0, 0]
     for steps in range(1, max_steps + 1):
         if state.phase == Phase.ENDED:
             return GameResult(state, steps - 1, history=tuple(history),
-                              discard_count=discard_count)
+                              discard_count=discard_count,
+                              discards_by_player=tuple(discards_by_player))
         selected = choose_action(state, rng)
         if selected is None:
             state.phase = Phase.ENDED
             return GameResult(state, steps - 1, history=tuple(history),
-                              discard_count=discard_count)
+                              discard_count=discard_count,
+                              discards_by_player=tuple(discards_by_player))
         player, action = selected
         if record_history:
             history.append(GameEvent(steps, player, state.phase, action))
@@ -124,6 +137,7 @@ def play_game(
         discarder = state.discard_player if win_by_discard else None
         if action.kind == ActionType.DISCARD:
             discard_count += 1
+            discards_by_player[player] += 1
         apply_action(state, action, player)
         if action.kind == ActionType.WIN:
             winner_state = state.players[player]
@@ -145,10 +159,12 @@ def play_game(
                 score=score,
                 discarder=discarder,
                 discard_count=discard_count,
+                discards_by_player=tuple(discards_by_player),
             )
     state.phase = Phase.ENDED
     return GameResult(state, max_steps, history=tuple(history),
-                      discard_count=discard_count)
+                      discard_count=discard_count,
+                      discards_by_player=tuple(discards_by_player))
 
 
 def format_game_trace(result: GameResult, limit: int | None = None) -> str:
@@ -185,6 +201,8 @@ def simulate_games(
     total_tai = 0
     total_discards = 0
     deal_in_count = 0
+    discards_by_player = [0, 0, 0, 0]
+    deal_ins_by_player = [0, 0, 0, 0]
     total_steps = 0
     for _ in range(games):
         result = play_game(rng, max_steps, choose_action)
@@ -199,7 +217,12 @@ def simulate_games(
         total_steps += result.steps
         total_discards += result.discard_count
         deal_in_count += result.discarder is not None
+        if result.discarder is not None:
+            deal_ins_by_player[result.discarder] += 1
+        for player, count in enumerate(result.discards_by_player):
+            discards_by_player[player] += count
     return SimulationStats(
         games, wins, games - wins, total_steps,
         discard_wins, self_draw_wins, total_tai, total_discards, deal_in_count,
+        tuple(discards_by_player), tuple(deal_ins_by_player),
     )
