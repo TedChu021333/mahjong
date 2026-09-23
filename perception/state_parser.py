@@ -5,8 +5,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Sequence
+from dataclasses import dataclass
 
 from game.rules import GameState, Meld, Phase, PlayerState
 from game.tiles import NUM_TILE_TYPES, is_flower
@@ -17,7 +16,6 @@ class ObservedPlayer:
     """單一玩家由畫面辨識出的資訊。"""
 
     hand: tuple[int, ...] = ()
-    flowers: tuple[int, ...] = ()
     discards: tuple[int, ...] = ()
     melds: tuple[Meld, ...] = ()
 
@@ -45,10 +43,6 @@ def _validate_player(observed: ObservedPlayer) -> None:
         _validate_tile(tile)
         if is_flower(tile):
             raise ValueError("花牌必須放在 flowers，不可放入 hand")
-    for tile in observed.flowers:
-        _validate_tile(tile, allow_flower=True)
-        if not is_flower(tile):
-            raise ValueError("flowers 只能包含花牌")
     for tile in observed.discards:
         _validate_tile(tile)
     for meld in observed.melds:
@@ -86,7 +80,7 @@ def parse_observed_table(observed: ObservedTable) -> GameState:
                 raise ValueError("同一玩家手牌中的牌不能超過 4 張")
         players.append(PlayerState(
             hand=counts,
-            flowers=list(player.flowers),
+            flowers=[],
             melds=list(player.melds),
             discards=list(player.discards),
         ))
