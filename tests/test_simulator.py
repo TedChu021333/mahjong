@@ -23,6 +23,8 @@ def test_many_random_games_are_reproducible_and_do_not_crash():
     assert first.total_steps > 0
     assert first.discard_wins + first.self_draw_wins == first.wins
     assert first.total_tai >= 0
+    assert first.total_discards > 0
+    assert 0 <= first.deal_in_rate <= 1
 
 
 def test_invalid_simulation_arguments_are_rejected():
@@ -56,3 +58,6 @@ def test_simulation_stats_report_win_type_and_average_tai():
     stats = simulate_games(10, seed=17)
     assert stats.discard_wins + stats.self_draw_wins == stats.wins
     assert stats.average_tai >= 0
+    assert stats.total_discards > 0
+    assert 0 <= stats.deal_in_game_rate <= 1
+    assert 0 <= stats.discard_win_rate <= 1
