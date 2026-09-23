@@ -22,6 +22,9 @@ TAI = {
     "清一色": 8,
     "嚦咕嚦咕": 4,
     "花牌": 1,
+    "三元牌": 1,
+    "門風牌": 1,
+    "圈風牌": 1,
 }
 
 
@@ -69,6 +72,8 @@ def _patterns_for_decomposition(
     concealed_melds: Sequence[tuple[str, int]],
     self_draw: bool,
     flowers: int,
+    seat_wind: int | None,
+    round_wind: int | None,
 ) -> tuple[str, ...]:
     meld_tiles = _meld_tiles(melds)
     all_melds = [kind for kind, _ in concealed_melds]
@@ -87,6 +92,21 @@ def _patterns_for_decomposition(
         patterns.append("平胡")
     if len(suits) == 1:
         patterns.append("混一色" if honors else "清一色")
+    honor_pungs = [
+        tile for kind, tile in concealed_melds if kind == "pung" and is_honor(tile)
+    ]
+    honor_pungs.extend(
+        meld.tiles[0]
+        for meld in melds
+        if meld.kind in {"pung", "kong"} and is_honor(meld.tiles[0])
+    )
+    for tile in honor_pungs:
+        if 31 <= tile <= 33:
+            patterns.append("三元牌")
+        if tile == seat_wind:
+            patterns.append("門風牌")
+        if tile == round_wind:
+            patterns.append("圈風牌")
     if flowers:
         patterns.extend(["花牌"] * flowers)
     return tuple(patterns)
@@ -102,6 +122,8 @@ def score_hand(
     flowers: int = 0,
     self_draw: bool = False,
     allow_lickgu: bool = True,
+    seat_wind: int | None = None,
+    round_wind: int | None = None,
 ) -> Score:
     """計算胡牌台數；多種拆法時選台數最高者。"""
     hand = _validate_counts(counts)
@@ -122,6 +144,7 @@ def score_hand(
     for pair, concealed_melds in decompose(hand):
         patterns = _patterns_for_decomposition(
             hand, open_melds, pair, concealed_melds, self_draw, flowers
+            , seat_wind, round_wind
         )
         scores.append(
             Score(_score_patterns(patterns), patterns, pair, concealed_melds)

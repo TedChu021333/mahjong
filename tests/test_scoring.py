@@ -17,7 +17,7 @@ def test_pinghu_and_menzen_are_scored():
 
 def test_all_triplets_and_mixed_one_suit_are_scored():
     score = score_hand(C("111222333m444m555z66z"))
-    assert score.tai == 9
+    assert score.tai == 10
     assert "碰碰胡" in score.patterns
     assert "混一色" in score.patterns
 
@@ -38,3 +38,13 @@ def test_self_draw_and_flowers_add_context_tai():
     score = score_hand(C("123456789m123456p11p"), self_draw=True, flowers=2)
     assert score.tai == 6
     assert score.patterns.count("花牌") == 2
+
+
+def test_honor_triplets_score_dragon_and_wind_tai():
+    score = score_hand(
+        C("111m222m333m111z555z66z"), seat_wind=27, round_wind=27
+    )
+    assert score.patterns.count("三元牌") == 1
+    assert score.patterns.count("門風牌") == 1
+    assert score.patterns.count("圈風牌") == 1
+    assert score.tai == 12

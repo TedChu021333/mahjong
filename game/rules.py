@@ -69,6 +69,8 @@ class GameState:
     discard_player: int | None = None
     response_player: int | None = None
     response_players: list[int] = field(default_factory=list)
+    round_wind: int = 27
+    seat_winds: tuple[int, int, int, int] = (27, 28, 29, 30)
 
     def __post_init__(self) -> None:
         if len(self.players) != 4:

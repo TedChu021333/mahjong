@@ -101,6 +101,8 @@ def play_game(
                 winner_state.melds,
                 flowers=len(winner_state.flowers),
                 self_draw=not win_by_discard,
+                seat_wind=state.seat_winds[player],
+                round_wind=state.round_wind,
             )
             return GameResult(
                 state,
