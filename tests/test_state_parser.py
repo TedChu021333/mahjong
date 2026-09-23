@@ -2,7 +2,18 @@ import pytest
 
 from game.rules import Meld, Phase
 from game.tiles import parse
+from perception.config import MY_HAND_REGION, OPEN_MELD_REGION_BY_COUNT
 from perception.state_parser import ObservedPlayer, ObservedTable, parse_observed_table
+
+
+def test_screen_regions_match_1920x1080_training_layout():
+    assert MY_HAND_REGION == (10, 818, 1763, 996)
+    assert OPEN_MELD_REGION_BY_COUNT[1] == (3, 855, 336, 994)
+    assert OPEN_MELD_REGION_BY_COUNT[2] == (0, 854, 657, 996)
+    for region in (MY_HAND_REGION, *OPEN_MELD_REGION_BY_COUNT.values()):
+        left, top, right, bottom = region
+        assert 0 <= left < right <= 1920
+        assert 0 <= top < bottom <= 1080
 
 
 def test_observed_table_becomes_game_state_without_unknown_wall():
