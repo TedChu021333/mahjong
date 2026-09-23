@@ -286,6 +286,7 @@ def apply_action(state: GameState, action: Action, player: int | None = None) ->
         for _ in range(3):
             remove_tile(current, claimed)
         current.melds.append(Meld("kong", (claimed,) * 4, state.discard_player))
+        source_discards.pop()
         state.current_player = actor
         _clear_response(state)
         state.phase = Phase.DRAW

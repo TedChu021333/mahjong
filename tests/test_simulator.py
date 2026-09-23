@@ -61,6 +61,20 @@ def test_simulation_stats_report_win_type_and_average_tai():
     assert stats.total_discards > 0
     assert 0 <= stats.deal_in_game_rate <= 1
     assert 0 <= stats.discard_win_rate <= 1
+
+
+def test_player_policy_can_control_one_seat_against_random_opponents():
+    from agent.rule_agent import choose_rule_action_for_player
+    from game.simulator import _choose_random_for_player
+
+    def policy(state, player, rng):
+        if player == 0:
+            return choose_rule_action_for_player(state, player, rng)
+        return _choose_random_for_player(state, player, rng)
+
+    stats = simulate_games(5, seed=19, player_policy=policy)
+    assert sum(stats.wins_by_player) == stats.wins
+    assert stats.total_discards > 0
     assert len(stats.deal_in_rate_by_player) == 4
     assert sum(stats.wins_by_player) == stats.wins
     assert sum(stats.self_draw_wins_by_player) == stats.self_draw_wins

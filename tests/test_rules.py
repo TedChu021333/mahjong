@@ -118,6 +118,20 @@ def test_discard_win_adds_claimed_tile_to_winner_hand():
     assert state.players[1].hand[parse("1z")[0]] == 2
 
 
+def test_discard_kong_removes_claimed_tile_from_source_discard():
+    players = [PlayerState() for _ in range(4)]
+    players[1].hand = C("111234567m1234567p")
+    players[0].discards = parse("1m")
+    state = GameState([], players, phase=Phase.RESPONSE, current_player=0,
+                      last_discard=parse("1m")[0], discard_player=0,
+                      response_player=1, response_players=[1])
+    kong = next(action for action in legal_actions(state, player=1)
+                if action.kind == ActionType.KONG)
+    apply_action(state, kong, player=1)
+    assert state.players[0].discards == []
+    assert state.players[1].melds[0].tiles == (0, 0, 0, 0)
+
+
 def test_player_cannot_ron_on_a_tile_already_discarded_by_self():
     players = [PlayerState() for _ in range(4)]
     players[1].hand = C("123456789m123456p1z")

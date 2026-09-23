@@ -10,6 +10,7 @@ from .scoring import Score, score_hand
 from .tiles import tile_name
 
 ActionChooser = Callable[[GameState, Random], tuple[int, Action] | None]
+PlayerPolicy = Callable[[GameState, int, Random], Action | None]
 
 
 @dataclass(frozen=True)
@@ -111,11 +112,37 @@ def choose_random_action(state: GameState, rng: Random) -> tuple[int, Action] | 
     return player, rng.choice(actions)
 
 
+def _choose_random_for_player(state: GameState, player: int, rng: Random) -> Action | None:
+    actions = legal_actions(state, player)
+    winning = [action for action in actions if action.kind == ActionType.WIN]
+    if winning:
+        return winning[0]
+    return rng.choice(actions) if actions else None
+
+
+def _choose_with_player_policy(
+    state: GameState, rng: Random, policy: PlayerPolicy
+) -> tuple[int, Action] | None:
+    players = state.response_players if state.phase == Phase.RESPONSE else [state.current_player]
+    choices = [(player, policy(state, player, rng)) for player in players]
+    choices = [(player, action) for player, action in choices if action is not None]
+    if not choices:
+        return None
+    winning = [(player, action) for player, action in choices
+               if action.kind == ActionType.WIN]
+    if winning:
+        return winning[0]
+    active = [(player, action) for player, action in choices
+              if action.kind != ActionType.PASS]
+    return active[0] if active else choices[0]
+
+
 def play_game(
     rng: Random | None = None,
     max_steps: int = 10_000,
     choose_action: ActionChooser | None = None,
     record_history: bool = False,
+    player_policy: PlayerPolicy | None = None,
 ) -> GameResult:
     """執行一局隨機對局；牌牆耗盡或達到步數上限都視為流局。"""
     if max_steps <= 0:
@@ -131,7 +158,10 @@ def play_game(
             return GameResult(state, steps - 1, history=tuple(history),
                               discard_count=discard_count,
                               discards_by_player=tuple(discards_by_player))
-        selected = choose_action(state, rng)
+        selected = (
+            _choose_with_player_policy(state, rng, player_policy)
+            if player_policy is not None else choose_action(state, rng)
+        )
         if selected is None:
             state.phase = Phase.ENDED
             return GameResult(state, steps - 1, history=tuple(history),
@@ -197,6 +227,7 @@ def simulate_games(
     seed: int | None = None,
     max_steps: int = 10_000,
     choose_action: ActionChooser | None = None,
+    player_policy: PlayerPolicy | None = None,
 ) -> SimulationStats:
     """執行多局隨機對局，回傳胡牌與流局統計。"""
     if games < 0:
@@ -215,7 +246,7 @@ def simulate_games(
     discard_wins_by_player = [0, 0, 0, 0]
     total_steps = 0
     for _ in range(games):
-        result = play_game(rng, max_steps, choose_action)
+        result = play_game(rng, max_steps, choose_action, player_policy=player_policy)
         wins += result.winner is not None
         if result.winner is not None:
             wins_by_player[result.winner] += 1
