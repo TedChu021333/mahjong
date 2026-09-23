@@ -31,7 +31,6 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
         candidates.append((next_shanten, tile, after_discard))
     if not candidates:
         raise ValueError("沒有可打出的牌")
-    minimum_shanten = min(candidate[0] for candidate in candidates)
     safe_set = set(safe_tiles)
     if any(tile < 0 or tile >= 34 for tile in safe_set):
         raise ValueError("安全牌編碼必須在 0-33 之間")
@@ -40,7 +39,7 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
         raise ValueError("筋牌編碼必須在 0-33 之間")
     best = []
     for next_shanten, tile, after_discard in candidates:
-        if next_shanten != minimum_shanten:
+        if next_shanten != min(candidate[0] for candidate in candidates):
             continue
         effective = effective_tiles(after_discard, n_open_melds)
         if visible_counts is None:
