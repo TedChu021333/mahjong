@@ -12,7 +12,8 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
                    rng: Random | None = None,
                    visible_counts: Sequence[int] | None = None,
                    safe_tiles: Sequence[int] = (),
-                   suji_tiles: Sequence[int] = ()) -> int:
+                   suji_tiles: Sequence[int] = (),
+                   defensive: bool = False) -> int:
     """選一張牌打出：最低向聽優先，再取有效進張最多。"""
     if sum(hand) not in (17 - 3 * n_open_melds, 16 - 3 * n_open_melds):
         raise ValueError("選擇打牌時手牌張數不正確")
@@ -47,9 +48,12 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
         else:
             outs = sum(max(0, 4 - visible_counts[tile]) for tile in effective)
         risk = 0 if tile in safe_set else 1 if tile in suji_set else 2
-        best.append((-outs, risk, tile))
-    best_score = min((outs, risk) for outs, risk, _ in best)
-    best_tiles = [tile for outs, risk, tile in best if (outs, risk) == best_score]
+        if defensive:
+            best.append((risk, -outs, next_shanten, tile))
+        else:
+            best.append((-outs, risk, next_shanten, tile))
+    best_score = min(score[:3] for score in best)
+    best_tiles = [tile for *score, tile in best if tuple(score) == best_score]
     return (rng or Random()).choice(best_tiles)
 
 
@@ -73,14 +77,23 @@ def visible_tile_counts(state: GameState, player: int) -> list[int]:
 
 
 def safe_tiles(state: GameState, player: int) -> set[int]:
-    """回傳至少一位對手已打過的現物牌。"""
+    """回傳對可觀測威脅對手都已打過的現物牌。"""
     if not 0 <= player < 4:
         raise ValueError("player 必須在 0-3 之間")
-    safe = set()
-    for opponent, opponent_state in enumerate(state.players):
-        if opponent != player:
-            safe.update(opponent_state.discards)
-    return safe
+    opponents = [
+        opponent_state for opponent, opponent_state in enumerate(state.players)
+        if opponent != player and len(opponent_state.melds) >= 2
+    ]
+    if not opponents:
+        opponents = [
+            opponent_state for opponent, opponent_state in enumerate(state.players)
+            if opponent != player
+        ]
+    safe: set[int] | None = None
+    for opponent_state in opponents:
+        discards = set(opponent_state.discards)
+        safe = discards if safe is None else safe & discards
+    return safe or set()
 
 
 def suji_tiles(state: GameState, player: int) -> set[int]:
@@ -134,10 +147,14 @@ def choose_rule_action_for_player(
                 return action
         return next((action for action in actions if action.kind == ActionType.PASS), None)
     if state.phase == Phase.DISCARD:
+        defensive = any(
+            opponent != player and len(opponent_state.melds) >= 2
+            for opponent, opponent_state in enumerate(state.players)
+        )
         tile = choose_discard(state.players[player].hand,
                               state.players[player].open_melds, rng,
                               visible_tile_counts(state, player), safe_tiles(state, player),
-                              suji_tiles(state, player))
+                              suji_tiles(state, player), defensive=defensive)
         return Action(ActionType.DISCARD, tile=tile)
     action = next((action for action in actions if action.kind == ActionType.DRAW), None)
     return action

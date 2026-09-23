@@ -117,6 +117,8 @@ def _has_chow(hand: list[int], tile: int) -> list[tuple[int, ...]]:
 
 
 def _win_action(player: PlayerState, tile: int | None = None) -> Action | None:
+    if tile is not None and tile in player.discards:
+        return None
     counts = player.hand.copy()
     if tile is not None:
         counts[tile] += 1
