@@ -104,6 +104,20 @@ def test_chow_consumes_two_tiles_and_returns_to_discard():
     assert state.players[1].melds[0].kind == "chow"
 
 
+def test_discard_win_adds_claimed_tile_to_winner_hand():
+    players = [PlayerState() for _ in range(4)]
+    players[1].hand = C("123456789m123456p1z")
+    players[0].discards = parse("1z")
+    state = GameState([], players, phase=Phase.RESPONSE, current_player=0,
+                      last_discard=parse("1z")[0], discard_player=0,
+                      response_player=1, response_players=[1])
+    win = next(action for action in legal_actions(state, player=1)
+               if action.kind == ActionType.WIN)
+    apply_action(state, win, player=1)
+    assert state.phase == Phase.ENDED
+    assert state.players[1].hand[parse("1z")[0]] == 2
+
+
 def test_flower_is_replaced_during_draw():
     players = [PlayerState() for _ in range(4)]
     players[1].hand = C("123456789m123456p11z")

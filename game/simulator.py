@@ -6,6 +6,7 @@ from random import Random
 from typing import Callable
 
 from .rules import Action, ActionType, GameState, Phase, apply_action, initial_state, legal_actions
+from .scoring import Score, score_hand
 from .tiles import tile_name
 
 ActionChooser = Callable[[GameState, Random], tuple[int, Action] | None]
@@ -19,6 +20,7 @@ class GameResult:
     win_tile: int | None = None
     win_by_discard: bool = False
     history: tuple["GameEvent", ...] = ()
+    score: Score | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,13 @@ def play_game(
         win_by_discard = state.phase == Phase.RESPONSE and action.kind == ActionType.WIN
         apply_action(state, action, player)
         if action.kind == ActionType.WIN:
+            winner_state = state.players[player]
+            score = score_hand(
+                winner_state.hand,
+                winner_state.melds,
+                flowers=len(winner_state.flowers),
+                self_draw=not win_by_discard,
+            )
             return GameResult(
                 state,
                 steps,
@@ -100,6 +109,7 @@ def play_game(
                 win_tile=action.tile,
                 win_by_discard=win_by_discard,
                 history=tuple(history),
+                score=score,
             )
     state.phase = Phase.ENDED
     return GameResult(state, max_steps, history=tuple(history))

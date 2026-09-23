@@ -128,4 +128,7 @@ def score_hand(
         )
     if not scores:
         raise ValueError("胡牌拆解失敗")
-    return max(scores, key=lambda score: score.tai)
+    best = max(scores, key=lambda score: score.tai)
+    if not best.patterns:
+        return Score(best.tai, ("基本胡",), best.pair, best.melds)
+    return best

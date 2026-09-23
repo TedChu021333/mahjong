@@ -241,6 +241,8 @@ def apply_action(state: GameState, action: Action, player: int | None = None) ->
         state.phase = Phase.RESPONSE
         return
     if action.kind == ActionType.WIN:
+        if action.tile is not None:
+            add_tile(current, action.tile)
         state.phase = Phase.ENDED
         return
     if action.kind == ActionType.PASS:

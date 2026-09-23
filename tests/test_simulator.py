@@ -38,3 +38,13 @@ def test_game_history_is_optional_and_formatable():
     trace = format_game_trace(with_history, limit=3)
     assert "P" in trace
     assert "結果：" in trace
+
+
+def test_game_result_includes_score_when_a_game_is_won():
+    from agent.rule_agent import choose_rule_action
+
+    result = play_game(Random(3), choose_action=choose_rule_action)
+    assert result.winner is not None
+    assert result.score is not None
+    assert result.score.patterns
+    assert "基本胡" in result.score.patterns or result.score.tai >= 1
