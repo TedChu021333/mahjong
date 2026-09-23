@@ -30,15 +30,27 @@ class SimulationStats:
 
 def choose_random_action(state: GameState, rng: Random) -> tuple[int, Action] | None:
     """選一個合法動作；胡牌優先，其餘動作隨機。"""
-    player = state.response_player if state.phase == Phase.RESPONSE else state.current_player
-    if player is None:
+    if state.phase == Phase.RESPONSE:
+        players = state.response_players or (
+            [state.response_player] if state.response_player is not None else []
+        )
+    else:
+        players = [state.current_player]
+    if not players:
         return None
-    actions = legal_actions(state, player)
-    if not actions:
+    available = [(player, legal_actions(state, player)) for player in players]
+    available = [(player, actions) for player, actions in available if actions]
+    if not available:
         return None
-    winning = [action for action in actions if action.kind == ActionType.WIN]
+    winning = [
+        (player, action)
+        for player, actions in available
+        for action in actions
+        if action.kind == ActionType.WIN
+    ]
     if winning:
-        return player, winning[0]
+        return winning[0]
+    player, actions = rng.choice(available)
     return player, rng.choice(actions)
 
 

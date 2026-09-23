@@ -68,6 +68,7 @@ class GameState:
     last_discard: int | None = None
     discard_player: int | None = None
     response_player: int | None = None
+    response_players: list[int] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if len(self.players) != 4:
@@ -148,7 +149,10 @@ def legal_actions(state: GameState, player: int | None = None) -> list[Action]:
 
     if state.phase != Phase.RESPONSE or state.last_discard is None:
         return []
-    if actor != state.response_player or state.discard_player is None:
+    pending = state.response_players or (
+        [state.response_player] if state.response_player is not None else []
+    )
+    if actor not in pending or state.discard_player is None:
         return []
 
     tile = state.last_discard
@@ -193,6 +197,7 @@ def _clear_response(state: GameState) -> None:
     state.last_discard = None
     state.discard_player = None
     state.response_player = None
+    state.response_players.clear()
 
 
 def _draw(state: GameState, player: int) -> None:
@@ -231,16 +236,21 @@ def apply_action(state: GameState, action: Action, player: int | None = None) ->
         current.discards.append(action.tile)
         state.last_discard = action.tile
         state.discard_player = actor
-        state.response_player = (actor + 1) % 4
+        state.response_players = [(actor + offset) % 4 for offset in (1, 2, 3)]
+        state.response_player = state.response_players[0]
         state.phase = Phase.RESPONSE
         return
     if action.kind == ActionType.WIN:
         state.phase = Phase.ENDED
         return
     if action.kind == ActionType.PASS:
-        state.current_player = (state.discard_player + 1) % 4  # type: ignore[operator]
-        _clear_response(state)
-        state.phase = Phase.DRAW
+        state.response_players.remove(actor)
+        if state.response_players:
+            state.response_player = state.response_players[0]
+        else:
+            state.current_player = (state.discard_player + 1) % 4
+            _clear_response(state)
+            state.phase = Phase.DRAW
         return
     if action.kind == ActionType.KONG and state.phase == Phase.DISCARD:
         assert action.tile is not None

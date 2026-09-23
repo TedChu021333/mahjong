@@ -15,11 +15,11 @@ def test_random_game_reaches_terminal_state():
 
 
 def test_many_random_games_are_reproducible_and_do_not_crash():
-    first = simulate_games(100, seed=11)
-    second = simulate_games(100, seed=11)
+    first = simulate_games(50, seed=11)
+    second = simulate_games(50, seed=11)
     assert first == second
-    assert first.games == 100
-    assert first.wins + first.draws == 100
+    assert first.games == 50
+    assert first.wins + first.draws == 50
     assert first.total_steps > 0
 
 

@@ -55,6 +55,20 @@ def test_response_actions_for_non_next_player_cannot_chow():
     assert all(action.kind != ActionType.CHOW for action in legal_actions(state, player=2))
 
 
+def test_all_three_other_players_can_pass_before_next_draw():
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = C("123456789m123456p11z")
+    state = GameState([], players, phase=Phase.DISCARD)
+    apply_action(state, Action(ActionType.DISCARD, tile=parse("1m")[0]))
+    assert state.response_players == [1, 2, 3]
+    for player in (1, 2):
+        apply_action(state, Action(ActionType.PASS), player=player)
+        assert state.phase == Phase.RESPONSE
+    apply_action(state, Action(ActionType.PASS), player=3)
+    assert state.phase == Phase.DRAW
+    assert state.current_player == 1
+
+
 def test_discard_then_pass_advances_to_next_player_draw():
     players = [PlayerState() for _ in range(4)]
     players[0].hand = C("123456789m123456p11z")
@@ -64,6 +78,8 @@ def test_discard_then_pass_advances_to_next_player_draw():
     assert state.phase == Phase.RESPONSE
     assert state.players[0].hand[0] == 0
     apply_action(state, Action(ActionType.PASS), player=1)
+    apply_action(state, Action(ActionType.PASS), player=2)
+    apply_action(state, Action(ActionType.PASS), player=3)
     assert state.phase == Phase.DRAW
     assert state.current_player == 1
     apply_action(state, Action(ActionType.DRAW))
