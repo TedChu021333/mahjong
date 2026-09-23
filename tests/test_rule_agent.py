@@ -6,6 +6,8 @@ from agent.rule_agent import (
     choose_rule_action_for_player,
     safe_tiles,
     suji_tiles,
+    opponent_threat_score,
+    should_fold,
     visible_tile_counts,
 )
 from game.rules import ActionType, GameState, Phase, PlayerState, apply_action, legal_actions
@@ -137,3 +139,21 @@ def test_visible_tile_counts_do_not_include_opponent_hidden_hands():
             hand = [1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 2, 0, 1, 0, 0, 0,
                 1, 0, 2, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0]
             assert choose_discard(hand, rng=Random(1), safe_tiles={0}, defensive=True) == 0
+
+
+def test_threat_score_uses_only_public_melds_and_discards():
+    players = [PlayerState() for _ in range(4)]
+    players[1].melds = [object(), object()]
+    players[1].discards = parse("123456m")
+    players[1].hand = C("111222333m444p55z")
+    state = GameState([], players)
+    assert opponent_threat_score(state, 0, 1) == 4
+
+
+def test_should_fold_when_behind_against_high_public_threat():
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = C("119m119p119s1234567z")
+    players[1].melds = [object(), object()]
+    players[1].discards = parse("123456m")
+    state = GameState([], players)
+    assert should_fold(state, 0)

@@ -118,6 +118,40 @@ def suji_tiles(state: GameState, player: int) -> set[int]:
     return suji
 
 
+def opponent_threat_score(state: GameState, observer: int, opponent: int) -> int:
+    """以公開資訊估計對手威脅，不讀取對手手牌。"""
+    if not 0 <= observer < 4 or not 0 <= opponent < 4:
+        raise ValueError("observer 與 opponent 必須在 0-3 之間")
+    if observer == opponent:
+        raise ValueError("observer 與 opponent 不可相同")
+    opponent_state = state.players[opponent]
+    meld_count = len(opponent_state.melds)
+    if meld_count >= 3:
+        score = 4
+    elif meld_count == 2:
+        score = 3
+    elif meld_count == 1:
+        score = 2
+    else:
+        score = 0
+    if meld_count and len(opponent_state.discards) >= 6:
+        score += 1
+    return min(score, 5)
+
+
+def should_fold(state: GameState, player: int) -> bool:
+    """判斷是否值得放棄進攻，進入完全防守。"""
+    if not 0 <= player < 4:
+        raise ValueError("player 必須在 0-3 之間")
+    own = state.players[player]
+    own_shanten = shanten(own.hand, own.open_melds)
+    highest_threat = max(
+        opponent_threat_score(state, player, opponent)
+        for opponent in range(4) if opponent != player
+    )
+    return own_shanten >= 2 and highest_threat >= 3
+
+
 def choose_rule_action_for_player(
     state: GameState, player: int, rng: Random | None = None
 ) -> Action | None:
@@ -147,10 +181,7 @@ def choose_rule_action_for_player(
                 return action
         return next((action for action in actions if action.kind == ActionType.PASS), None)
     if state.phase == Phase.DISCARD:
-        defensive = any(
-            opponent != player and len(opponent_state.melds) >= 2
-            for opponent, opponent_state in enumerate(state.players)
-        )
+        defensive = should_fold(state, player)
         tile = choose_discard(state.players[player].hand,
                               state.players[player].open_melds, rng,
                               visible_tile_counts(state, player), safe_tiles(state, player),
