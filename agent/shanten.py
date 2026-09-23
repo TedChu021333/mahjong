@@ -91,24 +91,36 @@ def seven_pairs_shanten(counts: Sequence[int]) -> int:
     return 7 - pairs + max(0, 7 - distinct)
 
 
-def shanten(counts: Sequence[int], n_open_melds: int = 0) -> int:
-    """回傳可用牌型中的最低向聽數。"""
+@lru_cache(maxsize=100_000)
+def _shanten_cached(counts: tuple[int, ...], n_open_melds: int) -> int:
     standard = standard_shanten(counts, n_open_melds)
     if n_open_melds:
         return standard
     return min(standard, seven_pairs_shanten(counts))
 
 
-def effective_tiles(counts: Sequence[int], n_open_melds: int = 0) -> list[int]:
-    """列出摸到後能降低向聽數的牌種。"""
-    validated = list(_validate_counts(counts, n_open_melds))
-    current = shanten(validated, n_open_melds)
+def shanten(counts: Sequence[int], n_open_melds: int = 0) -> int:
+    """回傳可用牌型中的最低向聽數。"""
+    validated = _validate_counts(counts, n_open_melds)
+    return _shanten_cached(validated, n_open_melds)
+
+
+@lru_cache(maxsize=100_000)
+def _effective_tiles_cached(counts: tuple[int, ...], n_open_melds: int) -> tuple[int, ...]:
+    current = _shanten_cached(counts, n_open_melds)
+    mutable = list(counts)
     effective = []
     for tile in range(NUM_TILE_TYPES):
-        if validated[tile] >= 4:
+        if mutable[tile] >= 4:
             continue
-        validated[tile] += 1
-        if shanten(validated, n_open_melds) < current:
+        mutable[tile] += 1
+        if _shanten_cached(tuple(mutable), n_open_melds) < current:
             effective.append(tile)
-        validated[tile] -= 1
-    return effective
+        mutable[tile] -= 1
+    return tuple(effective)
+
+
+def effective_tiles(counts: Sequence[int], n_open_melds: int = 0) -> list[int]:
+    """列出摸到後能降低向聽數的牌種。"""
+    validated = _validate_counts(counts, n_open_melds)
+    return list(_effective_tiles_cached(validated, n_open_melds))

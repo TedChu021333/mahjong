@@ -19,12 +19,18 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
         after_discard = hand.copy()
         after_discard[tile] -= 1
         next_shanten = shanten(after_discard, n_open_melds)
-        outs = len(effective_tiles(after_discard, n_open_melds))
-        candidates.append((next_shanten, -outs, tile))
+        candidates.append((next_shanten, tile, after_discard))
     if not candidates:
         raise ValueError("沒有可打出的牌")
-    best_score = min((score[:2] for score in candidates))
-    best_tiles = [score[2] for score in candidates if score[:2] == best_score]
+    minimum_shanten = min(candidate[0] for candidate in candidates)
+    best = []
+    for next_shanten, tile, after_discard in candidates:
+        if next_shanten != minimum_shanten:
+            continue
+        outs = len(effective_tiles(after_discard, n_open_melds))
+        best.append((-outs, tile))
+    best_outs = min(score[0] for score in best)
+    best_tiles = [tile for outs, tile in best if outs == best_outs]
     return (rng or Random()).choice(best_tiles)
 
 
