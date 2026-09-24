@@ -6,13 +6,13 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from random import Random
 
 import numpy as np
 
 from agent.rule_agent import choose_rule_action_for_player
-from game.rules import Action, ActionType, GameState, Phase
+from game.rules import Action, ActionType, GameState, Phase, legal_actions
 from game.tiles import tile_name
 from perception.config import GOLD_TEMPLATE_BOX, TEMPLATE_DIR
 from perception.config import MAX_HAND_TILES
@@ -30,6 +30,8 @@ class Observation:
     buttons: frozenset[str] | None
     claim: ClaimTile | None
     gold_tiles: tuple[int, ...]
+    boxes: tuple[tuple[int, int, int, int], ...] = field(default=(), compare=False)
+    """每張暗手牌在畫面上的位置（自動操作點擊用）；被選起時會上移，不參與比較。"""
 
     @property
     def my_turn(self) -> bool:
@@ -57,7 +59,7 @@ def observe(image: np.ndarray, readers: Readers) -> Observation | None:
         return None
     gold = tuple(t for t in read_gold_tiles(image, readers.gold) if t is not None)
     return Observation(reading.known_tiles(), read_buttons(image),
-                       read_claim_tile(image, readers.tiles), gold)
+                       read_claim_tile(image, readers.tiles), gold, reading.boxes)
 
 
 def _consistent_layout(boxes) -> bool:
@@ -109,9 +111,21 @@ def describe(action: Action) -> str:
     return action.kind.value
 
 
-def advise(observation: Observation, rng: Random | None = None) -> str | None:
+def decide(observation: Observation, rng: Random | None = None) -> Action | None:
     state = build_state(observation)
     if state is None:
         return None
-    action = choose_rule_action_for_player(state, ME, rng or Random(0))
+    return choose_rule_action_for_player(state, ME, rng or Random(0))
+
+
+def chow_options(observation: Observation) -> int:
+    """可以吃的組合數；超過一種時遊戲會要求選擇吃法。"""
+    state = build_state(observation)
+    if state is None or state.phase != Phase.RESPONSE:
+        return 0
+    return sum(action.kind == ActionType.CHOW for action in legal_actions(state, ME))
+
+
+def advise(observation: Observation, rng: Random | None = None) -> str | None:
+    action = decide(observation, rng)
     return describe(action) if action is not None else None

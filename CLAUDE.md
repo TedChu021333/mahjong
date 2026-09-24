@@ -4,7 +4,9 @@
 
 ## 開發原則
 - 策略訓練在自己的模擬器中進行，不直接在遊戲中學習。
-- 正式伺服器只做「提示模式」（AI 建議、人來點），全自動只在自己的模擬器裡跑，避免違反遊戲條款。
+- 正式對局只做「提示模式」（AI 建議、人來點）；自動點擊（`python -m hint --auto`）只在遊戲的
+  訓練場使用，其餘全自動只在自己的模擬器裡跑。自動點擊仍可能違反遊戲條款，使用者已知悉。
+- 自動操作不加入任何規避偵測的設計（例如模擬人類的隨機延遲、隨機點擊位置）。
 - 全部用 Python；只有 self-play 速度成為瓶頸時，才把規則引擎的熱點改寫成 Rust/C++。
 - 每個模組都要有 pytest 測試：`python -m pytest tests`
 
@@ -12,8 +14,8 @@
 - `game/`       規則核心：tiles.py（牌編碼）、win.py（胡牌判定）、rules.py、scoring.py、simulator.py
 - `agent/`      shanten.py、rule_agent.py、mcts_agent.py、rl_agent.py
 - `perception/` 螢幕擷取 (mss)、牌面辨識 (OpenCV 模板比對 → YOLO)、state_parser.py
-- `hint/`       提示模式：`python -m hint`（即時）、`--image`、`--video` 回放測試
-- `control/`    actuator.py（pyautogui）
+- `hint/`       提示模式：`python -m hint`（即時）、`--image`、`--video` 回放測試、`--auto` 自動點擊
+- `control/`    actuator.py（pyautogui）：把動作轉成點擊；滑鼠甩到左上角中止
 - `training/`、`eval/`
 
 ## 視覺資料設定
@@ -38,7 +40,11 @@
   都在 `perception/config.py`，由 train/遊戲流程.mp4 量測。
 - 金牌與可吃碰的牌直接用手牌模板比對（金牌只取模板的牌面區塊）。
 - 副露牌平躺有透視，手牌模板比對不準（拉正後最高約 0.7），需要另外收集副露模板。
-- 比對在 40x60 解析度以矩陣運算完成，一幀約 0.1 秒。
+- 比對在 40x60 解析度以矩陣運算完成，一幀約 0.05 秒。OpenBLAS 必須單執行緒
+  （`OPENBLAS_NUM_THREADS=1`，在 perception/hint 的 `__init__` 與 tests/conftest.py 設定），
+  否則小矩陣乘法在 Windows 上會慢約 250 倍。
+- 出牌：點一下牌就打出（影片中牌只浮起 3～5 幀就飛出）；自動模式若畫面沒變會補點。
+  有多種吃法時的選擇介面還沒看過，自動模式遇到時交給使用者。
 
 ## 牌編碼
 0-8 萬、9-17 筒、18-26 條、27-30 東南西北、31-33 中發白、34-41 花牌（春夏秋冬梅蘭竹菊）。

@@ -29,6 +29,7 @@ def grab_screen(monitor: int = 1) -> np.ndarray:
     """擷取整個螢幕（預設主螢幕），回傳 BGR 圖片。"""
     import mss
 
-    with mss.mss() as sct:
+    factory = getattr(mss, "MSS", None) or mss.mss  # 新版 mss 改名為 MSS
+    with factory() as sct:
         shot = np.asarray(sct.grab(sct.monitors[monitor]))
     return cv2.cvtColor(shot, cv2.COLOR_BGRA2BGR)
