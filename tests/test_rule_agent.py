@@ -30,8 +30,9 @@ def test_rule_agent_draws_and_discards():
     state = GameState([0], players, phase=Phase.DISCARD)
     player, action = choose_rule_action(state, Random(1))
     assert player == 0
-    assert action.kind == ActionType.DISCARD
-    assert action.tile in parse("123456789m123456p12z")
+    # 打掉一張字牌後單吊聽牌，規則式 AI 會同時宣告聽牌
+    assert action.kind == ActionType.DECLARE
+    assert action.tile in parse("12z")
 
 
 def test_rule_agent_wins_before_discarding():
@@ -49,7 +50,7 @@ def test_player_policy_returns_only_that_players_action():
     state = GameState([0], players, phase=Phase.DISCARD)
     action = choose_rule_action_for_player(state, 0, Random(1))
     assert action is not None
-    assert action.kind == ActionType.DISCARD
+    assert action.kind in {ActionType.DISCARD, ActionType.DECLARE}
 
 
 def test_rule_agent_accepts_a_pung_without_worsening_shanten():

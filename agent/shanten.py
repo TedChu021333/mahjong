@@ -84,13 +84,19 @@ def standard_shanten(counts: Sequence[int], n_open_melds: int = 0) -> int:
 
 
 def _seven_pairs_shanten_validated(counts: tuple[int, ...]) -> int:
-    pairs = sum(count // 2 for count in counts)
-    distinct = sum(count > 0 for count in counts)
-    return 7 - pairs + max(0, 7 - distinct)
+    # 嚦咕嚦咕 = 1 刻 + 7 對，共 8 種牌 17 張；逐一假設哪種牌當刻子，
+    # 其餘取張數最多的 7 種當對子，缺幾張就差幾步（胡牌 = -1）。
+    pair_parts = sorted((min(count, 2) for count in counts), reverse=True)
+    best = 0
+    for count in counts:
+        pairs = pair_parts.copy()
+        pairs.remove(min(count, 2))
+        best = max(best, min(count, 3) + sum(pairs[:7]))
+    return 17 - best - 1
 
 
 def seven_pairs_shanten(counts: Sequence[int]) -> int:
-    """回傳一般七對子的向聽數；此變體限門清 16 張手牌。"""
+    """回傳嚦咕嚦咕（7 對 + 1 刻）的向聽數；此牌型限門清。"""
     validated = _validate_counts(counts, 0)
     return _seven_pairs_shanten_validated(validated)
 

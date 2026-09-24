@@ -2,8 +2,15 @@ from random import Random
 
 import pytest
 
-from game.rules import Phase
-from game.simulator import format_game_trace, make_uniform_policy, play_game, simulate_games
+from game.rules import ActionType, GameState, Phase, PlayerState, legal_actions
+from game.simulator import (
+    _choose_with_player_policy,
+    format_game_trace,
+    make_uniform_policy,
+    play_game,
+    simulate_games,
+)
+from game.tiles import parse, to_counts
 
 
 def test_random_game_reaches_terminal_state():
@@ -92,3 +99,19 @@ def test_uniform_policy_supports_same_strategy_self_play():
     assert len(stats.deal_in_confidence_by_player) == 4
     assert len(stats.win_confidence_by_player) == 4
     assert all(0 <= low <= high <= 1 for low, high in stats.win_confidence_by_player)
+
+def test_pung_by_later_seat_beats_chow_by_next_seat():
+    players = [PlayerState() for _ in range(4)]
+    players[0].discards = parse("5m")
+    players[1].hand = to_counts(parse("46m1234567p1234s"))
+    players[2].hand = to_counts(parse("55m1234567p1234s"))
+    state = GameState(wall=[], players=players, phase=Phase.RESPONSE,
+                      last_discard=parse("5m")[0], discard_player=0,
+                      response_player=1, response_players=[1, 2, 3])
+
+    def claim_anything(state, player, rng):
+        actions = legal_actions(state, player)
+        return next((a for a in actions if a.kind != ActionType.PASS), actions[0])
+
+    player, action = _choose_with_player_policy(state, Random(0), claim_anything)
+    assert (player, action.kind) == (2, ActionType.PUNG)

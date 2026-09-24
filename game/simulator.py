@@ -7,7 +7,7 @@ from random import Random
 from typing import Callable
 
 from .rules import Action, ActionType, GameState, Phase, apply_action, initial_state, legal_actions
-from .scoring import Score, score_hand
+from .scoring import Score, score_flower_win, score_hand
 from .tiles import tile_name
 
 ActionChooser = Callable[[GameState, Random], tuple[int, Action] | None]
@@ -163,9 +163,40 @@ def _choose_with_player_policy(
                if action.kind == ActionType.WIN]
     if winning:
         return winning[0]
+    # 同時回應時：胡 > 槓/碰 > 吃；同優先權依座位順序
+    for kinds in ({ActionType.KONG, ActionType.PUNG}, {ActionType.CHOW}):
+        claims = [(player, action) for player, action in choices if action.kind in kinds]
+        if claims:
+            return claims[0]
     active = [(player, action) for player, action in choices
               if action.kind != ActionType.PASS]
     return active[0] if active else choices[0]
+
+
+def _win_events(state: GameState, self_draw: bool) -> list[str]:
+    """胡牌當下（套用動作前）的對局事件台。"""
+    if self_draw:
+        events = ["槓上開花"] if state.after_kong else []
+        if not state.drawable:
+            events.append("海底撈月")
+        return events
+    if state.robbing_kong:
+        return ["搶槓"]
+    return [] if state.drawable else ["河底撈魚"]
+
+
+def _flower_win_result(state: GameState, steps: int, history: list[GameEvent],
+                       discard_count: int, discards_by_player: list[int]) -> GameResult:
+    flower_win = state.flower_win
+    assert flower_win is not None
+    dealer = state.dealer in {flower_win.winner, flower_win.from_player}
+    return GameResult(
+        state, steps, winner=flower_win.winner,
+        win_by_discard=flower_win.from_player is not None,
+        history=tuple(history), score=score_flower_win(flower_win.kind, dealer),
+        discarder=flower_win.from_player, discard_count=discard_count,
+        discards_by_player=tuple(discards_by_player),
+    )
 
 
 def play_game(
@@ -174,17 +205,21 @@ def play_game(
     choose_action: ActionChooser | None = None,
     record_history: bool = False,
     player_policy: PlayerPolicy | None = None,
+    dealer: int = 0,
 ) -> GameResult:
-    """執行一局隨機對局；牌牆耗盡或達到步數上限都視為流局。"""
+    """執行一局對局；摸到留牌或達到步數上限都視為流局。"""
     if max_steps <= 0:
         raise ValueError("max_steps 必須為正數")
     rng = rng or Random()
     choose_action = choose_action or choose_random_action
-    state = initial_state(rng)
+    state = initial_state(rng, dealer=dealer)
     history: list[GameEvent] = []
     discard_count = 0
     discards_by_player = [0, 0, 0, 0]
     for steps in range(1, max_steps + 1):
+        if state.flower_win is not None:
+            return _flower_win_result(state, steps - 1, history,
+                                      discard_count, discards_by_player)
         if state.phase == Phase.ENDED:
             return GameResult(state, steps - 1, history=tuple(history),
                               discard_count=discard_count,
@@ -203,7 +238,10 @@ def play_game(
             history.append(GameEvent(steps, player, state.phase, action))
         win_by_discard = state.phase == Phase.RESPONSE and action.kind == ActionType.WIN
         discarder = state.discard_player if win_by_discard else None
-        if action.kind == ActionType.DISCARD:
+        if action.kind == ActionType.WIN:
+            events = _win_events(state, self_draw=not win_by_discard)
+            win_tile = action.tile if win_by_discard else state.last_drawn
+        if action.kind in {ActionType.DISCARD, ActionType.DECLARE}:
             discard_count += 1
             discards_by_player[player] += 1
         apply_action(state, action, player)
@@ -212,16 +250,23 @@ def play_game(
             score = score_hand(
                 winner_state.hand,
                 winner_state.melds,
-                flowers=len(winner_state.flowers),
+                flowers=winner_state.flowers,
                 self_draw=not win_by_discard,
                 seat_wind=state.seat_winds[player],
                 round_wind=state.round_wind,
+                win_tile=win_tile,
+                # 莊家有參與（莊家胡或莊家放槍）才加莊家台；非莊自摸時莊家
+                # 多付的部分屬於付款計算，不算在胡牌者的台數裡。
+                dealer=state.dealer in {player, discarder},
+                events=events,
+                gold_tiles=state.gold_tiles,
+                declared=state.declared[player],
             )
             return GameResult(
                 state,
                 steps,
                 winner=player,
-                win_tile=action.tile,
+                win_tile=win_tile,
                 win_by_discard=win_by_discard,
                 history=tuple(history),
                 score=score,

@@ -24,8 +24,12 @@ def test_open_meld_reduces_required_concealed_hand_size():
     assert standard_shanten(C("123456789m123p1z"), n_open_melds=1) == 0
 
 
-def test_seven_pairs_shanten():
-    assert seven_pairs_shanten(C("11223344556677m88p")) == -1
+def test_lickgu_shanten_needs_seven_pairs_and_one_triplet():
+    # 16 張 8 對：再摸到任一對子牌成刻即胡，是聽牌而非胡牌
+    assert seven_pairs_shanten(C("11223344556677m88p")) == 0
+    assert shanten(C("11223344556677m88p")) == 0
+    assert seven_pairs_shanten(C("11223344556677m888p")) == -1
+    assert seven_pairs_shanten(C("1133557799m1133p59s")) == 1
 
 
 def test_invalid_hand_size_is_rejected():

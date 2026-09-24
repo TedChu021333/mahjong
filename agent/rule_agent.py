@@ -202,11 +202,16 @@ def choose_rule_action_for_player(
                 return action
         return next((action for action in actions if action.kind == ActionType.PASS), None)
     if state.phase == Phase.DISCARD:
+        if state.declared[player]:
+            return actions[0]  # 聽牌後手牌鎖住，只剩打掉摸進的牌
         defensive = should_fold(state, player)
         tile = choose_discard(state.players[player].hand,
                               state.players[player].open_melds, rng,
                               visible_tile_counts(state, player), safe_tiles(state, player),
                               suji_tiles(state, player), defensive=defensive)
+        declare = Action(ActionType.DECLARE, tile=tile)
+        if not defensive and declare in actions:
+            return declare  # 聽牌 +1 台；暫時一律宣告，取捨留給之後的策略
         return Action(ActionType.DISCARD, tile=tile)
     action = next((action for action in actions if action.kind == ActionType.DRAW), None)
     return action
@@ -215,15 +220,14 @@ def choose_rule_action_for_player(
 def choose_rule_action(state: GameState, rng: Random | None = None) -> tuple[int, Action] | None:
     """模擬器相容的聚合器；實際玩家決策請使用指定座位 API。"""
     players = state.response_players if state.phase == Phase.RESPONSE else [state.current_player]
-    for player in players:
-        action = choose_rule_action_for_player(state, player, rng)
-        if action is not None and action.kind == ActionType.WIN:
-            return player, action
-    for player in players:
-        action = choose_rule_action_for_player(state, player, rng)
-        if action is not None and action.kind != ActionType.PASS:
-            return player, action
-    if players:
-        action = choose_rule_action_for_player(state, players[0], rng)
-        return (players[0], action) if action is not None else None
-    return None
+    choices = [(player, choose_rule_action_for_player(state, player, rng)) for player in players]
+    choices = [(player, action) for player, action in choices if action is not None]
+    # 同時回應時：胡 > 槓/碰 > 吃 > 其他；同優先權依座位順序
+    for kinds in ({ActionType.WIN}, {ActionType.KONG, ActionType.PUNG}, {ActionType.CHOW}):
+        claims = [(player, action) for player, action in choices if action.kind in kinds]
+        if claims:
+            return claims[0]
+    active = [(player, action) for player, action in choices if action.kind != ActionType.PASS]
+    if active:
+        return active[0]
+    return choices[0] if choices else None

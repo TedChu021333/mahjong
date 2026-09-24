@@ -91,6 +91,17 @@ def parse(s: str) -> list[int]:
     return tiles
 
 
+def tile_code(t: int) -> str:
+    """單張牌的字串代碼，parse() 的反函數：如 4 → "5m"、27 → "1z"。"""
+    if is_suited(t):
+        return f"{t % 9 + 1}{'mps'[t // 9]}"
+    if is_honor(t):
+        return f"{t - 26}z"
+    if is_flower(t):
+        return f"{t - FLOWER_START + 1}f"
+    raise ValueError(f"無效的牌編碼：{t}")
+
+
 def to_counts(tiles: list[int]) -> list[int]:
     """牌列表 → 長度 34 的計數陣列（花牌不可放進手牌計數）"""
     counts = [0] * NUM_TILE_TYPES
