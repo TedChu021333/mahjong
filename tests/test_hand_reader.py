@@ -1,0 +1,189 @@
+from pathlib import Path
+
+import cv2
+import numpy as np
+import pytest
+
+from game.tiles import parse
+from perception.capture import read_image
+from perception.config import (
+    HAND_TILE_BOTTOM,
+    SCREEN_HEIGHT,
+    SCREEN_WIDTH,
+    TILE_RAISE,
+    TRAIN_DIR,
+)
+from perception.extract_templates import extract_templates
+from perception.hand_reader import (
+    TileClassifier,
+    _cell_box,
+    crop_tile,
+    drawn_tile_box,
+    locate_hand_tiles,
+    read_hand,
+)
+
+TABLE_COLOR = (80, 60, 40)
+
+
+def blank_screen() -> np.ndarray:
+    screen = np.zeros((SCREEN_HEIGHT, SCREEN_WIDTH, 3), np.uint8)
+    screen[:] = TABLE_COLOR
+    return screen
+
+
+def draw_tile(screen: np.ndarray, box, seed: int, top: int = 832, raise_by: int = 0) -> None:
+    """畫一張白色牌面，中間放由 seed 決定的彩色方塊圖樣。"""
+    left, _, right, bottom = box
+    top, bottom = top - raise_by, bottom - raise_by
+    screen[top:bottom - 3, left + 3:right - 3] = (235, 235, 235)
+    pattern = np.random.default_rng(seed).integers(0, 200, (6, 4, 3), dtype=np.uint8)
+    pattern = cv2.resize(pattern, (right - left - 30, bottom - top - 50),
+                         interpolation=cv2.INTER_NEAREST)
+    screen[top + 25:top + 25 + pattern.shape[0], left + 15:left + 15 + pattern.shape[1]] = pattern
+
+
+def screen_with_hand(seeds: list[int]) -> np.ndarray:
+    screen = blank_screen()
+    for index, seed in enumerate(reversed(seeds)):
+        draw_tile(screen, _cell_box(index), seed)
+    return screen
+
+
+def test_locates_hand_and_ignores_lower_meld_tiles():
+    screen = screen_with_hand([1, 2, 3, 4, 5, 6, 7])
+    # 副露牌較低（牌面從 y≈860 開始），緊鄰暗手牌左側
+    for index in range(7, 10):
+        draw_tile(screen, _cell_box(index), 99, top=862)
+    boxes = locate_hand_tiles(screen)
+    assert len(boxes) == 7
+    assert boxes == sorted(boxes)
+    assert boxes[-1] == _cell_box(0)
+
+
+def test_kong_top_tile_in_meld_area_is_not_a_hand_tile():
+    # 槓子的第 4 張疊在副露中間，會蓋到偵測橫帶；它和暗手牌之間隔著空格
+    screen = screen_with_hand([1, 2, 3, 4, 5])
+    draw_tile(screen, _cell_box(14), 9, top=800)
+    boxes = locate_hand_tiles(screen)
+    assert len(boxes) == 5
+    assert _cell_box(14) not in boxes
+
+
+def test_flower_display_overlapping_tile_top_does_not_hide_tile():
+    screen = screen_with_hand(list(range(16)))
+    left, *_ = _cell_box(12)
+    screen[780:850, left + 5:left + 80] = (200, 120, 40)  # 壓在手牌頂端的花牌
+    assert len(locate_hand_tiles(screen)) == 16
+
+
+def test_partly_filled_grid_and_drawn_tile():
+    # 張數不足時由左邊排起、右側格子空著；摸進的牌在獨立位置，排在最後
+    screen = blank_screen()
+    for index in range(15, 0, -1):
+        draw_tile(screen, _cell_box(index), index)
+    draw_tile(screen, drawn_tile_box(), 50)
+    boxes = locate_hand_tiles(screen)
+    assert len(boxes) == 16
+    assert _cell_box(0) not in boxes
+    assert boxes[-1] == drawn_tile_box()
+
+
+def test_raised_tile_is_found_and_cropped_at_raised_position():
+    screen = screen_with_hand([1, 2, 3, 4])
+    raised = _cell_box(1)
+    screen[raised[1] - TILE_RAISE:raised[3], raised[0]:raised[2]] = TABLE_COLOR
+    draw_tile(screen, raised, 2, raise_by=TILE_RAISE)
+    boxes = locate_hand_tiles(screen)
+    assert len(boxes) == 4
+    # 合成牌面下緣比真實牌少 3px，量到的位移會多幾個像素
+    assert abs(raised[1] - boxes[2][1] - TILE_RAISE) <= 4
+    assert [box[1] for box in boxes].count(raised[1]) == 3
+
+
+def test_empty_table_has_no_hand_tiles():
+    assert locate_hand_tiles(blank_screen()) == []
+
+
+def test_classifier_matches_templates_under_dimming():
+    seeds = [10, 11, 12, 13]
+    screen = screen_with_hand(seeds)
+    boxes = locate_hand_tiles(screen)
+    tiles = parse("1m5p9s7z")
+    classifier = TileClassifier([(tile, crop_tile(screen, box)) for tile, box in zip(tiles, boxes)])
+    dimmed = (screen.astype(np.float32) * 0.6 + 15).astype(np.uint8)
+    reading = read_hand(dimmed, classifier)
+    assert reading.tiles == tuple(tiles)
+    assert reading.known_tiles() == tuple(tiles)
+
+
+def test_unknown_tile_is_reported_as_none():
+    screen = screen_with_hand([20, 21])
+    boxes = locate_hand_tiles(screen)
+    classifier = TileClassifier([(0, crop_tile(screen, boxes[0]))])
+    reading = read_hand(screen, classifier)
+    assert reading.tiles == (0, None)
+    assert not reading.complete
+    with pytest.raises(ValueError):
+        reading.known_tiles()
+
+
+def test_extracted_templates_round_trip(tmp_path: Path):
+    screen = screen_with_hand([30, 31, 32])
+    labels = parse("123m")
+    paths = extract_templates(screen, labels, "合成", tmp_path)
+    assert [path.parent.name for path in paths] == ["1m", "2m", "3m"]
+    classifier = TileClassifier.from_directory(tmp_path)
+    assert read_hand(screen, classifier).tiles == tuple(labels)
+    with pytest.raises(ValueError):
+        extract_templates(screen, parse("12m"), "合成", tmp_path)
+
+
+def test_tile_crop_stays_inside_hand_row():
+    box = _cell_box(0)
+    assert box[3] == HAND_TILE_BOTTOM
+    assert box[2] <= SCREEN_WIDTH
+
+
+# 訓練截圖的人工標註（暗手牌由左到右）；train/ 不進版控，沒有截圖時略過。
+SCREENSHOT_LABELS = {
+    "副露區1": "233455668m8p588s",
+    "副露區2": "2355566m788s",
+    "吃牌畫面": "334467m888p2244568s",
+    "完整正常畫面": "257778m114p2335588s",
+    "碰牌畫面": "557778m114p2335588s",
+    "胡牌畫面": "22255p56s",
+    "第十七張": "47789m246788p13352s",  # 最後的 2s 是摸進的第 17 張
+    "缺的牌1": "244m388p35588s12345z",   # 東南西被選取上移（換三張）
+    "缺的牌2": "7m222568p2356s34655z",
+    "缺的牌3": "47789m24678p13359s5z",
+    "缺的牌4": "57m3577p2223469s147z",
+    "缺的牌5": "157m233577p2223469s",
+    "缺的牌6": "3347m8889p1244568s6z",
+}
+
+
+@pytest.mark.skipif(
+    not all((TRAIN_DIR / f"{name}.png").exists() for name in SCREENSHOT_LABELS),
+    reason="缺少訓練截圖",
+)
+def test_real_screenshots_leave_one_out():
+    """每張截圖只用其他截圖的模板辨識，模擬遇到新畫面的情況。"""
+    data = {}
+    for name, labels in SCREENSHOT_LABELS.items():
+        image = read_image(TRAIN_DIR / f"{name}.png")
+        boxes = locate_hand_tiles(image)
+        assert len(boxes) == len(parse(labels)), name
+        data[name] = [crop_tile(image, box) for box in boxes], parse(labels)
+    for name, (crops, labels) in data.items():
+        classifier = TileClassifier([
+            (tile, crop)
+            for other, (other_crops, other_labels) in data.items() if other != name
+            for tile, crop in zip(other_labels, other_crops)
+        ])
+        for crop, tile in zip(crops, labels):
+            predicted, _ = classifier.classify(crop)
+            if tile in classifier.known_tiles:
+                assert predicted == tile, name
+            else:
+                assert predicted is None, name

@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from game.rules import GameState, Meld, Phase, PlayerState
 from game.tiles import NUM_TILE_TYPES, is_flower
 
+UNKNOWN_MELD = "unknown"
+
 
 @dataclass(frozen=True)
 class ObservedPlayer:
@@ -18,6 +20,8 @@ class ObservedPlayer:
     hand: tuple[int, ...] = ()
     discards: tuple[int, ...] = ()
     melds: tuple[Meld, ...] = ()
+    unknown_melds: int = 0
+    """只知道組數、還沒辨識出內容的副露。"""
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,8 @@ class ObservedTable:
     response_players: tuple[int, ...] = ()
     round_wind: int = 27
     seat_winds: tuple[int, int, int, int] = (27, 28, 29, 30)
+    gold_tiles: tuple[int, ...] = ()
+    last_drawn: int | None = None
 
 
 def _validate_tile(tile: int, allow_flower: bool = False) -> None:
@@ -78,10 +84,14 @@ def parse_observed_table(observed: ObservedTable) -> GameState:
             counts[tile] += 1
             if counts[tile] > 4:
                 raise ValueError("同一玩家手牌中的牌不能超過 4 張")
+        if player.unknown_melds < 0 or len(player.melds) + player.unknown_melds > 5:
+            raise ValueError("副露組數必須在 0-5 之間")
+        # 內容未知的副露用空牌組佔位：規則引擎只需要組數來判斷手牌張數與胡牌
+        placeholders = [Meld(UNKNOWN_MELD, ()) for _ in range(player.unknown_melds)]
         players.append(PlayerState(
             hand=counts,
             flowers=[],
-            melds=list(player.melds),
+            melds=list(player.melds) + placeholders,
             discards=list(player.discards),
         ))
 
@@ -96,4 +106,6 @@ def parse_observed_table(observed: ObservedTable) -> GameState:
         response_players=list(observed.response_players),
         round_wind=observed.round_wind,
         seat_winds=observed.seat_winds,
+        gold_tiles=list(observed.gold_tiles),
+        last_drawn=observed.last_drawn,
     )
