@@ -19,7 +19,7 @@ from typing import Iterator
 import cv2
 import numpy as np
 
-from hint.advisor import Readers, chow_options, decide, describe, observe
+from hint.advisor import Readers, decide, describe, observe
 from perception.capture import grab_screen, read_image
 
 RETRY_AFTER = 1.5
@@ -60,6 +60,10 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         if observation is None or observation != previous:
             previous = observation
             continue
+        if actuator is not None and actuator.follow_up(observation):
+            print(f"[{stamp}] 選擇吃法", flush=True)
+            acted_for, acted_at, retries = observation, clock(), 0
+            continue
         action = decide(observation)
         advice = describe(action) if action is not None else None
         if advice is not None and advice != last_advice:
@@ -73,10 +77,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             retries += 1
         else:
             retries = 0
-        if action.kind.value == "chow" and chow_options(observation) > 1:
-            if observation != acted_for:
-                print(f"[{stamp}] 有多種吃法，請手動操作", flush=True)
-        elif not actuator.perform(action, observation):
+        if not actuator.perform(action, observation):
             print(f"[{stamp}] 畫面上找不到對應的按鈕或牌，略過", flush=True)
         acted_for = observation
         acted_at = clock()

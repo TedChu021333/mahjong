@@ -59,3 +59,17 @@ def test_real_screenshot_end_to_end():
     readers = Readers()
     observation = observe(read_image(TRAIN_DIR / "吃牌畫面.png"), readers)
     assert advise(observation) == "吃，組成 六萬七萬八萬"
+
+
+@pytest.mark.skipif(
+    not (TRAIN_DIR / "缺的牌1.png").exists() or not TEMPLATE_DIR.exists(),
+    reason="缺少訓練截圖或模板",
+)
+def test_swap_screen_is_recognised_with_selected_tiles():
+    readers = Readers()
+    selecting = observe(read_image(TRAIN_DIR / "缺的牌1.png"), readers)
+    assert selecting.swap_prompt is True
+    assert [i for i, up in enumerate(selecting.raised) if up] == [11, 12, 13]
+    assert advise(selecting) == "換三張：換 東、南、西"
+    waiting = observe(read_image(TRAIN_DIR / "缺的牌5.png"), readers)
+    assert waiting.swap_prompt is None

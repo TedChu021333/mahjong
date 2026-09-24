@@ -65,3 +65,11 @@ GOLD_SLOT_SIZE = (52, 75)
 GOLD_MAX_SLOTS = 8
 GOLD_TEMPLATE_BOX = (0, 12, 106, 170)
 """金牌小圖只有牌面，比對時手牌模板只取這塊（網格搜尋結果）。"""
+
+# 換三張畫面：「不換」出現代表正在選牌；「換牌」在選了牌之後才會亮（橘色）。
+SWAP_KEEP_BUTTON = (757, 655)
+SWAP_CONFIRM_BUTTON = (1163, 655)
+
+# 多種吃法時的選項框（由 train/吃牌2.png 量測）：每框三張正面牌，依順子由小到大排列。
+CHOW_PANEL_ROWS = (650, 790)
+CHOW_PANEL_WIDTH = (230, 340)

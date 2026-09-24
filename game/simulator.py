@@ -206,13 +206,14 @@ def play_game(
     record_history: bool = False,
     player_policy: PlayerPolicy | None = None,
     dealer: int = 0,
+    swap: bool = False,
 ) -> GameResult:
     """執行一局對局；摸到留牌或達到步數上限都視為流局。"""
     if max_steps <= 0:
         raise ValueError("max_steps 必須為正數")
     rng = rng or Random()
     choose_action = choose_action or choose_random_action
-    state = initial_state(rng, dealer=dealer)
+    state = initial_state(rng, dealer=dealer, swap=swap)
     history: list[GameEvent] = []
     discard_count = 0
     discards_by_player = [0, 0, 0, 0]

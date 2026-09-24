@@ -1,4 +1,4 @@
-"""手牌以外的畫面資訊：吃碰槓聽胡按鈕、可吃碰的那張牌、金牌面板。"""
+"""手牌以外的畫面資訊：吃碰槓聽胡按鈕、可吃碰的那張牌、金牌面板、換三張。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -9,6 +9,8 @@ import numpy as np
 from perception.config import (
     ACTION_BUTTON_CENTERS,
     CANCEL_BUTTON_REGION,
+    CHOW_PANEL_ROWS,
+    CHOW_PANEL_WIDTH,
     CLAIM_TILE_MARGINS,
     CLAIM_TILE_POSITIONS,
     CLAIM_TILE_SIZE,
@@ -16,6 +18,8 @@ from perception.config import (
     GOLD_SLOT_ORIGIN,
     GOLD_SLOT_PITCH,
     GOLD_SLOT_SIZE,
+    SWAP_CONFIRM_BUTTON,
+    SWAP_KEEP_BUTTON,
 )
 from perception.hand_reader import TileClassifier
 
@@ -96,3 +100,42 @@ def read_gold_tiles(image: np.ndarray, gold_classifier: TileClassifier) -> list[
         tile, _ = gold_classifier.classify(image[top:bottom, left:right])
         tiles.append(tile)
     return tiles
+
+
+def _orange_ratio(image: np.ndarray, center: tuple[int, int]) -> float:
+    """量按鈕左側（避開中間的白字）的橘色比例。"""
+    x, y = center
+    hsv = _hsv(image[y - 40:y + 40, x - 120:x - 70])
+    orange = (hsv[..., 0] >= 8) & (hsv[..., 0] <= 25) & (hsv[..., 1] > 150) & (hsv[..., 2] > 150)
+    return float(orange.mean())
+
+
+def read_swap_prompt(image: np.ndarray) -> bool | None:
+    """換三張畫面：不在選牌時回傳 None；否則回傳「換牌」按鈕是否可按。"""
+    if _orange_ratio(image, SWAP_KEEP_BUTTON) < 0.5:
+        return None
+    return _orange_ratio(image, SWAP_CONFIRM_BUTTON) >= 0.5
+
+
+def read_chow_panels(image: np.ndarray) -> tuple[tuple[int, int], ...]:
+    """多種吃法的選項框中心，由左到右；沒有選項框時回傳空 tuple。
+
+    以「一段連續的白色牌面欄位」找框：框內三張牌之間的縫很窄，框與框之間
+    隔著較寬的深色間距。"""
+    top, bottom = CHOW_PANEL_ROWS
+    hsv = _hsv(image[top:bottom])
+    columns = (((hsv[..., 1] < 60) & (hsv[..., 2] > 170)).mean(axis=0) > 0.5).tolist()
+    panels = []
+    start = end = None
+    gap = 0
+    for x, white in enumerate(columns + [False] * 16):
+        if white:
+            start = x if start is None else start
+            end, gap = x, 0
+        elif start is not None:
+            gap += 1
+            if gap > 15:
+                if CHOW_PANEL_WIDTH[0] <= end - start <= CHOW_PANEL_WIDTH[1]:
+                    panels.append(((start + end) // 2, (top + bottom) // 2))
+                start = None
+    return tuple(panels)

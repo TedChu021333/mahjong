@@ -11,14 +11,22 @@ from random import Random
 
 import numpy as np
 
-from agent.rule_agent import choose_rule_action_for_player
+from agent.rule_agent import choose_rule_action_for_player, choose_swap_tiles
 from game.rules import Action, ActionType, GameState, Phase, legal_actions
-from game.tiles import tile_name
+from game.tiles import NUM_TILE_TYPES, tile_name
 from perception.config import GOLD_TEMPLATE_BOX, TEMPLATE_DIR
 from perception.config import MAX_HAND_TILES
 from perception.hand_reader import TileClassifier, _cell_box, drawn_tile_box, read_hand
 from perception.state_parser import ObservedPlayer, ObservedTable, parse_observed_table
-from perception.table_reader import ClaimTile, read_buttons, read_claim_tile, read_gold_tiles
+from perception.config import HAND_TILE_TOP
+from perception.table_reader import (
+    ClaimTile,
+    read_buttons,
+    read_chow_panels,
+    read_claim_tile,
+    read_gold_tiles,
+    read_swap_prompt,
+)
 
 ME = 0
 SOURCE_SEAT = {"left": 3, "right": 1}
@@ -32,6 +40,12 @@ class Observation:
     gold_tiles: tuple[int, ...]
     boxes: tuple[tuple[int, int, int, int], ...] = field(default=(), compare=False)
     """每張暗手牌在畫面上的位置（自動操作點擊用）；被選起時會上移，不參與比較。"""
+    swap_prompt: bool | None = None
+    """換三張選牌中時為「換牌」按鈕是否可按；不在換三張畫面為 None。"""
+    raised: tuple[bool, ...] = ()
+    """各張暗手牌是否被選起（換三張）。"""
+    chow_panels: tuple[tuple[int, int], ...] = ()
+    """多種吃法時的選項框中心。"""
 
     @property
     def my_turn(self) -> bool:
@@ -59,7 +73,10 @@ def observe(image: np.ndarray, readers: Readers) -> Observation | None:
         return None
     gold = tuple(t for t in read_gold_tiles(image, readers.gold) if t is not None)
     return Observation(reading.known_tiles(), read_buttons(image),
-                       read_claim_tile(image, readers.tiles), gold, reading.boxes)
+                       read_claim_tile(image, readers.tiles), gold, reading.boxes,
+                       read_swap_prompt(image),
+                       tuple(box[1] != HAND_TILE_TOP for box in reading.boxes),
+                       read_chow_panels(image))
 
 
 def _consistent_layout(boxes) -> bool:
@@ -108,22 +125,31 @@ def describe(action: Action) -> str:
         return "吃，組成 " + "".join(tile_name(t) for t in action.tiles)
     if action.kind == ActionType.PASS:
         return "不要，按「取消」"
+    if action.kind == ActionType.SWAP:
+        if not action.tiles:
+            return "換三張：不換"
+        return "換三張：換 " + "、".join(tile_name(t) for t in action.tiles)
     return action.kind.value
 
 
 def decide(observation: Observation, rng: Random | None = None) -> Action | None:
+    if observation.swap_prompt is not None:
+        counts = [0] * NUM_TILE_TYPES
+        for tile in observation.hand:
+            counts[tile] += 1
+        return Action(ActionType.SWAP, tiles=choose_swap_tiles(counts))
     state = build_state(observation)
     if state is None:
         return None
     return choose_rule_action_for_player(state, ME, rng or Random(0))
 
 
-def chow_options(observation: Observation) -> int:
-    """可以吃的組合數；超過一種時遊戲會要求選擇吃法。"""
+def chow_options(observation: Observation) -> list[tuple[int, ...]]:
+    """所有吃法，順序與遊戲選項框相同（順子由小到大）。"""
     state = build_state(observation)
     if state is None or state.phase != Phase.RESPONSE:
-        return 0
-    return sum(action.kind == ActionType.CHOW for action in legal_actions(state, ME))
+        return []
+    return [action.tiles for action in legal_actions(state, ME) if action.kind == ActionType.CHOW]
 
 
 def advise(observation: Observation, rng: Random | None = None) -> str | None:

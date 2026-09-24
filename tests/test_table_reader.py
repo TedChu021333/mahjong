@@ -68,3 +68,21 @@ def test_real_screenshots():
         else:
             assert (reading.tile, reading.source) == (parse(claim)[0], source), name
         assert read_gold_tiles(image, gold) == parse(gold_tiles), name
+
+
+def test_chow_panels_are_found_only_on_the_choice_screen():
+    from perception.table_reader import read_chow_panels
+    blank = np.full((SCREEN_HEIGHT, SCREEN_WIDTH, 3), 60, np.uint8)
+    assert read_chow_panels(blank) == ()
+    for left in (700, 1060):
+        blank[650:790, left:left + 280] = 235
+    centers = read_chow_panels(blank)
+    assert [x for x, _ in centers] == [839, 1199]
+
+
+@pytest.mark.skipif(not (TRAIN_DIR / "吃牌2.png").exists(), reason="缺少訓練截圖")
+def test_real_chow_choice_screen():
+    from perception.table_reader import read_chow_panels
+    image = read_image(TRAIN_DIR / "吃牌2.png")
+    assert len(read_chow_panels(image)) == 2
+    assert read_chow_panels(read_image(TRAIN_DIR / "吃牌畫面.png")) == ()

@@ -11,6 +11,7 @@
 - 金牌：每局隨機 GOLD_TILES_AT_START 種牌，每次槓成立再加 1 種。
 - 聽：打牌時可同時宣告聽牌（打完必須是聽牌），之後手牌鎖住，只能打掉
   摸進的牌或胡，也不能吃碰槓。
+- 換三張（可選）：開局每人可選 0～MAX_SWAP 張與牌牆交換。
 """
 from __future__ import annotations
 
@@ -25,9 +26,11 @@ from .win import is_win, winning_tiles
 DEAD_WALL_SIZE = 16
 """台灣麻將留 8 墩（16 張）不摸。"""
 GOLD_TILES_AT_START = 2
+MAX_SWAP = 3
 
 
 class Phase(StrEnum):
+    SWAP = "swap"
     DRAW = "draw"
     DISCARD = "discard"
     RESPONSE = "response"
@@ -44,6 +47,8 @@ class ActionType(StrEnum):
     PASS = "pass"
     DECLARE = "declare"
     """打出 tile 並宣告聽牌。"""
+    SWAP = "swap"
+    """換三張：tiles 為要換掉的牌（可為空，代表不換）。"""
 
 
 @dataclass(frozen=True)
@@ -119,6 +124,8 @@ class GameState:
     """槓牌時依序加入的金牌候選；開局就洗好，讓同一 seed 的對局可重現。"""
     declared: list[bool] = field(default_factory=lambda: [False] * 4)
     """各家是否已宣告聽牌。"""
+    swap_players: list[int] = field(default_factory=list)
+    """換三張階段還沒決定的玩家（依序）。"""
 
     def __post_init__(self) -> None:
         if len(self.players) != 4:
@@ -153,8 +160,11 @@ def _collect_flower(state: GameState, player: int, tile: int) -> None:
 
 
 def initial_state(rng: Random | None = None, dealer: int = 0,
-                  round_wind: int = 27) -> GameState:
-    """建立洗好的初始牌局；莊家 17 張，其餘玩家 16 張，花牌自動補。"""
+                  round_wind: int = 27, swap: bool = False) -> GameState:
+    """建立洗好的初始牌局；莊家 17 張，其餘玩家 16 張，花牌自動補。
+
+    swap=True 時先進入換三張階段，從莊家開始每人決定一次。
+    """
     if not 0 <= dealer < 4:
         raise ValueError("dealer 必須在 0-3 之間")
     rng = rng or Random()
@@ -179,6 +189,9 @@ def initial_state(rng: Random | None = None, dealer: int = 0,
                     return state
             else:
                 state.players[player].hand[tile] += 1
+    if swap:
+        state.phase = Phase.SWAP
+        state.swap_players = [(dealer + offset) % 4 for offset in range(4)]
     return state
 
 
@@ -252,6 +265,10 @@ def legal_actions(state: GameState, player: int | None = None) -> list[Action]:
     if not 0 <= actor < 4:
         raise ValueError("player 必須在 0-3 之間")
     current = state.players[actor]
+
+    if state.phase == Phase.SWAP:
+        # 可換的組合太多，只列出「不換」；apply_action 另外驗證要換的牌
+        return [Action(ActionType.SWAP)] if actor == state.current_player else []
 
     if state.phase == Phase.DRAW:
         if actor != state.current_player or not state.drawable:
@@ -353,6 +370,37 @@ def _draw(state: GameState, player: int) -> None:
     state.phase = Phase.ENDED
 
 
+def _swap(state: GameState, player: int, tiles: tuple[int, ...]) -> None:
+    """換三張：先摸新牌（花牌照常補花），換掉的牌再放回牌牆可摸的位置。"""
+    current = state.players[player]
+    if len(tiles) > MAX_SWAP:
+        raise ValueError(f"最多換 {MAX_SWAP} 張")
+    for tile in tiles:
+        remove_tile(current, tile)
+    received = 0
+    while received < len(tiles):
+        if not state.drawable:
+            raise ValueError("牌牆不足以換牌")
+        tile = state.wall.pop()
+        if is_flower(tile):
+            _collect_flower(state, player, tile)
+            if state.flower_win is not None:
+                return
+            continue
+        add_tile(current, tile)
+        received += 1
+    # 放回的位置由牌局內容決定，同一 seed 的對局可重現；留牌區不放
+    placer = Random(hash((len(state.wall), player, tiles)))
+    for tile in tiles:
+        state.wall.insert(placer.randint(state.reserve, len(state.wall)), tile)
+    state.swap_players.remove(player)
+    if state.swap_players:
+        state.current_player = state.swap_players[0]
+    else:
+        state.current_player = state.dealer
+        state.phase = Phase.DISCARD
+
+
 def _upgrade_to_kong(player: PlayerState, tile: int) -> None:
     index = next(i for i, meld in enumerate(player.melds)
                  if meld.kind == "pung" and meld.tiles[0] == tile)
@@ -375,10 +423,14 @@ def apply_action(state: GameState, action: Action, player: int | None = None) ->
     is_pass = action.kind == ActionType.PASS and any(
         candidate.kind == ActionType.PASS for candidate in legal
     )
-    if actor is None or (action not in legal and not is_pass):
+    is_swap = action.kind == ActionType.SWAP and bool(legal)
+    if actor is None or (action not in legal and not is_pass and not is_swap):
         raise ValueError("不是目前情境下的合法動作")
 
     current = state.players[actor]
+    if action.kind == ActionType.SWAP:
+        _swap(state, actor, action.tiles)
+        return
     if action.kind == ActionType.DRAW:
         _draw(state, actor)
         return

@@ -4,8 +4,8 @@ from __future__ import annotations
 from random import Random
 from typing import Sequence
 
-from .shanten import effective_tiles, shanten
-from game.rules import Action, ActionType, GameState, Phase, legal_actions
+from .shanten import effective_tiles, shanten, standard_shanten
+from game.rules import MAX_SWAP, Action, ActionType, GameState, Phase, legal_actions
 from game.tiles import is_honor, is_suited
 
 
@@ -55,6 +55,42 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
     best_score = min(score[:3] for score in best)
     best_tiles = [tile for *score, tile in best if tuple(score) == best_score]
     return (rng or Random()).choice(best_tiles)
+
+
+SWAP_MIN_GAIN = 0.02
+"""期望向聽數至少要降低這麼多才值得換。"""
+
+
+def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP) -> tuple[int, ...]:
+    """換三張：換掉「換一張隨機新牌後，期望向聽數比現在低」的牌，最多 limit 張。
+
+    新牌的機率依自己看不到的張數（4 - 手上張數）估計。各張分開評估，
+    取期望向聽數最低的幾張；沒有值得換的就不換。對子多時向聽數由嚦咕嚦咕
+    決定，所有單張的期望值都一樣，此時再以一般牌型的期望向聽數區分
+    （例如孤張字牌比能搭子的數牌更該換）。
+    """
+    hand = list(hand)
+    current = shanten(hand, 0)
+    unseen = [4 - count for count in hand]
+    candidates = []
+    for tile, count in enumerate(hand):
+        if not count:
+            continue
+        hand[tile] -= 1
+        total = weighted = weighted_standard = 0
+        for new_tile, copies in enumerate(unseen):
+            if copies <= 0 or hand[new_tile] >= 4:
+                continue
+            hand[new_tile] += 1
+            weighted += copies * shanten(hand, 0)
+            weighted_standard += copies * standard_shanten(hand, 0)
+            total += copies
+            hand[new_tile] -= 1
+        hand[tile] += 1
+        expected = weighted / total
+        if expected < current - SWAP_MIN_GAIN:
+            candidates.append((round(expected, 6), weighted_standard / total, tile))
+    return tuple(tile for *_, tile in sorted(candidates)[:limit])
 
 
 def visible_tile_counts(state: GameState, player: int) -> list[int]:
@@ -183,6 +219,8 @@ def choose_rule_action_for_player(
     win = next((action for action in actions if action.kind == ActionType.WIN), None)
     if win is not None:
         return win
+    if state.phase == Phase.SWAP:
+        return Action(ActionType.SWAP, tiles=choose_swap_tiles(state.players[player].hand))
     if state.phase == Phase.RESPONSE:
         current = state.players[player]
         baseline = shanten(current.hand, current.open_melds)

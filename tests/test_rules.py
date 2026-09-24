@@ -269,3 +269,31 @@ def test_declared_player_cannot_claim():
                       response_player=1, response_players=[1],
                       declared=[False, True, False, False])
     assert {a.kind for a in legal_actions(state, 1)} == {ActionType.PASS}
+
+
+def test_swap_phase_replaces_tiles_from_wall_in_dealer_order():
+    state = initial_state(Random(9), dealer=1, swap=True)
+    assert state.phase == Phase.SWAP and state.current_player == 1
+    wall_size = len(state.wall)
+    flowers_before = len(state.players[1].flowers)
+    hand = state.players[1].hand.copy()
+    give = tuple(t for t, count in enumerate(hand) if count)[:3]
+    apply_action(state, Action(ActionType.SWAP, tiles=give))
+    assert state.players[1].hand_size == 17
+    # 摸進幾張就放回幾張；摸到花會多摸，所以牌牆只會少花牌的張數
+    new_flowers = len(state.players[1].flowers) - flowers_before
+    assert len(state.wall) == wall_size - new_flowers
+    assert state.current_player == 2
+    for player in (2, 3, 0):
+        apply_action(state, Action(ActionType.SWAP))  # 不換
+    assert state.phase == Phase.DISCARD and state.current_player == 1
+
+
+def test_swap_rejects_more_than_three_tiles():
+    state = initial_state(Random(9), swap=True)
+    tiles = tuple(t for t, count in enumerate(state.players[0].hand) if count)[:4]
+    try:
+        apply_action(state, Action(ActionType.SWAP, tiles=tiles))
+    except ValueError:
+        return
+    raise AssertionError("換 4 張應該被拒絕")

@@ -78,3 +78,57 @@ def test_auto_loop_acts_once_per_screen_and_retries_later():
     # 第一次點擊後，每隔 RETRY_AFTER 秒補點一次，最多 MAX_RETRIES 次
     assert len(clicks) == 1 + MAX_RETRIES
     assert RETRY_AFTER > 0.3
+
+
+def swap_screen(raised=(), confirm=False) -> Observation:
+    hand = tuple(parse("244m388p35588s12345z"))
+    boxes = tuple(_cell_box(index) for index in reversed(range(16)))
+    flags = tuple(index in raised for index in range(16))
+    return Observation(hand, None, None, (), boxes, confirm, flags)
+
+
+def test_swap_selects_tiles_one_click_at_a_time_then_confirms():
+    from game.rules import ActionType
+    action = Action(ActionType.SWAP, tiles=tuple(parse("123z")))  # 東南西在第 11-13 張
+    clicks, actuator = recorder()
+    actuator.perform(action, swap_screen())
+    assert clicks == [center(_cell_box(4))]          # 先選東（第 11 張）
+    clicks.clear()
+    actuator.perform(action, swap_screen(raised={11, 12, 13, 0}))
+    assert clicks == [center(_cell_box(15))]         # 取消多選的第 0 張
+    clicks.clear()
+    actuator.perform(action, swap_screen(raised={11, 12, 13}, confirm=True))
+    from perception.config import SWAP_CONFIRM_BUTTON
+    assert clicks == [SWAP_CONFIRM_BUTTON]
+
+
+def test_swap_nothing_presses_keep():
+    from perception.config import SWAP_KEEP_BUTTON
+    clicks, actuator = recorder()
+    actuator.perform(Action(ActionType.SWAP), swap_screen())
+    assert clicks == [SWAP_KEEP_BUTTON]
+
+
+def test_multiple_chow_options_click_chow_then_the_matching_panel():
+    # 上家打 6s，手上 4s5s7s：可吃 456s 或 567s（選項框依此順序）
+    hand = tuple(parse("111m222m333m99p457s11z"))
+    assert len(hand) == 16
+    waiting = Observation(hand, frozenset({"chow"}), ClaimTile(P("6s"), 0.9, "left"), ())
+    clicks, actuator = recorder()
+    action = Action(ActionType.CHOW, tile=P("6s"), tiles=tuple(parse("567s")))
+    assert actuator.perform(action, waiting)
+    assert clicks == [ACTION_BUTTON_CENTERS["chow"]]
+    panels = ((850, 720), (1212, 720))
+    with_panels = Observation(hand, None, None, (), chow_panels=panels)
+    assert actuator.follow_up(with_panels)
+    assert clicks[-1] == (1212, 720)
+    assert not actuator.follow_up(with_panels)  # 只點一次
+
+
+def test_single_chow_option_needs_no_panel():
+    hand = tuple(parse("111m222m333m99p45s111z"))
+    assert len(hand) == 16
+    waiting = Observation(hand, frozenset({"chow"}), ClaimTile(P("6s"), 0.9, "left"), ())
+    clicks, actuator = recorder()
+    actuator.perform(Action(ActionType.CHOW, tile=P("6s"), tiles=tuple(parse("456s"))), waiting)
+    assert actuator.pending_chow is None
