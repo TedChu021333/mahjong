@@ -14,6 +14,7 @@
     fold:<n>      規則式 AI，有對手宣告聽牌時，自己向聽數 ≥n 就棄胡
     nodeclare     規則式 AI，但聽牌時不宣告（不拿聽牌 1 台，手牌不鎖、還能防守）
     ev[:<w>]      期望值打牌（agent.ev_agent），w 為放槍損失的權重（預設 RISK_WEIGHT）
+    mc[:<n>]      蒙地卡羅打牌（agent.mc_agent），n 為每個候選的模擬次數（預設 ROLLOUTS）
 """
 from __future__ import annotations
 
@@ -42,6 +43,10 @@ def make_policy(spec: str) -> PlayerPolicy:
         return partial(_gold_policy, penalty=float(arg))
     if name == "blind" and not arg:
         return _blind_policy
+    if name == "mc":
+        from agent.mc_agent import ROLLOUTS
+
+        return partial(_mc_policy, rollouts=int(arg) if arg else ROLLOUTS)
     if name == "ev":
         from agent.ev_agent import RISK_WEIGHT
 
@@ -51,6 +56,12 @@ def make_policy(spec: str) -> PlayerPolicy:
     if name == "fold" and arg:
         return partial(_fold_policy, shanten=int(arg))
     raise ValueError(f"未知的策略代號：{spec}")
+
+
+def _mc_policy(state, player, rng, rollouts):
+    from agent.mc_agent import choose_mc_action_for_player
+
+    return choose_mc_action_for_player(state, player, rng, rollouts=rollouts, undeclared_share=0.0)
 
 
 def _ev_policy(state, player, rng, risk_weight):

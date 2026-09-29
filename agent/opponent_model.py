@@ -172,9 +172,10 @@ def _random_partial(rng: Random) -> tuple[int, ...]:
     return (first, first + 1)
 
 
-def sample_waits(pool: Sequence[int], open_melds: int, rng: Random,
-                 forbidden: set[int] = frozenset()) -> list[int] | None:
-    """從 pool 組出一副聽牌的暗手牌，回傳聽的牌；聽到 forbidden 的牌、或組不出來時回傳 None。"""
+def sample_tenpai_hand(pool: Sequence[int], open_melds: int, rng: Random,
+                       forbidden: set[int] = frozenset()) -> tuple[list[int], list[int]] | None:
+    """從 pool 組出一副聽牌的暗手牌，回傳 (手牌計數, 聽的牌)；聽到 forbidden 的牌、或組不出來時
+    回傳 None。不改動 pool。"""
     melds_needed = 4 - open_melds
     for _ in range(SAMPLE_ATTEMPTS):
         left = list(pool)
@@ -194,8 +195,15 @@ def sample_waits(pool: Sequence[int], open_melds: int, rng: Random,
                 counts[tile] += 1
         waits = winning_tiles(counts, open_melds)
         if waits and not forbidden.intersection(waits):
-            return waits
+            return counts, waits
     return None
+
+
+def sample_waits(pool: Sequence[int], open_melds: int, rng: Random,
+                 forbidden: set[int] = frozenset()) -> list[int] | None:
+    """組出一副聽牌手牌，只回傳聽的牌。"""
+    sampled = sample_tenpai_hand(pool, open_melds, rng, forbidden)
+    return None if sampled is None else sampled[1]
 
 
 @dataclass(frozen=True)

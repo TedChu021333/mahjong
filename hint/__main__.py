@@ -116,6 +116,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     missed_for = None
     last_claim = None
     """(最近讀到的放大牌, 時間)。"""
+    decided_for = decided_action = None
     """已經存過「胡按鈕亮著卻沒選胡」截圖的畫面。"""
     for stamp, frame in frames:
         observation = observe_fn(frame, readers)
@@ -174,7 +175,10 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 observation = replace(observation, claimed=True, forbidden=forbidden)
             else:
                 pending_claim = None
-        action = decide(observation)
+        # 同一個畫面只決定一次：蒙地卡羅 AI 每次要約 2 秒且有隨機性，重算會讓建議閃動
+        if observation != decided_for:
+            decided_for, decided_action = observation, decide(observation)
+        action = decided_action
         if action is not None and action.kind in (ActionType.CHOW, ActionType.PUNG):
             pending_claim = (hand_after_claim(observation, action),
                              forbidden_after_claim(action, action.tile))
@@ -215,7 +219,8 @@ def main() -> None:
                         help="自動點擊（只在對手全是電腦的訓練場使用；滑鼠甩到左上角中止）")
     parser.add_argument("--no-overlay", action="store_true", help="不顯示浮動小視窗")
     parser.add_argument("--ai", choices=POLICIES, default="rule",
-                        help="打牌 AI：rule 規則式（預設）、ev 期望值打牌（估計放槍風險）")
+                        help="打牌 AI：rule 規則式（預設）、ev 期望值打牌（估計放槍風險）、"
+                             "mc 蒙地卡羅（模擬比較，每步約 2 秒）")
     parser.add_argument("--demo-overlay", action="store_true",
                         help="只展示小視窗外觀（可拖曳調整位置），不辨識畫面")
     args = parser.parse_args()

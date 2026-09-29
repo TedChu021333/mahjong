@@ -203,12 +203,13 @@ def describe(action: Action) -> str:
     return action.kind.value
 
 
-POLICIES = ("rule", "ev")
+POLICIES = ("rule", "ev", "mc")
 _policy = "rule"
 
 
 def use_policy(name: str) -> None:
-    """選擇打牌 AI：rule（規則式，預設）或 ev（期望值打牌，會估計放槍風險）。"""
+    """選擇打牌 AI：rule（規則式，預設）、ev（期望值打牌，估計放槍風險）、
+    mc（蒙地卡羅，把候選打法模擬到結束比較，每步最多約 2 秒）。"""
     global _policy
     if name not in POLICIES:
         raise ValueError(f"未知的 AI：{name}")
@@ -225,6 +226,11 @@ def decide(observation: Observation, rng: Random | None = None) -> Action | None
     state = build_state(observation)
     if state is None:
         return None
+    if _policy == "mc":
+        from agent.mc_agent import LIVE_ROLLOUTS, TIME_LIMIT, choose_mc_action_for_player
+
+        return choose_mc_action_for_player(state, ME, rng or Random(0), rollouts=LIVE_ROLLOUTS,
+                                           time_limit=TIME_LIMIT)
     if _policy == "ev":
         from agent.ev_agent import choose_ev_action_for_player
 
