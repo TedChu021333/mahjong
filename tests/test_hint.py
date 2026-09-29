@@ -184,3 +184,17 @@ def test_opponent_information_reaches_the_rule_agent():
     assert state.declared == [False, False, True, False]
     assert len(state.players[2].melds) == 2 and state.players[2].discards == parse("9m1z")
     assert advise(observation) in ("打 九萬", "打 東")  # 對家聽牌，棄胡打現物
+
+
+def test_ev_policy_can_be_selected():
+    import pytest
+    from hint.advisor import use_policy
+
+    observation = Observation(T("123456789m12345p9s17z"), None, None, ())
+    try:
+        use_policy("ev")
+        assert advise(observation).startswith("打 ")
+    finally:
+        use_policy("rule")
+    with pytest.raises(ValueError):
+        use_policy("nope")

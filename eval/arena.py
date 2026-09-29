@@ -13,6 +13,7 @@
     blind         規則式 AI，但忽略對手宣告聽牌（看不到「聽」標記時的行為）
     fold:<n>      規則式 AI，有對手宣告聽牌時，自己向聽數 ≥n 就棄胡
     nodeclare     規則式 AI，但聽牌時不宣告（不拿聽牌 1 台，手牌不鎖、還能防守）
+    ev[:<w>]      期望值打牌（agent.ev_agent），w 為放槍損失的權重（預設 RISK_WEIGHT）
 """
 from __future__ import annotations
 
@@ -41,11 +42,23 @@ def make_policy(spec: str) -> PlayerPolicy:
         return partial(_gold_policy, penalty=float(arg))
     if name == "blind" and not arg:
         return _blind_policy
+    if name == "ev":
+        from agent.ev_agent import RISK_WEIGHT
+
+        return partial(_ev_policy, risk_weight=float(arg) if arg else RISK_WEIGHT)
     if name == "nodeclare" and not arg:
         return _no_declare_policy
     if name == "fold" and arg:
         return partial(_fold_policy, shanten=int(arg))
     raise ValueError(f"未知的策略代號：{spec}")
+
+
+def _ev_policy(state, player, rng, risk_weight):
+    from agent.ev_agent import choose_ev_action_for_player
+
+    # 模擬器裡的 AI 聽牌一律宣告，沒宣告的人不會已經聽牌
+    return choose_ev_action_for_player(state, player, rng, risk_weight=risk_weight,
+                                       undeclared_share=0.0)
 
 
 def _no_declare_policy(state, player, rng):

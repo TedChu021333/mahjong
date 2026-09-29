@@ -191,6 +191,18 @@ def describe(action: Action) -> str:
     return action.kind.value
 
 
+POLICIES = ("rule", "ev")
+_policy = "rule"
+
+
+def use_policy(name: str) -> None:
+    """選擇打牌 AI：rule（規則式，預設）或 ev（期望值打牌，會估計放槍風險）。"""
+    global _policy
+    if name not in POLICIES:
+        raise ValueError(f"未知的 AI：{name}")
+    _policy = name
+
+
 def decide(observation: Observation, rng: Random | None = None) -> Action | None:
     if observation.swap_prompt is not None:
         counts = [0] * NUM_TILE_TYPES
@@ -201,6 +213,10 @@ def decide(observation: Observation, rng: Random | None = None) -> Action | None
     state = build_state(observation)
     if state is None:
         return None
+    if _policy == "ev":
+        from agent.ev_agent import choose_ev_action_for_player
+
+        return choose_ev_action_for_player(state, ME, rng or Random(0))
     return choose_rule_action_for_player(state, ME, rng or Random(0))
 
 

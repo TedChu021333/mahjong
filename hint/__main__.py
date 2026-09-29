@@ -5,6 +5,7 @@
     python -m hint --video train/遊戲流程.mp4 --step 1
     python -m hint --no-overlay            # 建議只印在終端機，不顯示浮動小視窗
     python -m hint --auto                  # 自動點擊，只在對手全是電腦的訓練場使用
+    python -m hint --auto --ai ev          # 改用期望值打牌 AI（會估計各張牌的放槍風險）
 
 連續兩幀辨識結果相同才給建議（避開理牌、摸牌等動畫），建議改變時才印出。
 自動模式：同一個畫面只操作一次；點完 RETRY_AFTER 秒畫面沒變（例如出牌要點兩下）
@@ -26,7 +27,7 @@ import numpy as np
 
 from game.rules import ActionType, forbidden_after_claim
 from game.tiles import tile_name
-from hint.advisor import Readers, decide, describe, hand_after_claim, observe
+from hint.advisor import POLICIES, Readers, decide, describe, hand_after_claim, observe, use_policy
 from hint.river_watch import RiverWatch
 from hint.river_watch import summary as river_summary
 from perception.continue_button import ContinueButton
@@ -213,9 +214,12 @@ def main() -> None:
     parser.add_argument("--auto", action="store_true",
                         help="自動點擊（只在對手全是電腦的訓練場使用；滑鼠甩到左上角中止）")
     parser.add_argument("--no-overlay", action="store_true", help="不顯示浮動小視窗")
+    parser.add_argument("--ai", choices=POLICIES, default="rule",
+                        help="打牌 AI：rule 規則式（預設）、ev 期望值打牌（估計放槍風險）")
     parser.add_argument("--demo-overlay", action="store_true",
                         help="只展示小視窗外觀（可拖曳調整位置），不辨識畫面")
     args = parser.parse_args()
+    use_policy(args.ai)
     if args.demo_overlay:
         from hint.overlay import demo
 
