@@ -83,3 +83,27 @@ BUTTON_TEMPLATE_DIR = TRAIN_DIR / "buttons"
 CONTINUE_MIN_SCORE = 0.9
 CONTINUE_SEARCH_MARGIN = 10
 """參考圖在區域外擴這麼多像素的範圍內搜尋，容許畫面些微位移。"""
+
+# 牌河：四家打出的牌在桌面中央，牌面正立、有透視（遠小近大，左右兩家有斜度）。
+# 格位排列（何時換行、換欄）還沒在影片中完整出現，因此不寫死格線，而是在各家區域內
+# 找「牌面上緣」：連續兩列亮白（>RIVER_FACE_MIN），上方一兩列較暗（<RIVER_GAP_MAX，
+# 可能是綠色桌面、牌縫，或上一張疊牌的灰色底邊與牌面之間的暗線）。
+RIVER_REGIONS = {
+    "top": (600, 240, 1320, 370),    # 對家：一排由左往右
+    "left": (440, 370, 760, 630),    # 上家：兩欄由上往下
+    "right": (1100, 370, 1460, 630),  # 下家
+    "me": (520, 630, 1320, 780),     # 自己：一排由左往右
+}
+RIVER_ROW_TOPS = {"top": (284,), "left": (397, 457, 519), "right": (397, 457, 519), "me": (651,)}
+"""已觀察到的各列牌面上緣 y；不在這些列（±RIVER_ROW_TOLERANCE）的偵測多半是動畫或放大顯示。
+影片中牌河最長 9 張，換行後的列還沒出現過，收集到畫面後要補上。"""
+RIVER_ROW_TOLERANCE = 6
+RIVER_FACE_HEIGHT = {"top": 50, "left": 52, "right": 52, "me": 66}
+"""由牌面上緣往下取的高度（斜看的牌面在垂直方向被壓扁）。"""
+RIVER_FACE_PAD = 5
+"""上緣白色區段因圓角比牌面窄，左右各補這麼多像素。"""
+RIVER_FACE_MIN = 235
+RIVER_GAP_MAX = 215
+RIVER_FACE_WIDTH = (40, 90)
+RIVER_TEMPLATE_DIR = TRAIN_DIR / "river_templates"
+"""牌河模板：train/river_templates/<牌代碼>/*.png（`python -m perception.river_reader` 產生）。"""

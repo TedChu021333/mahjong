@@ -138,3 +138,16 @@ def test_game_log_writes_detail_to_file(tmp_path):
     log("[2] 按下一場")
     text = log.path.read_text(encoding="utf-8")
     assert "[1] 打 九條　（手牌 九條）" in text and "[2] 按下一場" in text
+
+
+def test_hint_mode_records_settlement_without_clicking():
+    import hint.__main__ as hint_main
+    from perception.continue_button import ContinueButton
+
+    button = ContinueButton("小結算繼續", (1459, 977))
+    saved = []
+    hint_main.run(((str(i), button) for i in range(10)), readers=None,
+                  observe_fn=lambda frame, readers: None, find_continue=lambda frame: frame,
+                  save_result=lambda frame, prefix="": saved.append(frame) or "x.png",
+                  log=lambda line, detail=None, echo=True: None)
+    assert saved == [button]  # 沒有 actuator 也不會出錯，只存一次

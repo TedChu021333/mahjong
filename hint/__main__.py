@@ -27,7 +27,10 @@ import numpy as np
 from game.rules import ActionType, forbidden_after_claim
 from game.tiles import tile_name
 from hint.advisor import Readers, decide, describe, hand_after_claim, observe
+from hint.river_watch import RiverWatch
+from hint.river_watch import summary as river_summary
 from perception.continue_button import ContinueButton
+from perception.river_reader import RiverReader
 from perception.capture import grab_screen, read_image, write_image
 from perception.config import CONTINUE_BUTTONS, NEXT_GAME_CLICKS, NEXT_GAME_DELAY, NEXT_GAME_REGION
 
@@ -43,8 +46,9 @@ def save_result(frame: np.ndarray, prefix: str = "") -> Path:
     return path
 
 
-def print_log(line: str, detail: str | None = None) -> None:
-    print(line, flush=True)
+def print_log(line: str, detail: str | None = None, echo: bool = True) -> None:
+    if echo:
+        print(line, flush=True)
 
 
 class GameLog:
@@ -53,8 +57,10 @@ class GameLog:
     def __init__(self, directory: Path = RESULT_DIR) -> None:
         self.path = directory / f"log_{time.strftime('%Y%m%d')}.txt"
 
-    def __call__(self, line: str, detail: str | None = None) -> None:
-        print(line, flush=True)
+    def __call__(self, line: str, detail: str | None = None, echo: bool = True) -> None:
+        """echo=False 只寫進記錄檔（例如牌河事件，終端機不必每張都印）。"""
+        if echo:
+            print(line, flush=True)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as file:
             file.write(f"{time.strftime('%H:%M:%S')} {line}")
@@ -94,7 +100,7 @@ def video_frames(path: Path, step: float, start: float) -> Iterator[tuple[str, n
 
 def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         actuator=None, observe_fn=observe, clock=time.monotonic, show=None,
-        find_continue=None, save_result=save_result, log=print_log) -> None:
+        find_continue=None, save_result=save_result, log=print_log, rivers=None) -> None:
     previous = None
     last_advice = None
     acted_for = None
@@ -108,6 +114,11 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     """已經存過「胡按鈕亮著卻沒選胡」截圖的畫面。"""
     for stamp, frame in frames:
         observation = observe_fn(frame, readers)
+        if rivers is not None and observation is not None:
+            for event in rivers.update(frame, observation):
+                name = tile_name(event.tile) if event.tile is not None else "?"
+                log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
+            observation = replace(observation, discards=rivers.discards())
         if observation is None and find_continue is not None:
             observation = find_continue(frame)
         if observation is None and next_game_clicks and clock() - acted_at >= NEXT_GAME_DELAY:
@@ -129,9 +140,17 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             else:
                 retries = 0
                 log(f"[{stamp}] 結算截圖存到 {save_result(frame)}")
+                if rivers is not None:
+                    log(f"[{stamp}] 本局牌河：{river_summary(rivers)}"
+                        f"（累計自動收集 {rivers.saved} 張牌河模板）", echo=False)
+                    rivers.new_hand()
+            acted_for, acted_at = observation, clock()
+            if actuator is None:  # 提示模式：只記錄，由人按繼續
+                retries = MAX_RETRIES
+                continue
+            if retries == 0:
                 log(f"[{stamp}] 按「{observation.name}」")
             actuator.click(observation.center)
-            acted_for, acted_at = observation, clock()
             next_game_clicks = NEXT_GAME_CLICKS
             continue
         if actuator is not None and actuator.follow_up(observation):
@@ -221,28 +240,29 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
         time.sleep(3)
     mode = "自動模式" if auto else "提示模式"
     readers = Readers()
-    find_continue = None
-    if auto:
-        from perception.continue_button import ContinueButtons
+    from perception.continue_button import ContinueButtons
 
-        buttons = ContinueButtons.from_directory()
-        missing = [name for name in CONTINUE_BUTTONS if name not in buttons.references]
-        if missing:
-            print(f"缺少按鈕參考圖，不會自動按：{'、'.join(missing)}", flush=True)
-        find_continue = buttons.find
+    # 提示模式也偵測結算畫面：存結算截圖、重置牌河；只有自動模式會按
+    buttons = ContinueButtons.from_directory()
+    missing = [name for name in CONTINUE_BUTTONS if name not in buttons.references]
+    if missing:
+        print(f"缺少按鈕參考圖，認不出結算畫面：{'、'.join(missing)}", flush=True)
+    find_continue = buttons.find
     log = GameLog()
     print(f"記錄檔：{log.path}", flush=True)
+    rivers = RiverWatch(RiverReader.from_directory())
     if not overlay:
         print(f"{mode}啟動，Ctrl+C 結束", flush=True)
         run(screen_frames(interval), readers, actuator=actuator, find_continue=find_continue,
-            log=log)
+            log=log, rivers=rivers)
         return
     from hint.overlay import Overlay
 
     print(f"{mode}啟動（浮動小視窗），Ctrl+C 結束", flush=True)
     window = Overlay()
     window.run(lambda: run(screen_frames(interval), readers, actuator=actuator,
-                           show=window.show, find_continue=find_continue, log=log))
+                           show=window.show, find_continue=find_continue, log=log,
+                           rivers=rivers))
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ from perception.table_reader import (
 
 ME = 0
 SOURCE_SEAT = {"left": 3, "top": 2, "right": 1}
+RIVER_SEAT = {"me": 0, "right": 1, "top": 2, "left": 3}
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,9 @@ class Observation:
     第 17 張的位置），由提示迴圈比對吃碰前後的手牌補上。"""
     forbidden: tuple[int, ...] = ()
     """剛吃碰後不能打的牌。"""
+    discards: tuple[tuple[int, ...], ...] = field(default=(), compare=False)
+    """各家打過的牌（座位同 SOURCE_SEAT：0 自己、1 下家、2 對家、3 上家），由牌河追蹤補上；
+    不參與比較，牌河變動不會讓同一個畫面重新給建議。"""
 
     @property
     def my_turn(self) -> bool:
@@ -98,9 +102,39 @@ def _consistent_layout(boxes) -> bool:
     return cells[-1] == MAX_HAND_TILES - 1 and cells[0] % 3 == 0
 
 
+def _rivers(observation: Observation, claim_seat: int | None = None,
+            claim_tile: int | None = None) -> list[list[int]]:
+    """各家牌河；待回應的那張一定排在打牌者最後。牌河可能誤讀，任一種牌加上自己手牌
+    超過 4 張時丟掉較早的，避免規則引擎拒絕整個狀態。"""
+    rivers = [list(tiles) for tiles in observation.discards] or [[] for _ in range(4)]
+    rivers += [[] for _ in range(4 - len(rivers))]
+    if claim_seat is not None and (not rivers[claim_seat] or rivers[claim_seat][-1] != claim_tile):
+        rivers[claim_seat].append(claim_tile)
+    seen = [0] * NUM_TILE_TYPES
+    for tile in observation.hand:
+        seen[tile] += 1
+    if claim_seat is not None:
+        seen[claim_tile] += 1  # 待回應的那張優先保留
+    capped = [[] for _ in range(4)]
+    for seat, tiles in enumerate(rivers):
+        last = len(tiles) - 1
+        for index, tile in enumerate(tiles):
+            if seat == claim_seat and index == last:
+                capped[seat].append(tile)
+            elif seen[tile] < 4:
+                seen[tile] += 1
+                capped[seat].append(tile)
+    return capped
+
+
 def build_state(observation: Observation) -> GameState | None:
-    players = [ObservedPlayer() for _ in range(4)]
-    players[ME] = ObservedPlayer(hand=observation.hand, unknown_melds=observation.meld_count)
+    claim = observation.claim
+    responding = not observation.my_turn and observation.buttons is not None         and claim is not None and claim.tile is not None
+    source = SOURCE_SEAT[claim.source] if responding else None
+    rivers = _rivers(observation, source, claim.tile if responding else None)
+    players = [ObservedPlayer(discards=tuple(rivers[seat])) for seat in range(4)]
+    players[ME] = ObservedPlayer(hand=observation.hand, unknown_melds=observation.meld_count,
+                                 discards=tuple(rivers[ME]))
     common = dict(gold_tiles=observation.gold_tiles)
     if observation.my_turn:
         if observation.claimed:
@@ -111,11 +145,8 @@ def build_state(observation: Observation) -> GameState | None:
             table = ObservedTable(players=tuple(players), current_player=ME, phase=Phase.DISCARD,
                                   last_drawn=observation.hand[-1], **common)
         return parse_observed_table(table)
-    claim = observation.claim
-    if observation.buttons is None or claim is None or claim.tile is None:
+    if not responding:
         return None
-    source = SOURCE_SEAT[claim.source]
-    players[source] = ObservedPlayer(discards=(claim.tile,))
     table = ObservedTable(players=tuple(players), current_player=source, phase=Phase.RESPONSE,
                           last_discard=claim.tile, discard_player=source,
                           response_players=(ME,), **common)
