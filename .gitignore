@@ -3,3 +3,4 @@ train/*
 __pycache__/
 *.py[cod]
 .pytest_cache/
+hint/overlay_position.txt

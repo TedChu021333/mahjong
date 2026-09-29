@@ -73,3 +73,13 @@ def test_swap_screen_is_recognised_with_selected_tiles():
     assert advise(selecting).startswith("換三張：換 西、白")
     waiting = observe(read_image(TRAIN_DIR / "經典_碰.png"), readers)
     assert waiting.swap_prompt is None
+
+
+def test_overlay_colors_and_position_file(tmp_path):
+    from hint.overlay import DEFAULT_POSITION, color_for, load_position, save_position
+    assert color_for("胡！") != color_for("打 九筒") != color_for("碰 二萬")
+    assert color_for("打 四筒，並按「聽」") == color_for("聽")
+    path = tmp_path / "pos.txt"
+    assert load_position(path) == DEFAULT_POSITION
+    save_position(12, 34, path)
+    assert load_position(path) == (12, 34)

@@ -7,6 +7,7 @@ import pytest
 from game.tiles import parse
 from perception.capture import read_image
 from perception.config import (
+    TEMPLATE_DIR,
     HAND_TILE_BOTTOM,
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
@@ -162,6 +163,7 @@ SCREENSHOT_LABELS = {
     "經典_b43": "3344899m57889p2458s",
     "經典_b72": "3344899m557889p458s2p",
     "經典_b99": "3344899m557889p458s4m",
+    "經典_c67": "22344688m22345567p",
 }
 
 
@@ -196,3 +198,23 @@ def test_real_screenshots_leave_one_out():
                 assert predicted == tile, name
             else:
                 assert predicted is None, name
+
+
+@pytest.mark.skipif(
+    not (TRAIN_DIR / "經典_c69_變暗.png").exists() or not TEMPLATE_DIR.exists(),
+    reason="缺少訓練截圖或模板",
+)
+def test_dimmed_hand_while_claim_buttons_are_shown():
+    """按鈕出現時不能吃碰的牌會變暗；排除同一時刻的模板後仍要全部認得。"""
+    templates = [
+        (parse(path.parent.name)[0], read_image(path))
+        for path in TEMPLATE_DIR.glob("*/*.png")
+        if not path.name.startswith(("經典_c6", "經典_c7"))
+    ]
+    classifier = TileClassifier(templates)
+    reading = read_hand(read_image(TRAIN_DIR / "經典_c69_變暗.png"), classifier)
+    expected = parse("22344688m22345567p")
+    assert len(reading.tiles) == len(expected)
+    for predicted, tile in zip(reading.tiles, expected):
+        # 只在這一刻出現過的牌種（6萬）沒有其他模板，應回報無法辨識而不是猜錯
+        assert predicted == (tile if tile in classifier.known_tiles else None)

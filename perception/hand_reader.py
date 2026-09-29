@@ -192,7 +192,7 @@ class TileClassifier:
         上下半張分開比對取較低者：萬子下半部的「萬」字都相同，整張比對
         會被它拉高，分開後由上半的數字決定分數。每半只在原位置上下左右
         TEMPLATE_MARGIN 內搜尋；分數等同 TM_CCOEFF_NORMED，但一次對所有模板
-        以矩陣乘法計算（逐一呼叫 matchTemplate 一幀要 3 秒以上）。
+        以矩陣運算計算（逐一呼叫 matchTemplate 一幀要 3 秒以上）。
         """
         target = _normalize(tile_image)
         m = TEMPLATE_MARGIN
@@ -204,7 +204,9 @@ class TileClassifier:
             width = region.shape[1] - 2 * m
             windows = np.lib.stride_tricks.sliding_window_view(region, (height, width, 3))
             windows = _unit_rows(windows.reshape(-1, height, width, 3))
-            best = (windows @ templates.T).max(axis=0)
+            # einsum 不經過 OpenBLAS；多執行緒 BLAS 處理這種小矩陣在 Windows 上慢約 60 倍，
+            # 而環境變數只有在 numpy 載入前設定才有效，改用 einsum 就不受載入順序影響
+            best = np.einsum("ij,kj->ik", windows, templates, optimize=False).max(axis=0)
             per_template = best if per_template is None else np.minimum(per_template, best)
         result: dict[int, float] = {}
         for tile, score in zip(self._tiles.tolist(), per_template.tolist()):

@@ -66,8 +66,9 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             continue
         action = decide(observation)
         advice = describe(action) if action is not None else None
-        if advice is not None and advice != last_advice:
-            print(f"[{stamp}] {advice}", flush=True)
+        if advice != last_advice:
+            if advice is not None:
+                print(f"[{stamp}] {advice}", flush=True)
             if show is not None:
                 show(advice)
         last_advice = advice
@@ -94,7 +95,14 @@ def main() -> None:
     parser.add_argument("--interval", type=float, default=0.3, help="即時模式擷取間隔（秒）")
     parser.add_argument("--auto", action="store_true", help="自動點擊（目前停用，見說明）")
     parser.add_argument("--no-overlay", action="store_true", help="不顯示浮動小視窗")
+    parser.add_argument("--demo-overlay", action="store_true",
+                        help="只展示小視窗外觀（可拖曳調整位置），不辨識畫面")
     args = parser.parse_args()
+    if args.demo_overlay:
+        from hint.overlay import demo
+
+        demo()
+        return
     readers = Readers()
     if args.image:
         observation = observe(read_image(args.image), readers)
