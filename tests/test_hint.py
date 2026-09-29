@@ -198,3 +198,14 @@ def test_ev_policy_can_be_selected():
         use_policy("rule")
     with pytest.raises(ValueError):
         use_policy("nope")
+
+
+def test_wall_is_estimated_from_discards_and_claims():
+    from hint.advisor import build_state, estimate_wall
+
+    fresh = Observation(T("123456789m12345p9s17z"), None, None, ())
+    assert estimate_wall(fresh) == 60 and build_state(fresh).drawable == 60
+    later = Observation(T("123456789m12345p9s17z"), None, None, (),
+                        discards=(tuple(range(8)), tuple(range(9)), tuple(range(9)), tuple(range(9))),
+                        melds=(0, 1, 0, 1))
+    assert estimate_wall(later) == 60 - 35 + 2

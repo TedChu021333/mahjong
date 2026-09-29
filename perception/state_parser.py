@@ -41,6 +41,8 @@ class ObservedTable:
     forbidden_discards: tuple[int, ...] = ()
     declared: tuple[bool, bool, bool, bool] = (False, False, False, False)
     """各家是否已宣告聽牌。"""
+    wall_remaining: int = 0
+    """估計的牌牆可摸張數（畫面上看不到，只影響 state.drawable；牌牆內容以 0 佔位）。"""
 
 
 def _validate_tile(tile: int, allow_flower: bool = False) -> None:
@@ -101,7 +103,7 @@ def parse_observed_table(observed: ObservedTable) -> GameState:
         ))
 
     return GameState(
-        wall=[],
+        wall=[0] * max(0, observed.wall_remaining),
         players=players,
         current_player=observed.current_player,
         phase=observed.phase,

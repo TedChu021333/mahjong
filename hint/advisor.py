@@ -138,6 +138,17 @@ def _rivers(observation: Observation, claim_seat: int | None = None,
     return capped
 
 
+START_DRAWABLE = 60
+"""開局可摸張數的估計：模擬器補完花後平均 59，莊家第一張不必摸再加 1。"""
+
+
+def estimate_wall(observation: Observation) -> int:
+    """剩餘可摸張數 ≈ 60 − 總出牌數 + 吃碰次數（吃碰的人不摸牌）；補花讀不到，未扣。"""
+    discards = sum(len(tiles) for tiles in observation.discards)
+    claims = sum(observation.melds) + observation.meld_count
+    return max(0, START_DRAWABLE - discards + claims)
+
+
 def build_state(observation: Observation) -> GameState | None:
     claim = observation.claim
     responding = not observation.my_turn and observation.buttons is not None         and claim is not None and claim.tile is not None
@@ -151,7 +162,8 @@ def build_state(observation: Observation) -> GameState | None:
     declared = [False] * 4
     for seat in observation.declared:
         declared[SOURCE_SEAT[seat]] = True
-    common = dict(gold_tiles=observation.gold_tiles, declared=tuple(declared))
+    common = dict(gold_tiles=observation.gold_tiles, declared=tuple(declared),
+                  wall_remaining=estimate_wall(observation))
     if observation.my_turn:
         if observation.claimed:
             table = ObservedTable(players=tuple(players), current_player=ME, phase=Phase.DISCARD,
