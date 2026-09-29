@@ -287,3 +287,26 @@ def test_declared_opponent_is_the_biggest_threat_and_triggers_folding():
     assert safe_tiles(state, 0) == set(parse("9m1z"))
     action = choose_rule_action_for_player(state, 0, Random(0))
     assert action.tile in parse("9m1z")  # 棄胡：打對聽牌者安全的牌
+
+
+def test_swap_never_gives_away_gold_tiles():
+    from agent.rule_agent import choose_swap_tiles
+
+    # 21:12 那局的起手：金牌是一條、南、西，原本會換掉南、西
+    hand = C("22238m23458p35689s23z")
+    assert set(choose_swap_tiles(hand)) >= set(parse("23z"))
+    swapped = choose_swap_tiles(hand, gold_tiles=parse("1s23z"))
+    assert not set(swapped) & set(parse("1s23z"))
+    assert len(swapped) == 3
+
+
+def test_tenpai_prefers_the_wait_with_more_live_tiles():
+    # 五組面子加東、九條：打哪張都是單騎聽另一張。別家打過三張九條 → 聽九條已經沒牌，改聽東
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = C("123456789m123456p1z9s")
+    assert sum(players[0].hand) == 17
+    players[1].discards = parse("9s9s9s")
+    state = GameState([0], players, phase=Phase.DISCARD)
+    assert choose_rule_action_for_player(state, 0, Random(0)).tile == P("9s")
+    players[1].discards = parse("1z1z1z")
+    assert choose_rule_action_for_player(state, 0, Random(0)).tile == P("1z")

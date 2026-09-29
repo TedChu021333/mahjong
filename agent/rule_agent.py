@@ -83,20 +83,22 @@ SWAP_MIN_GAIN = 0.02
 """期望向聽數至少要降低這麼多才值得換。"""
 
 
-def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP) -> tuple[int, ...]:
+def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP,
+                      gold_tiles: Sequence[int] = ()) -> tuple[int, ...]:
     """換三張：換掉「換一張隨機新牌後，期望向聽數比現在低」的牌，最多 limit 張。
 
     新牌的機率依自己看不到的張數（4 - 手上張數）估計。各張分開評估，
     取期望向聽數最低的幾張；沒有值得換的就不換。對子多時向聽數由嚦咕嚦咕
     決定，所有單張的期望值都一樣，此時再以一般牌型的期望向聽數區分
-    （例如孤張字牌比能搭子的數牌更該換）。
+    （例如孤張字牌比能搭子的數牌更該換）。金牌留著胡牌時每張 +1 台，不換。
     """
+    gold = set(gold_tiles)
     hand = list(hand)
     current = shanten(hand, 0)
     unseen = [4 - count for count in hand]
     candidates = []
     for tile, count in enumerate(hand):
-        if not count:
+        if not count or tile in gold:
             continue
         hand[tile] -= 1
         total = weighted = weighted_standard = 0
@@ -296,7 +298,8 @@ def choose_rule_action_for_player(
     if win is not None:
         return win
     if state.phase == Phase.SWAP:
-        return Action(ActionType.SWAP, tiles=choose_swap_tiles(state.players[player].hand))
+        return Action(ActionType.SWAP, tiles=choose_swap_tiles(state.players[player].hand,
+                                                               gold_tiles=state.gold_tiles))
     if state.phase == Phase.RESPONSE:
         current = state.players[player]
         baseline = hand_value(current.hand, current.open_melds)

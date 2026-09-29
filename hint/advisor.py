@@ -196,7 +196,8 @@ def decide(observation: Observation, rng: Random | None = None) -> Action | None
         counts = [0] * NUM_TILE_TYPES
         for tile in observation.hand:
             counts[tile] += 1
-        return Action(ActionType.SWAP, tiles=choose_swap_tiles(counts))
+        return Action(ActionType.SWAP, tiles=choose_swap_tiles(counts,
+                                                               gold_tiles=observation.gold_tiles))
     state = build_state(observation)
     if state is None:
         return None
