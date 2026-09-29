@@ -25,6 +25,7 @@ import cv2
 import numpy as np
 
 from game.rules import ActionType, forbidden_after_claim
+from game.tiles import tile_name
 from hint.advisor import Readers, decide, describe, hand_after_claim, observe
 from perception.continue_button import ContinueButton
 from perception.capture import grab_screen, read_image, write_image
@@ -36,10 +37,37 @@ RESULT_DIR = Path("result")
 """每局結算畫面的截圖。"""
 
 
-def save_result(frame: np.ndarray) -> Path:
-    path = RESULT_DIR / f"{time.strftime('%Y%m%d_%H%M%S')}.png"
+def save_result(frame: np.ndarray, prefix: str = "") -> Path:
+    path = RESULT_DIR / f"{prefix}{time.strftime('%Y%m%d_%H%M%S')}.png"
     write_image(path, frame)
     return path
+
+
+def print_log(line: str, detail: str | None = None) -> None:
+    print(line, flush=True)
+
+
+class GameLog:
+    """即時模式的記錄：終端機只印建議，記錄檔另外附上當時的手牌與金牌，方便事後對照結算截圖。"""
+
+    def __init__(self, directory: Path = RESULT_DIR) -> None:
+        self.path = directory / f"log_{time.strftime('%Y%m%d')}.txt"
+
+    def __call__(self, line: str, detail: str | None = None) -> None:
+        print(line, flush=True)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a", encoding="utf-8") as file:
+            file.write(f"{time.strftime('%H:%M:%S')} {line}")
+            file.write(f"　（{detail}）\n" if detail else "\n")
+
+
+def hand_text(observation) -> str:
+    text = "手牌 " + "".join(tile_name(tile) for tile in observation.hand)
+    if observation.gold_tiles:
+        text += "，金牌 " + "".join(tile_name(tile) for tile in observation.gold_tiles)
+    if observation.buttons:
+        text += "，按鈕 " + "、".join(sorted(observation.buttons))
+    return text
 
 
 def screen_frames(interval: float) -> Iterator[tuple[str, np.ndarray]]:
@@ -66,7 +94,7 @@ def video_frames(path: Path, step: float, start: float) -> Iterator[tuple[str, n
 
 def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         actuator=None, observe_fn=observe, clock=time.monotonic, show=None,
-        find_continue=None, save_result=save_result) -> None:
+        find_continue=None, save_result=save_result, log=print_log) -> None:
     previous = None
     last_advice = None
     acted_for = None
@@ -76,13 +104,15 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     """按下小結算「繼續」後還要點幾次下一場按鈕。"""
     pending_claim = None
     """最近一次建議的吃碰：(吃碰後應有的手牌, 不能打的牌)。"""
+    missed_for = None
+    """已經存過「胡按鈕亮著卻沒選胡」截圖的畫面。"""
     for stamp, frame in frames:
         observation = observe_fn(frame, readers)
         if observation is None and find_continue is not None:
             observation = find_continue(frame)
         if observation is None and next_game_clicks and clock() - acted_at >= NEXT_GAME_DELAY:
             left, top, right, bottom = NEXT_GAME_REGION
-            print(f"[{stamp}] 按下一場", flush=True)
+            log(f"[{stamp}] 按下一場")
             actuator.click(((left + right) // 2, (top + bottom) // 2))
             next_game_clicks -= 1
             acted_at = clock()
@@ -98,14 +128,14 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 retries += 1
             else:
                 retries = 0
-                print(f"[{stamp}] 結算截圖存到 {save_result(frame)}", flush=True)
-                print(f"[{stamp}] 按「{observation.name}」", flush=True)
+                log(f"[{stamp}] 結算截圖存到 {save_result(frame)}")
+                log(f"[{stamp}] 按「{observation.name}」")
             actuator.click(observation.center)
             acted_for, acted_at = observation, clock()
             next_game_clicks = NEXT_GAME_CLICKS
             continue
         if actuator is not None and actuator.follow_up(observation):
-            print(f"[{stamp}] 選擇吃法", flush=True)
+            log(f"[{stamp}] 選擇吃法")
             acted_for, acted_at, retries = observation, clock(), 0
             continue
         if observation.my_turn and pending_claim is not None:
@@ -119,9 +149,14 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             pending_claim = (hand_after_claim(observation, action),
                              forbidden_after_claim(action, action.tile))
         advice = describe(action) if action is not None else None
+        buttons = observation.buttons or frozenset()
+        if "win" in buttons and (action is None or action.kind != ActionType.WIN)                 and observation != missed_for:
+            missed_for = observation
+            log(f"[{stamp}] 「胡」按鈕亮著但 AI 沒選胡，截圖存到 {save_result(frame, '未胡_')}",
+                hand_text(observation))
         if advice != last_advice:
             if advice is not None:
-                print(f"[{stamp}] {advice}", flush=True)
+                log(f"[{stamp}] {advice}", hand_text(observation))
             if show is not None:
                 show(advice)
         last_advice = advice
@@ -134,7 +169,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         else:
             retries = 0
         if not actuator.perform(action, observation):
-            print(f"[{stamp}] 畫面上找不到對應的按鈕或牌，略過", flush=True)
+            log(f"[{stamp}] 畫面上找不到對應的按鈕或牌，略過", hand_text(observation))
         acted_for = observation
         acted_at = clock()
 
@@ -195,16 +230,19 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
         if missing:
             print(f"缺少按鈕參考圖，不會自動按：{'、'.join(missing)}", flush=True)
         find_continue = buttons.find
+    log = GameLog()
+    print(f"記錄檔：{log.path}", flush=True)
     if not overlay:
         print(f"{mode}啟動，Ctrl+C 結束", flush=True)
-        run(screen_frames(interval), readers, actuator=actuator, find_continue=find_continue)
+        run(screen_frames(interval), readers, actuator=actuator, find_continue=find_continue,
+            log=log)
         return
     from hint.overlay import Overlay
 
     print(f"{mode}啟動（浮動小視窗），Ctrl+C 結束", flush=True)
     window = Overlay()
     window.run(lambda: run(screen_frames(interval), readers, actuator=actuator,
-                           show=window.show, find_continue=find_continue))
+                           show=window.show, find_continue=find_continue, log=log))
 
 
 if __name__ == "__main__":

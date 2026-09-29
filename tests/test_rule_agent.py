@@ -241,3 +241,34 @@ def test_rule_agent_plays_full_games_with_swap():
     for seed in range(3):
         result = play_game(Random(seed), player_policy=choose_rule_action_for_player, swap=True)
         assert result.state.phase.value == "ended"
+
+
+def test_gold_tile_is_kept_when_another_discard_is_as_good():
+    # 7s、東、南都是孤張，平常先打字牌；南是金牌時打東，東是金牌時打南
+    hand = C("123456789m123p45p7s1z2z")
+    assert sum(hand) == 17
+    east, south = P("1z"), P("2z")
+    assert choose_discard(hand, rng=Random(0), gold_tiles=(south,)) == east
+    assert choose_discard(hand, rng=Random(0), gold_tiles=(east,)) == south
+
+
+def test_gold_tile_is_kept_as_a_single_wait_instead_of_another_single():
+    # 聽 1s 單騎摸進金牌 9s：打 1s 改聽金牌，同樣是聽牌但胡了多台
+    hand = C("123456789m123456p1s9s")
+    assert choose_discard(hand, rng=Random(0), gold_tiles=(P("9s"),)) == P("1s")
+
+
+def test_gold_tile_is_discarded_if_keeping_it_costs_shanten():
+    # 聽 3p、6p 兩面時摸進金牌 9s：打掉 9s 才能維持聽牌，向聽數優先
+    hand = C("123456789m12345p11s9s")
+    assert sum(hand) == 17
+    tile = choose_discard(hand, rng=Random(0), gold_tiles=(P("9s"),))
+    assert tile == P("9s")
+
+
+def test_rule_agent_uses_the_tables_gold_tiles():
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = C("123456789m123p45p7s1z2z")
+    state = GameState([0], players, phase=Phase.DISCARD, gold_tiles=[P("2z")])
+    action = choose_rule_action_for_player(state, 0, Random(0))
+    assert action.tile == P("1z")

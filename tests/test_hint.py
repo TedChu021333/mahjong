@@ -113,3 +113,28 @@ def test_claimed_observation_never_suggests_a_forbidden_tile():
     forbidden = (parse("5s")[0], parse("8s")[0])
     claimed = Observation(hand, None, None, (), claimed=True, forbidden=forbidden)
     assert advise(claimed) == "打 九條"
+
+
+def test_loop_saves_a_screenshot_when_win_is_lit_but_not_chosen(monkeypatch):
+    import hint.__main__ as hint_main
+
+    waiting = Observation(T("11223789m99m4p56779s"), frozenset({"pung", "win"}),
+                          ClaimTile(parse("2m")[0], 0.9, "left"), ())
+    monkeypatch.setattr(hint_main, "decide", lambda observation: None)  # 模擬 AI 沒選胡
+    saved, lines = [], []
+    hint_main.run(((str(i), "frame") for i in range(4)), readers=None,
+                  observe_fn=lambda frame, readers: waiting,
+                  save_result=lambda frame, prefix="": saved.append(prefix) or "x.png",
+                  log=lambda line, detail=None: lines.append((line, detail)))
+    assert saved == ["未胡_"]  # 同一個畫面只存一次
+    assert "手牌 一萬一萬二萬" in lines[0][1] and "win" in lines[0][1]
+
+
+def test_game_log_writes_detail_to_file(tmp_path):
+    from hint.__main__ import GameLog
+
+    log = GameLog(tmp_path)
+    log("[1] 打 九條", "手牌 九條")
+    log("[2] 按下一場")
+    text = log.path.read_text(encoding="utf-8")
+    assert "[1] 打 九條　（手牌 九條）" in text and "[2] 按下一場" in text

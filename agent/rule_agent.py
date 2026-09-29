@@ -24,8 +24,17 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
                    safe_tiles: Sequence[int] = (),
                    suji_tiles: Sequence[int] = (),
                    defensive: bool = False,
-                   forbidden: Sequence[int] = ()) -> int:
-    """選一張牌打出：最低向聽優先，再取有效進張最多；forbidden 是吃碰後不能打的牌。"""
+                   forbidden: Sequence[int] = (),
+                   gold_tiles: Sequence[int] = (),
+                   gold_penalty: float | None = None) -> int:
+    """選一張牌打出：最低向聽優先，再取有效進張最多；forbidden 是吃碰後不能打的牌。
+
+    金牌留在手上胡牌時每張 +1 台，打出去被胡則對方多 3 台，所以打金牌的代價
+    視同少了 gold_penalty 張有效進張；防守時同樣危險程度下也先打非金牌。
+    """
+    if gold_penalty is None:
+        gold_penalty = GOLD_DISCARD_PENALTY
+    gold = set(gold_tiles)
     if sum(hand) not in (17 - 3 * n_open_melds, 16 - 3 * n_open_melds):
         raise ValueError("選擇打牌時手牌張數不正確")
     if visible_counts is not None and (
@@ -56,14 +65,19 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
         else:
             outs = sum(max(0, 4 - visible_counts[tile]) for tile in effective)
         risk = 0 if tile in safe_set else 1 if tile in suji_set else 2
+        is_gold = tile in gold
+        value = outs - (gold_penalty if is_gold else 0)
         if defensive:
-            best.append((risk, -outs, next_shanten, tile))
+            best.append(((risk, is_gold), -value, next_shanten, tile))
         else:
-            best.append((-outs, risk, next_shanten, tile))
+            best.append((-value, risk, next_shanten, tile))
     best_score = min(score[:3] for score in best)
     best_tiles = [tile for *score, tile in best if tuple(score) == best_score]
     return (rng or Random()).choice(best_tiles)
 
+
+GOLD_DISCARD_PENALTY = 8
+"""打出一張金牌的代價，以有效進張張數計（由模擬器比較決定，見 CLAUDE.md）。"""
 
 SWAP_MIN_GAIN = 0.02
 """期望向聽數至少要降低這麼多才值得換。"""
@@ -255,9 +269,10 @@ def should_fold(state: GameState, player: int) -> bool:
 
 
 def choose_rule_action_for_player(
-    state: GameState, player: int, rng: Random | None = None
+    state: GameState, player: int, rng: Random | None = None,
+    gold_penalty: float | None = None,
 ) -> Action | None:
-    """只替指定玩家做決策，不讀取對手隱藏手牌。"""
+    """只替指定玩家做決策，不讀取對手隱藏手牌；gold_penalty 見 choose_discard。"""
     if not 0 <= player < 4:
         raise ValueError("player 必須在 0-3 之間")
     actions = legal_actions(state, player)
@@ -293,7 +308,8 @@ def choose_rule_action_for_player(
                               state.players[player].open_melds, rng,
                               visible_tile_counts(state, player), safe_tiles(state, player),
                               suji_tiles(state, player), defensive=defensive,
-                              forbidden=state.forbidden_discards if state.claimed else ())
+                              forbidden=state.forbidden_discards if state.claimed else (),
+                              gold_tiles=state.gold_tiles, gold_penalty=gold_penalty)
         declare = Action(ActionType.DECLARE, tile=tile)
         if not defensive and declare in actions:
             return declare  # 聽牌 +1 台；暫時一律宣告，取捨留給之後的策略
