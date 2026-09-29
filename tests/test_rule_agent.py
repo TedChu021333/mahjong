@@ -11,12 +11,25 @@ from agent.rule_agent import (
     should_fold,
     visible_tile_counts,
 )
-from game.rules import ActionType, GameState, Phase, PlayerState, apply_action
+from game.rules import (
+    Action,
+    ActionType,
+    GameState,
+    Phase,
+    PlayerState,
+    apply_action,
+    forbidden_after_claim,
+    legal_actions,
+)
 from game.tiles import parse, to_counts
 
 
 def C(value: str) -> list[int]:
     return to_counts(parse(value))
+
+
+def P(value: str) -> int:
+    return parse(value)[0]
 
 
 def test_choose_discard_keeps_single_wait():
@@ -53,18 +66,59 @@ def test_player_policy_returns_only_that_players_action():
     assert action.kind in {ActionType.DISCARD, ActionType.DECLARE}
 
 
-def test_rule_agent_accepts_a_pung_without_worsening_shanten():
+def response_state(hand: str, discard: str, source: int = 0) -> GameState:
+    """玩家 1 對 source 打出的牌做回應；source=0 是玩家 1 的上家，可以吃。"""
     players = [PlayerState() for _ in range(4)]
-    players[1].hand = C("111234567m1234567p")
-    players[0].discards = parse("1m")
-    state = GameState([], players, current_player=0, phase=Phase.RESPONSE,
-                      last_discard=parse("1m")[0], discard_player=0,
-                      response_player=1, response_players=[1])
-    player, action = choose_rule_action(state, Random(1))
-    assert player == 1
+    players[1].hand = C(hand)
+    players[source].discards = parse(discard)
+    return GameState([], players, current_player=source, phase=Phase.RESPONSE,
+                     last_discard=parse(discard)[0], discard_player=source,
+                     response_player=1, response_players=[1])
+
+
+def test_rule_agent_skips_a_pung_that_does_not_help():
+    # 已經有 111m，碰 1m 向聽與進張都沒有變好
+    state = response_state("111234567m1234567p", "1m")
+    assert choose_rule_action_for_player(state, 1).kind == ActionType.PASS
+
+
+def test_rule_agent_pungs_when_it_widens_the_hand():
+    # 經典_碰.png：碰二萬向聽不變，但有效進張由 7 張增加為 15 張
+    state = response_state("11223789m99m4p56779s", "2m")
+    _, action = choose_rule_action(state, Random(1))
     assert action.kind == ActionType.PUNG
-    apply_action(state, action, player)
+    apply_action(state, action, 1)
     assert state.players[1].melds[0].kind == "pung"
+
+
+def test_rule_agent_does_not_break_a_run_to_chow():
+    # 手上 456789s 已成兩組順子，吃 5s 只是拆面子
+    state = response_state("123m456789s1155p79p1z", "5s")
+    assert any(action.kind == ActionType.CHOW for action in legal_actions(state, 1))
+    assert choose_rule_action_for_player(state, 1).kind == ActionType.PASS
+
+
+def test_forbidden_discards_after_claims():
+    chow = lambda tiles: Action(ActionType.CHOW, tiles=tuple(parse(tiles)))
+    assert forbidden_after_claim(chow("567s"), P("5s")) == (P("5s"), P("8s"))
+    assert forbidden_after_claim(chow("345s"), P("5s")) == (P("5s"), P("2s"))
+    assert forbidden_after_claim(chow("456s"), P("5s")) == (P("5s"),)
+    assert forbidden_after_claim(chow("789s"), P("7s")) == (P("7s"),)   # 沒有 10
+    assert forbidden_after_claim(chow("123s"), P("3s")) == (P("3s"),)   # 沒有 0
+    assert forbidden_after_claim(Action(ActionType.PUNG, tiles=(1, 1, 1)), 1) == (1,)
+
+
+def test_after_chow_the_engine_and_agent_avoid_forbidden_tiles():
+    # 用 67s 吃 5s 後不能打 5s、8s，即使它們是最該打的孤張
+    state = response_state("111m222m333m444p67s5s8s", "5s")
+    chow = Action(ActionType.CHOW, tile=P("5s"), tiles=tuple(parse("567s")), from_player=0)
+    apply_action(state, chow, 1)
+    discards = {action.tile for action in legal_actions(state, 1)}
+    assert P("5s") not in discards and P("8s") not in discards
+    action = choose_rule_action_for_player(state, 1, Random(1))
+    assert action.tile not in (P("5s"), P("8s"))
+    apply_action(state, action, 1)
+    assert state.forbidden_discards == ()
 
 
 def test_visible_tiles_are_used_to_weight_effective_draws():

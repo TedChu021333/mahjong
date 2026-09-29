@@ -4,26 +4,42 @@
     python -m hint --image train/吃牌畫面.png
     python -m hint --video train/遊戲流程.mp4 --step 1
     python -m hint --no-overlay            # 建議只印在終端機，不顯示浮動小視窗
+    python -m hint --auto                  # 自動點擊，只在對手全是電腦的訓練場使用
 
 連續兩幀辨識結果相同才給建議（避開理牌、摸牌等動畫），建議改變時才印出。
 自動模式：同一個畫面只操作一次；點完 RETRY_AFTER 秒畫面沒變（例如出牌要點兩下）
-才補點，最多 MAX_RETRIES 次。滑鼠甩到螢幕左上角會立刻中止。
+才補點，最多 MAX_RETRIES 次。讀不到手牌時檢查打完後的「繼續」類按鈕，
+同樣連續兩幀一致才點；按下小結算「繼續」後等 NEXT_GAME_DELAY 秒再點下一場按鈕
+（只在讀不到手牌時點，避免點到手牌）。每局結算畫面在按「繼續」前存到 result/。
+滑鼠甩到螢幕左上角會立刻中止。
 """
 from __future__ import annotations
 
 import argparse
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Iterator
 
 import cv2
 import numpy as np
 
-from hint.advisor import Readers, decide, describe, observe
-from perception.capture import grab_screen, read_image
+from game.rules import ActionType, forbidden_after_claim
+from hint.advisor import Readers, decide, describe, hand_after_claim, observe
+from perception.continue_button import ContinueButton
+from perception.capture import grab_screen, read_image, write_image
+from perception.config import CONTINUE_BUTTONS, NEXT_GAME_CLICKS, NEXT_GAME_DELAY, NEXT_GAME_REGION
 
 RETRY_AFTER = 1.5
 MAX_RETRIES = 2
+RESULT_DIR = Path("result")
+"""每局結算畫面的截圖。"""
+
+
+def save_result(frame: np.ndarray) -> Path:
+    path = RESULT_DIR / f"{time.strftime('%Y%m%d_%H%M%S')}.png"
+    write_image(path, frame)
+    return path
 
 
 def screen_frames(interval: float) -> Iterator[tuple[str, np.ndarray]]:
@@ -49,22 +65,59 @@ def video_frames(path: Path, step: float, start: float) -> Iterator[tuple[str, n
 
 
 def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
-        actuator=None, observe_fn=observe, clock=time.monotonic, show=None) -> None:
+        actuator=None, observe_fn=observe, clock=time.monotonic, show=None,
+        find_continue=None, save_result=save_result) -> None:
     previous = None
     last_advice = None
     acted_for = None
     acted_at = 0.0
     retries = 0
+    next_game_clicks = 0
+    """按下小結算「繼續」後還要點幾次下一場按鈕。"""
+    pending_claim = None
+    """最近一次建議的吃碰：(吃碰後應有的手牌, 不能打的牌)。"""
     for stamp, frame in frames:
         observation = observe_fn(frame, readers)
+        if observation is None and find_continue is not None:
+            observation = find_continue(frame)
+        if observation is None and next_game_clicks and clock() - acted_at >= NEXT_GAME_DELAY:
+            left, top, right, bottom = NEXT_GAME_REGION
+            print(f"[{stamp}] 按下一場", flush=True)
+            actuator.click(((left + right) // 2, (top + bottom) // 2))
+            next_game_clicks -= 1
+            acted_at = clock()
+        if observation is not None and not isinstance(observation, ContinueButton):
+            next_game_clicks = 0  # 新的一局已經開始
         if observation is None or observation != previous:
             previous = observation
+            continue
+        if isinstance(observation, ContinueButton):
+            if observation == acted_for:
+                if clock() - acted_at < RETRY_AFTER or retries >= MAX_RETRIES:
+                    continue
+                retries += 1
+            else:
+                retries = 0
+                print(f"[{stamp}] 結算截圖存到 {save_result(frame)}", flush=True)
+                print(f"[{stamp}] 按「{observation.name}」", flush=True)
+            actuator.click(observation.center)
+            acted_for, acted_at = observation, clock()
+            next_game_clicks = NEXT_GAME_CLICKS
             continue
         if actuator is not None and actuator.follow_up(observation):
             print(f"[{stamp}] 選擇吃法", flush=True)
             acted_for, acted_at, retries = observation, clock(), 0
             continue
+        if observation.my_turn and pending_claim is not None:
+            expected, forbidden = pending_claim
+            if tuple(sorted(observation.hand)) == expected:
+                observation = replace(observation, claimed=True, forbidden=forbidden)
+            else:
+                pending_claim = None
         action = decide(observation)
+        if action is not None and action.kind in (ActionType.CHOW, ActionType.PUNG):
+            pending_claim = (hand_after_claim(observation, action),
+                             forbidden_after_claim(action, action.tile))
         advice = describe(action) if action is not None else None
         if advice != last_advice:
             if advice is not None:
@@ -93,7 +146,8 @@ def main() -> None:
     parser.add_argument("--step", type=float, default=0.5, help="影片每隔幾秒取一幀")
     parser.add_argument("--start", type=float, default=0.0, help="影片從第幾秒開始")
     parser.add_argument("--interval", type=float, default=0.3, help="即時模式擷取間隔（秒）")
-    parser.add_argument("--auto", action="store_true", help="自動點擊（目前停用，見說明）")
+    parser.add_argument("--auto", action="store_true",
+                        help="自動點擊（只在對手全是電腦的訓練場使用；滑鼠甩到左上角中止）")
     parser.add_argument("--no-overlay", action="store_true", help="不顯示浮動小視窗")
     parser.add_argument("--demo-overlay", action="store_true",
                         help="只展示小視窗外觀（可拖曳調整位置），不辨識畫面")
@@ -103,27 +157,54 @@ def main() -> None:
 
         demo()
         return
-    readers = Readers()
     if args.image:
-        observation = observe(read_image(args.image), readers)
+        observation = observe(read_image(args.image), Readers())
         action = decide(observation) if observation else None
         print(describe(action) if action else "畫面無法辨識或不需要做決定")
     elif args.video:
-        run(video_frames(args.video, args.step, args.start), readers)
-    elif args.auto:
-        # 目前支援的「經典版」桌面是與真人配桌的場（畫面顯示真人即時配對、
-        # 對手有玩家名稱與照片頭像），在這裡自動打牌等於對真人使用外掛，
-        # 因此不提供。control.actuator 保留給確認沒有真人的場景或自己的模擬器。
-        raise SystemExit("自動模式已停用：目前的桌面版型是與真人對戰的場，只提供提示模式。")
-    elif args.no_overlay:
-        print("提示模式啟動，Ctrl+C 結束", flush=True)
-        run(screen_frames(args.interval), readers)
+        run(video_frames(args.video, args.step, args.start), Readers())
     else:
-        from hint.overlay import Overlay
+        live(args.interval, overlay=not args.no_overlay, auto=args.auto)
 
-        print("提示模式啟動（浮動小視窗），Ctrl+C 結束", flush=True)
-        overlay = Overlay()
-        overlay.run(lambda: run(screen_frames(args.interval), readers, show=overlay.show))
+
+def confirm_training_room(ask=input) -> bool:
+    """經典版一般場是與真人配桌，自動點擊只能用在對手全是電腦的訓練場。"""
+    print("自動模式只能在「訓練場」（三家對手都是電腦）使用；與真人配桌的場請用提示模式。")
+    answer = ask("確認目前是對手全為電腦的訓練場？輸入 y 繼續：")
+    return answer.strip().lower() == "y"
+
+
+def live(interval: float, overlay: bool, auto: bool) -> None:
+    actuator = None
+    if auto:
+        if not confirm_training_room():
+            raise SystemExit("已取消自動模式。")
+        from control.actuator import Actuator
+
+        actuator = Actuator()
+        print("自動模式 3 秒後開始，請切回遊戲視窗。滑鼠甩到螢幕左上角可立即中止。", flush=True)
+        time.sleep(3)
+    mode = "自動模式" if auto else "提示模式"
+    readers = Readers()
+    find_continue = None
+    if auto:
+        from perception.continue_button import ContinueButtons
+
+        buttons = ContinueButtons.from_directory()
+        missing = [name for name in CONTINUE_BUTTONS if name not in buttons.references]
+        if missing:
+            print(f"缺少按鈕參考圖，不會自動按：{'、'.join(missing)}", flush=True)
+        find_continue = buttons.find
+    if not overlay:
+        print(f"{mode}啟動，Ctrl+C 結束", flush=True)
+        run(screen_frames(interval), readers, actuator=actuator, find_continue=find_continue)
+        return
+    from hint.overlay import Overlay
+
+    print(f"{mode}啟動（浮動小視窗），Ctrl+C 結束", flush=True)
+    window = Overlay()
+    window.run(lambda: run(screen_frames(interval), readers, actuator=actuator,
+                           show=window.show, find_continue=find_continue))
 
 
 if __name__ == "__main__":

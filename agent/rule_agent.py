@@ -5,7 +5,16 @@ from random import Random
 from typing import Sequence
 
 from .shanten import effective_tiles, shanten, standard_shanten
-from game.rules import MAX_SWAP, Action, ActionType, GameState, Phase, legal_actions
+from game.rules import (
+    MAX_SWAP,
+    Action,
+    ActionType,
+    GameState,
+    Phase,
+    allowed_discards,
+    forbidden_after_claim,
+    legal_actions,
+)
 from game.tiles import is_honor, is_suited
 
 
@@ -14,8 +23,9 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
                    visible_counts: Sequence[int] | None = None,
                    safe_tiles: Sequence[int] = (),
                    suji_tiles: Sequence[int] = (),
-                   defensive: bool = False) -> int:
-    """選一張牌打出：最低向聽優先，再取有效進張最多。"""
+                   defensive: bool = False,
+                   forbidden: Sequence[int] = ()) -> int:
+    """選一張牌打出：最低向聽優先，再取有效進張最多；forbidden 是吃碰後不能打的牌。"""
     if sum(hand) not in (17 - 3 * n_open_melds, 16 - 3 * n_open_melds):
         raise ValueError("選擇打牌時手牌張數不正確")
     if visible_counts is not None and (
@@ -23,9 +33,7 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
     ):
         raise ValueError("可見牌計數必須是長度 34 且每格介於 0-4")
     candidates = []
-    for tile, count in enumerate(hand):
-        if not count:
-            continue
+    for tile in allowed_discards(hand, tuple(forbidden)):
         after_discard = hand.copy()
         after_discard[tile] -= 1
         next_shanten = shanten(after_discard, n_open_melds)
@@ -91,6 +99,43 @@ def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP) -> tuple[int, 
         if expected < current - SWAP_MIN_GAIN:
             candidates.append((round(expected, 6), weighted_standard / total, tile))
     return tuple(tile for *_, tile in sorted(candidates)[:limit])
+
+
+def hand_value(hand: Sequence[int], n_open_melds: int) -> tuple[int, int]:
+    """(向聽數, -有效進張張數)，越小越好；有效進張以自己手上沒有的張數計。"""
+    hand = list(hand)
+    outs = sum(4 - hand[tile] for tile in effective_tiles(hand, n_open_melds))
+    return shanten(hand, n_open_melds), -outs
+
+
+def claim_value(hand: Sequence[int], n_open_melds: int, action: Action,
+                claimed: int | None) -> tuple[int, int]:
+    """吃碰槓之後的 hand_value；吃碰要接著打一張，取打掉可打的牌後最好的結果。
+    明槓之後要補牌，只看向聽數。"""
+    assert claimed is not None
+    concealed = list(hand)
+    used = list(action.tiles)
+    used.remove(claimed)
+    for tile in used:
+        concealed[tile] -= 1
+    if action.kind == ActionType.KONG:
+        return shanten(concealed, n_open_melds + 1), 0
+    options = []
+    for tile in allowed_discards(concealed, forbidden_after_claim(action, claimed)):
+        concealed[tile] -= 1
+        options.append((shanten(concealed, n_open_melds + 1), tile))
+        concealed[tile] += 1
+    lowest = min(value for value, _ in options)
+    best = None
+    for value, tile in options:
+        if value != lowest:
+            continue
+        concealed[tile] -= 1
+        candidate = hand_value(concealed, n_open_melds + 1)
+        concealed[tile] += 1
+        best = candidate if best is None else min(best, candidate)
+    assert best is not None
+    return best
 
 
 def visible_tile_counts(state: GameState, player: int) -> list[int]:
@@ -223,21 +268,22 @@ def choose_rule_action_for_player(
         return Action(ActionType.SWAP, tiles=choose_swap_tiles(state.players[player].hand))
     if state.phase == Phase.RESPONSE:
         current = state.players[player]
-        baseline = shanten(current.hand, current.open_melds)
+        baseline = hand_value(current.hand, current.open_melds)
+        best = None
         for action in actions:
             if action.kind not in {ActionType.CHOW, ActionType.PUNG, ActionType.KONG}:
                 continue
-            concealed = current.hand.copy()
-            claimed = state.last_discard
-            assert claimed is not None
-            skipped_claimed = False
-            for tile in action.tiles:
-                if tile == claimed and not skipped_claimed:
-                    skipped_claimed = True
-                    continue
-                concealed[tile] -= 1
-            if shanten(concealed, current.open_melds + 1) <= baseline:
-                return action
+            after = claim_value(current.hand, current.open_melds, action, state.last_discard)
+            # 吃碰要讓向聽數變好、或向聽相同但有效進張變多才值得（拆掉已成的面子去吃
+            # 不划算）；明槓多摸一張，向聽不變差就槓
+            if action.kind == ActionType.KONG:
+                worth = after[0] <= baseline[0]
+            else:
+                worth = after < baseline
+            if worth and (best is None or after < best[0]):
+                best = (after, action)
+        if best is not None:
+            return best[1]
         return next((action for action in actions if action.kind == ActionType.PASS), None)
     if state.phase == Phase.DISCARD:
         if state.declared[player]:
@@ -246,7 +292,8 @@ def choose_rule_action_for_player(
         tile = choose_discard(state.players[player].hand,
                               state.players[player].open_melds, rng,
                               visible_tile_counts(state, player), safe_tiles(state, player),
-                              suji_tiles(state, player), defensive=defensive)
+                              suji_tiles(state, player), defensive=defensive,
+                              forbidden=state.forbidden_discards if state.claimed else ())
         declare = Action(ActionType.DECLARE, tile=tile)
         if not defensive and declare in actions:
             return declare  # 聽牌 +1 台；暫時一律宣告，取捨留給之後的策略

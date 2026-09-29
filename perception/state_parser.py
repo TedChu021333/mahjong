@@ -36,6 +36,9 @@ class ObservedTable:
     seat_winds: tuple[int, int, int, int] = (27, 28, 29, 30)
     gold_tiles: tuple[int, ...] = ()
     last_drawn: int | None = None
+    claimed: bool = False
+    """目前玩家剛吃碰（這一手不能胡，只能打牌）。"""
+    forbidden_discards: tuple[int, ...] = ()
 
 
 def _validate_tile(tile: int, allow_flower: bool = False) -> None:
@@ -108,4 +111,6 @@ def parse_observed_table(observed: ObservedTable) -> GameState:
         seat_winds=observed.seat_winds,
         gold_tiles=list(observed.gold_tiles),
         last_drawn=observed.last_drawn,
+        claimed=observed.claimed,
+        forbidden_discards=observed.forbidden_discards,
     )

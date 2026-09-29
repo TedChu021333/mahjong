@@ -4,6 +4,7 @@ from control.actuator import Actuator
 from hint.__main__ import MAX_RETRIES, RETRY_AFTER, run
 from hint.advisor import Observation
 from perception.config import ACTION_BUTTON_CENTERS, CANCEL_BUTTON_REGION
+from perception.continue_button import ContinueButton
 from perception.hand_reader import _cell_box, drawn_tile_box
 from perception.table_reader import ClaimTile
 
@@ -132,3 +133,50 @@ def test_single_chow_option_needs_no_panel():
     clicks, actuator = recorder()
     actuator.perform(Action(ActionType.CHOW, tile=P("6s"), tiles=tuple(parse("456s"))), waiting)
     assert actuator.pending_chow is None
+
+
+def test_auto_mode_requires_confirming_a_computer_only_room():
+    from hint.__main__ import confirm_training_room
+    assert confirm_training_room(ask=lambda _: "y")
+    assert confirm_training_room(ask=lambda _: " Y ")
+    assert not confirm_training_room(ask=lambda _: "")
+    assert not confirm_training_room(ask=lambda _: "n")
+
+
+def test_auto_loop_presses_continue_then_next_game_after_a_delay():
+    from perception.config import NEXT_GAME_CLICKS, NEXT_GAME_DELAY, NEXT_GAME_REGION
+
+    clicks, actuator = recorder()
+    button = ContinueButton("小結算繼續", (1459, 977))
+    next_game = center(NEXT_GAME_REGION)
+    now = [0.0]
+    # 每幀 0.5 秒：結算畫面 → 讀不到手牌 11 秒 → 新的一局
+    screens = [button] * 2 + [None] * 22 + [my_turn()] * 2 + [None] * 10
+
+    def frames():
+        for step, screen in enumerate(screens):
+            now[0] = step * 0.5
+            yield f"{step}", screen
+
+    saved = []
+    run(frames(), readers=None, actuator=actuator, observe_fn=lambda frame, readers: frame
+        if isinstance(frame, Observation) else None,
+        find_continue=lambda frame: frame if isinstance(frame, ContinueButton) else None,
+        clock=lambda: now[0], save_result=lambda frame: saved.append(frame) or "result/x.png")
+    assert saved == [button]                          # 每局只存一張結算截圖
+    assert clicks[0] == (1459, 977)                   # 按繼續
+    assert clicks[1] == next_game                     # 3 秒後按下一場
+    assert clicks[1:1 + NEXT_GAME_CLICKS] == [next_game] * NEXT_GAME_CLICKS
+    assert clicks[1 + NEXT_GAME_CLICKS:] == [center(drawn_tile_box())]  # 新局開始後不再點
+    assert NEXT_GAME_DELAY == 3.0
+
+
+def test_save_result_writes_a_png(tmp_path, monkeypatch):
+    import numpy as np
+    import hint.__main__ as hint_main
+    from perception.capture import read_image
+
+    monkeypatch.setattr(hint_main, "RESULT_DIR", tmp_path / "result")
+    path = hint_main.save_result(np.zeros((1080, 1920, 3), dtype=np.uint8))
+    assert path.parent == tmp_path / "result" and path.suffix == ".png"
+    assert read_image(path).shape == (1080, 1920, 3)

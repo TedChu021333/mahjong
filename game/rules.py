@@ -113,6 +113,8 @@ class GameState:
     """目前玩家最後摸進的牌，自摸時就是胡的那張。"""
     claimed: bool = False
     """剛吃碰，這一手只能打牌。"""
+    forbidden_discards: tuple[int, ...] = ()
+    """剛吃碰後這一手不能打的牌（見 forbidden_after_claim）。"""
     after_kong: bool = False
     """剛槓完補牌，此時自摸為槓上開花。"""
     robbing_kong: bool = False
@@ -259,6 +261,29 @@ def _added_kong_tiles(player: PlayerState) -> list[int]:
             if meld.kind == "pung" and player.hand[meld.tiles[0]]]
 
 
+def forbidden_after_claim(action: Action, claimed: int) -> tuple[int, ...]:
+    """吃碰後不能馬上打的牌：碰的那張；吃的那張，以及吃在順子邊張時另一頭的牌
+    （例如用 67 吃 5，不能打 5 和 8；用 46 吃 5 只不能打 5）。"""
+    if action.kind == ActionType.PUNG:
+        return (claimed,)
+    if action.kind != ActionType.CHOW:
+        return ()
+    low = min(action.tiles)
+    rank = low % 9
+    if claimed == low and rank <= 5:
+        return (claimed, low + 3)
+    if claimed == low + 2 and rank >= 1:
+        return (claimed, low - 1)
+    return (claimed,)
+
+
+def allowed_discards(hand: list[int], forbidden: tuple[int, ...] = ()) -> list[int]:
+    """可以打的牌種；手上只剩禁打的牌時全部都能打。"""
+    tiles = [tile for tile, count in enumerate(hand) if count]
+    allowed = [tile for tile in tiles if tile not in forbidden]
+    return allowed or tiles
+
+
 def legal_actions(state: GameState, player: int | None = None) -> list[Action]:
     """列出指定情境下的合法動作，不改變 state。"""
     actor = state.current_player if player is None else player
@@ -283,10 +308,10 @@ def legal_actions(state: GameState, player: int | None = None) -> list[Action]:
             # 聽牌後手牌鎖住：只能胡或打掉剛摸進的牌
             assert state.last_drawn is not None
             return ([win] if win else []) + [Action(ActionType.DISCARD, tile=state.last_drawn)]
-        actions = [Action(ActionType.DISCARD, tile=t)
-                   for t, count in enumerate(current.hand) if count]
+        allowed = allowed_discards(current.hand, state.forbidden_discards if state.claimed else ())
+        actions = [Action(ActionType.DISCARD, tile=t) for t in allowed]
         actions.extend(Action(ActionType.DECLARE, tile=t)
-                       for t in _declarable_discards(current))
+                       for t in _declarable_discards(current) if t in allowed)
         if state.claimed:
             return actions
         if state.drawable:  # 槓完要補牌
@@ -441,6 +466,7 @@ def apply_action(state: GameState, action: Action, player: int | None = None) ->
         remove_tile(current, action.tile)
         current.discards.append(action.tile)
         state.claimed = False
+        state.forbidden_discards = ()
         state.after_kong = False
         state.last_discard = action.tile
         state.discard_player = actor
@@ -526,4 +552,5 @@ def apply_action(state: GameState, action: Action, player: int | None = None) ->
     state.current_player = actor
     _clear_response(state)
     state.claimed = True
+    state.forbidden_discards = forbidden_after_claim(action, claimed)
     state.phase = Phase.DISCARD

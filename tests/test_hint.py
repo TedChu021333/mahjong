@@ -83,3 +83,33 @@ def test_overlay_colors_and_position_file(tmp_path):
     assert load_position(path) == DEFAULT_POSITION
     save_position(12, 34, path)
     assert load_position(path) == (12, 34)
+
+
+def test_loop_remembers_claim_and_forbids_tiles_on_the_next_discard(monkeypatch):
+    import hint.__main__ as hint_main
+
+    # 影片 55.5→57.5 秒：上家打二萬，碰；碰完遊戲把最右邊的九條移到第 17 張位置
+    waiting = Observation(T("11223789m99m4p56779s"), frozenset({"pung", "chow"}),
+                          ClaimTile(parse("2m")[0], 0.9, "left"), ())
+    after = Observation(T("113789m99m4p56779s"), None, None, ())
+    unrelated = Observation(T("113789m99m4p56789s"), None, None, ())
+    seen = []
+    real_decide = hint_main.decide
+    monkeypatch.setattr(hint_main, "decide",
+                        lambda observation: seen.append(observation) or real_decide(observation))
+    advice = []
+    frames = [waiting, waiting, after, after, unrelated, unrelated]
+    hint_main.run(((str(i), f) for i, f in enumerate(frames)), readers=None,
+                  observe_fn=lambda frame, readers: frame, show=advice.append)
+    assert advice[0] == "碰 二萬"
+    assert seen[1].claimed and seen[1].forbidden == (parse("2m")[0],)
+    assert not seen[2].claimed  # 手牌對不上就不是剛碰完
+
+
+def test_claimed_observation_never_suggests_a_forbidden_tile():
+    # 用 67s 吃 5s 後手上剩 5s、89s：平常打孤張五條就聽牌，但吃完不能打 5s、8s
+    hand = T("111m222m333m44p5s89s")
+    assert advise(Observation(hand, None, None, ())) == "打 五條，並按「聽」"
+    forbidden = (parse("5s")[0], parse("8s")[0])
+    claimed = Observation(hand, None, None, (), claimed=True, forbidden=forbidden)
+    assert advise(claimed) == "打 九條"

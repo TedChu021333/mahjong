@@ -46,6 +46,11 @@ class Observation:
     """各張暗手牌是否被選起（換三張）。"""
     chow_panels: tuple[tuple[int, int], ...] = ()
     """多種吃法時的選項框中心。"""
+    claimed: bool = False
+    """剛吃碰完、要打一張（這一手不能胡）。畫面上看不出來（遊戲會把最右邊的牌移到
+    第 17 張的位置），由提示迴圈比對吃碰前後的手牌補上。"""
+    forbidden: tuple[int, ...] = ()
+    """剛吃碰後不能打的牌。"""
 
     @property
     def my_turn(self) -> bool:
@@ -98,8 +103,13 @@ def build_state(observation: Observation) -> GameState | None:
     players[ME] = ObservedPlayer(hand=observation.hand, unknown_melds=observation.meld_count)
     common = dict(gold_tiles=observation.gold_tiles)
     if observation.my_turn:
-        table = ObservedTable(players=tuple(players), current_player=ME, phase=Phase.DISCARD,
-                              last_drawn=observation.hand[-1], **common)
+        if observation.claimed:
+            table = ObservedTable(players=tuple(players), current_player=ME, phase=Phase.DISCARD,
+                                  claimed=True, forbidden_discards=observation.forbidden,
+                                  **common)
+        else:
+            table = ObservedTable(players=tuple(players), current_player=ME, phase=Phase.DISCARD,
+                                  last_drawn=observation.hand[-1], **common)
         return parse_observed_table(table)
     claim = observation.claim
     if observation.buttons is None or claim is None or claim.tile is None:
@@ -144,6 +154,16 @@ def decide(observation: Observation, rng: Random | None = None) -> Action | None
     if state is None:
         return None
     return choose_rule_action_for_player(state, ME, rng or Random(0))
+
+
+def hand_after_claim(observation: Observation, action: Action) -> tuple[int, ...]:
+    """吃碰後暗手牌應有的樣子（排序過），用來認出吃碰完成後的畫面。"""
+    hand = list(observation.hand)
+    used = list(action.tiles)
+    used.remove(action.tile)
+    for tile in used:
+        hand.remove(tile)
+    return tuple(sorted(hand))
 
 
 def chow_options(observation: Observation) -> list[tuple[int, ...]]:

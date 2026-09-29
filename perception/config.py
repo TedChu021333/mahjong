@@ -68,3 +68,18 @@ SWAP_CONFIRM_BUTTON = (1164, 640)
 # 多種吃法時的選項框（由 train/吃牌2.png 量測）：每框三張正面牌，依順子由小到大排列。
 CHOW_PANEL_ROWS = (650, 790)
 CHOW_PANEL_WIDTH = (230, 340)
+
+# 打完後要按的「繼續」類按鈕：名稱 → 區域 (左, 上, 右, 下)。參考圖放 train/buttons/<名稱>.png，
+# 用 `python -m perception.continue_button <截圖> <名稱>` 從截圖裁出；沒有參考圖的按鈕不會被點。
+CONTINUE_BUTTONS = {
+    "小結算繼續": (1279, 912, 1639, 1043),  # 每局結算畫面的藍色「繼續」（train/經典_小結算.png）
+}
+NEXT_GAME_REGION = (1457, 893, 1869, 1005)
+"""按下小結算「繼續」後出現的下一場按鈕（使用者量測）；不做辨識，延遲後直接點。"""
+NEXT_GAME_DELAY = 3.0
+NEXT_GAME_CLICKS = 3
+"""讀不到手牌時最多點幾次（每次間隔 NEXT_GAME_DELAY）；讀到手牌就停。"""
+BUTTON_TEMPLATE_DIR = TRAIN_DIR / "buttons"
+CONTINUE_MIN_SCORE = 0.9
+CONTINUE_SEARCH_MARGIN = 10
+"""參考圖在區域外擴這麼多像素的範圍內搜尋，容許畫面些微位移。"""
