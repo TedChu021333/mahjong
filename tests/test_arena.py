@@ -26,7 +26,7 @@ def test_payments_follow_base_plus_tai():
 
 
 def test_policy_specs():
-    assert make_policy("rule") is not None and make_policy("gold:8") is not None
+    assert all(make_policy(spec) is not None for spec in ("rule", "gold:8", "blind", "fold:1", "nodeclare"))
     for bad in ("gold", "rule:1", "nope"):
         with pytest.raises(ValueError):
             make_policy(bad)

@@ -17,9 +17,10 @@ from perception.hand_reader import Box
 from perception.river_reader import SEATS, RiverTile
 
 CONFIRM_FRAMES = 3
-RESTORE_FRAMES = 15
-"""被判定吃碰的牌在這麼多幀內又在原位出現才算被蓋住；那一格之後會放同一家下一次
-打的牌，但要輪完一圈（通常超過這個時間）。兩張都認得出來時則直接比對牌種。"""
+RESTORE_FRAMES = 25
+"""被判定吃碰的牌在這麼多幀（約 7.5 秒）內又在原位出現才算被蓋住。自己能吃碰時，遊戲會把
+那張牌暫時拿出牌河等我們決定（最多約 5 秒），放棄後才放回去。那一格之後會放同一家下一次
+打的牌，但要輪完一圈；兩張都認得出來時則直接比對牌種。"""
 SAME_POSITION = 20
 """兩次偵測的左上角相差在這個距離內視為同一格。"""
 

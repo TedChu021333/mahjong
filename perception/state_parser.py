@@ -39,6 +39,8 @@ class ObservedTable:
     claimed: bool = False
     """目前玩家剛吃碰（這一手不能胡，只能打牌）。"""
     forbidden_discards: tuple[int, ...] = ()
+    declared: tuple[bool, bool, bool, bool] = (False, False, False, False)
+    """各家是否已宣告聽牌。"""
 
 
 def _validate_tile(tile: int, allow_flower: bool = False) -> None:
@@ -113,4 +115,5 @@ def parse_observed_table(observed: ObservedTable) -> GameState:
         last_drawn=observed.last_drawn,
         claimed=observed.claimed,
         forbidden_discards=observed.forbidden_discards,
+        declared=list(observed.declared),
     )

@@ -10,6 +10,9 @@
 策略代號：
     rule          規則式 AI（目前的預設參數）
     gold:<n>      規則式 AI，打出金牌的代價視同少 n 張有效進張
+    blind         規則式 AI，但忽略對手宣告聽牌（看不到「聽」標記時的行為）
+    fold:<n>      規則式 AI，有對手宣告聽牌時，自己向聽數 ≥n 就棄胡
+    nodeclare     規則式 AI，但聽牌時不宣告（不拿聽牌 1 台，手牌不鎖、還能防守）
 """
 from __future__ import annotations
 
@@ -23,6 +26,7 @@ from pathlib import Path
 from random import Random
 
 from agent.rule_agent import choose_rule_action_for_player
+from game.rules import Action, ActionType
 from game.simulator import GameResult, PlayerPolicy, play_game
 
 BASE = 3
@@ -35,7 +39,28 @@ def make_policy(spec: str) -> PlayerPolicy:
         return choose_rule_action_for_player
     if name == "gold" and arg:
         return partial(_gold_policy, penalty=float(arg))
+    if name == "blind" and not arg:
+        return _blind_policy
+    if name == "nodeclare" and not arg:
+        return _no_declare_policy
+    if name == "fold" and arg:
+        return partial(_fold_policy, shanten=int(arg))
     raise ValueError(f"未知的策略代號：{spec}")
+
+
+def _no_declare_policy(state, player, rng):
+    action = choose_rule_action_for_player(state, player, rng)
+    if action is not None and action.kind == ActionType.DECLARE:
+        return Action(ActionType.DISCARD, tile=action.tile)
+    return action
+
+
+def _fold_policy(state, player, rng, shanten):
+    return choose_rule_action_for_player(state, player, rng, declared_fold_shanten=shanten)
+
+
+def _blind_policy(state, player, rng):
+    return choose_rule_action_for_player(state, player, rng, use_declared=False)
 
 
 def _gold_policy(state, player, rng, penalty):
@@ -64,6 +89,8 @@ class PairedGame:
     baseline_net: int
     variant_won: bool
     variant_dealt_in: bool
+    baseline_won: bool = False
+    baseline_dealt_in: bool = False
 
 
 def play_pair(seed: int, variant: str, baseline: str) -> PairedGame:
@@ -76,7 +103,8 @@ def play_pair(seed: int, variant: str, baseline: str) -> PairedGame:
     reference = play_game(Random(seed), player_policy=base_policy, dealer=dealer, swap=True)
     trial = play_game(Random(seed), player_policy=mixed, dealer=dealer, swap=True)
     return PairedGame(seed, seat, payments(trial)[seat], payments(reference)[seat],
-                      trial.winner == seat, trial.discarder == seat)
+                      trial.winner == seat, trial.discarder == seat,
+                      reference.winner == seat, reference.discarder == seat)
 
 
 @dataclass(frozen=True)
@@ -89,6 +117,8 @@ class Summary:
     """差值的 95% 信賴區間半寬。"""
     win_rate: float
     deal_in_rate: float
+    baseline_win_rate: float = 0.0
+    baseline_deal_in_rate: float = 0.0
 
 
 def summarize(games: list[PairedGame]) -> Summary:
@@ -106,14 +136,17 @@ def summarize(games: list[PairedGame]) -> Summary:
         margin=1.96 * (variance / n) ** 0.5,
         win_rate=sum(game.variant_won for game in games) / n,
         deal_in_rate=sum(game.variant_dealt_in for game in games) / n,
+        baseline_win_rate=sum(game.baseline_won for game in games) / n,
+        baseline_deal_in_rate=sum(game.baseline_dealt_in for game in games) / n,
     )
 
 
 def describe(summary: Summary) -> str:
     return (f"{summary.games} 局：每局 {summary.variant_mean:+.3f} 台"
             f"（對照 {summary.baseline_mean:+.3f}），差 {summary.difference:+.3f}"
-            f" ± {summary.margin:.3f}；胡牌率 {summary.win_rate:.1%}、"
-            f"放槍率 {summary.deal_in_rate:.1%}")
+            f" ± {summary.margin:.3f}；胡牌率 {summary.win_rate:.1%}"
+            f"（對照 {summary.baseline_win_rate:.1%}）、放槍率 {summary.deal_in_rate:.1%}"
+            f"（對照 {summary.baseline_deal_in_rate:.1%}）")
 
 
 def compare(variant: str, baseline: str, games: int, start: int = 0, workers: int = 1,
@@ -136,7 +169,8 @@ def compare(variant: str, baseline: str, games: int, start: int = 0, workers: in
                 if writer is not None:
                     writer.writerow([variant, baseline, game.seed, game.seat, game.variant_net,
                                      game.baseline_net, int(game.variant_won),
-                                     int(game.variant_dealt_in)])
+                                     int(game.variant_dealt_in), int(game.baseline_won),
+                                     int(game.baseline_dealt_in)])
                     file.flush()
                 if progress_every and len(results) % progress_every == 0 and len(results) > 1:
                     print(f"[{time.time() - began:.0f}s] {describe(summarize(results))}",

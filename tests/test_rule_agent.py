@@ -272,3 +272,18 @@ def test_rule_agent_uses_the_tables_gold_tiles():
     state = GameState([0], players, phase=Phase.DISCARD, gold_tiles=[P("2z")])
     action = choose_rule_action_for_player(state, 0, Random(0))
     assert action.tile == P("1z")
+
+
+def test_declared_opponent_is_the_biggest_threat_and_triggers_folding():
+    from agent.rule_agent import opponent_threat_score, safe_tiles, should_fold
+
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = C("1479m258p369s1234567z")  # 很差的牌，向聽數高；手上有 9m、東可以棄
+    players[2].discards = parse("9m1z")
+    state = GameState([0], players, phase=Phase.DISCARD)
+    assert opponent_threat_score(state, 0, 2) == 0 and not should_fold(state, 0)
+    state.declared[2] = True
+    assert opponent_threat_score(state, 0, 2) == 5 and should_fold(state, 0)
+    assert safe_tiles(state, 0) == set(parse("9m1z"))
+    action = choose_rule_action_for_player(state, 0, Random(0))
+    assert action.tile in parse("9m1z")  # 棄胡：打對聽牌者安全的牌

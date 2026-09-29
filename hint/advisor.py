@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from random import Random
 
+import cv2
 import numpy as np
 
 from agent.rule_agent import choose_rule_action_for_player, choose_swap_tiles
@@ -18,12 +19,14 @@ from perception.config import CLAIM_TEMPLATE_BOX, GOLD_MIN_SCORE, GOLD_TEMPLATE_
 from perception.config import MAX_HAND_TILES
 from perception.hand_reader import TileClassifier, _cell_box, drawn_tile_box, read_hand
 from perception.state_parser import ObservedPlayer, ObservedTable, parse_observed_table
-from perception.config import HAND_TILE_TOP
+from perception.capture import read_image
+from perception.config import DECLARE_TEMPLATE, HAND_TILE_TOP
 from perception.table_reader import (
     ClaimTile,
     read_buttons,
     read_chow_panels,
     read_claim_tile,
+    read_declared,
     read_gold_tiles,
     read_swap_prompt,
 )
@@ -52,6 +55,10 @@ class Observation:
     第 17 張的位置），由提示迴圈比對吃碰前後的手牌補上。"""
     forbidden: tuple[int, ...] = ()
     """剛吃碰後不能打的牌。"""
+    melds: tuple[int, ...] = field(default=(), compare=False)
+    """推算的對手副露數（座位同 discards；自己的欄位不用，由手牌張數得知）。"""
+    declared: frozenset[str] = field(default=frozenset(), compare=False)
+    """旁邊有「聽」標記的對手（left/top/right）。"""
     discards: tuple[tuple[int, ...], ...] = field(default=(), compare=False)
     """各家打過的牌（座位同 SOURCE_SEAT：0 自己、1 下家、2 對家、3 上家），由牌河追蹤補上；
     不參與比較，牌河變動不會讓同一個畫面重新給建議。"""
@@ -73,6 +80,9 @@ class Readers:
         self.claim = TileClassifier.from_directory(template_dir, template_box=CLAIM_TEMPLATE_BOX)
         self.gold = TileClassifier.from_directory(template_dir, template_box=GOLD_TEMPLATE_BOX,
                                                   min_score=GOLD_MIN_SCORE)
+        self.declare = None
+        if DECLARE_TEMPLATE.exists():
+            self.declare = cv2.cvtColor(read_image(DECLARE_TEMPLATE), cv2.COLOR_BGR2GRAY)
 
 
 def observe(image: np.ndarray, readers: Readers) -> Observation | None:
@@ -87,7 +97,8 @@ def observe(image: np.ndarray, readers: Readers) -> Observation | None:
                        read_claim_tile(image, readers.claim), gold, reading.boxes,
                        read_swap_prompt(image),
                        tuple(box[1] != HAND_TILE_TOP for box in reading.boxes),
-                       read_chow_panels(image))
+                       read_chow_panels(image),
+                       declared=read_declared(image, readers.declare))
 
 
 def _consistent_layout(boxes) -> bool:
@@ -132,10 +143,15 @@ def build_state(observation: Observation) -> GameState | None:
     responding = not observation.my_turn and observation.buttons is not None         and claim is not None and claim.tile is not None
     source = SOURCE_SEAT[claim.source] if responding else None
     rivers = _rivers(observation, source, claim.tile if responding else None)
-    players = [ObservedPlayer(discards=tuple(rivers[seat])) for seat in range(4)]
+    melds = list(observation.melds) + [0] * (4 - len(observation.melds))
+    players = [ObservedPlayer(discards=tuple(rivers[seat]), unknown_melds=melds[seat])
+               for seat in range(4)]
     players[ME] = ObservedPlayer(hand=observation.hand, unknown_melds=observation.meld_count,
                                  discards=tuple(rivers[ME]))
-    common = dict(gold_tiles=observation.gold_tiles)
+    declared = [False] * 4
+    for seat in observation.declared:
+        declared[SOURCE_SEAT[seat]] = True
+    common = dict(gold_tiles=observation.gold_tiles, declared=tuple(declared))
     if observation.my_turn:
         if observation.claimed:
             table = ObservedTable(players=tuple(players), current_player=ME, phase=Phase.DISCARD,

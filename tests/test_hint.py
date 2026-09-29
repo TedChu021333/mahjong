@@ -151,3 +151,36 @@ def test_hint_mode_records_settlement_without_clicking():
                   save_result=lambda frame, prefix="": saved.append(frame) or "x.png",
                   log=lambda line, detail=None, echo=True: None)
     assert saved == [button]  # 沒有 actuator 也不會出錯，只存一次
+
+
+def test_claim_tile_is_remembered_when_the_circle_is_gone(monkeypatch):
+    import hint.__main__ as hint_main
+
+    # 影片 21.12.08：下家打一萬，圓框 0.7 秒後縮進牌河，「碰」按鈕還亮 5 秒
+    hand = T("11m234567p123456s45z")
+    circle = Observation(hand, None, ClaimTile(parse("1m")[0], 0.85, "right"), ())
+    prompt = Observation(hand, frozenset({"pung"}), None, ())
+    advice = []
+    now = [0.0]
+
+    def frames():
+        for step, screen in enumerate([circle, circle] + [prompt] * 4):
+            now[0] = step * 0.3
+            yield str(step), screen
+
+    hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: frame,
+                  clock=lambda: now[0], show=advice.append,
+                  log=lambda line, detail=None, echo=True: None)
+    assert [a for a in advice if a] and all("碰" in a or "不要" in a for a in advice if a)
+
+
+def test_opponent_information_reaches_the_rule_agent():
+    from hint.advisor import build_state
+
+    observation = Observation(T("1479m258p369s1234567z"), None, None, (),
+                              discards=((), (), tuple(parse("9m1z")), ()),
+                              melds=(0, 0, 2, 0), declared=frozenset({"top"}))
+    state = build_state(observation)
+    assert state.declared == [False, False, True, False]
+    assert len(state.players[2].melds) == 2 and state.players[2].discards == parse("9m1z")
+    assert advise(observation) in ("打 九萬", "打 東")  # 對家聽牌，棄胡打現物

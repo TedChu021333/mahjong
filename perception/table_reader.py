@@ -14,6 +14,8 @@ from perception.config import (
     CLAIM_TILE_MARGINS,
     CLAIM_TILE_POSITIONS,
     CLAIM_TILE_SIZE,
+    DECLARE_MIN_SCORE,
+    DECLARE_REGIONS,
     GOLD_MAX_SLOTS,
     GOLD_SLOT_ORIGIN,
     GOLD_SLOT_PITCH,
@@ -28,6 +30,15 @@ BUTTON_LIT_VALUE = 120
 """亮的按鈕亮度遠高於此值，變暗的按鈕在此之下（影片量測：亮 1.0、暗 ≤0.16）。"""
 CANCEL_MIN_RED = 0.42
 TILE_FACE_MIN_RATIO = 0.6
+CIRCLE_PROBE_OFFSETS = (62, 95)
+"""圓框判斷的取樣帶：距牌中心水平 62～95 像素（牌半寬約 53、圓框半徑約 105）。"""
+CIRCLE_PROBE_HALF_HEIGHT = 40
+CIRCLE_DARK_MAX = 40
+CIRCLE_MIN_DARK_RATIO = 0.6
+CLAIM_MIN_SCORE = 0.6
+CLAIM_MIN_MARGIN = 0.1
+"""放大的牌：最高分 ≥0.6 且領先次高 0.1 才採用（21.12.08 影片 17 次出牌：正確牌最低 0.70，
+與次高差最小 0.12；縮放動畫中的幀分數 <0.6 或差距 <0.05）。"""
 GOLD_MIN_FACE_RATIO = 0.3
 
 
@@ -67,16 +78,31 @@ class ClaimTile:
     """"left"（上家）或 "right"（下家）。"""
 
 
+def _in_discard_circle(image: np.ndarray, box: tuple[int, int, int, int]) -> bool:
+    """放大的牌外面有半透明的暗色圓框；牌左右兩側任一側夠暗就算（另一側可能壓著牌河，
+    透出來較亮）。綠色桌面、牌河、牌面都比這亮得多。"""
+    left, top, right, bottom = box
+    center_x, center_y = (left + right) // 2, (top + bottom) // 2
+    rows = slice(center_y - CIRCLE_PROBE_HALF_HEIGHT, center_y + CIRCLE_PROBE_HALF_HEIGHT)
+    near, far = CIRCLE_PROBE_OFFSETS
+    sides = (image[rows, center_x - far:center_x - near],
+             image[rows, center_x + near:center_x + far])
+    return max(float((side.max(axis=2) < CIRCLE_DARK_MAX).mean()) for side in sides)         >= CIRCLE_MIN_DARK_RATIO
+
+
 def read_claim_tile(image: np.ndarray, classifier: TileClassifier) -> ClaimTile | None:
-    """讀出圓圈裡放大顯示、可以吃碰胡的那張牌。"""
+    """讀出圓框裡放大顯示的那張牌（別家剛打出、有人可能吃碰胡時顯示約 0.65 秒；
+    能吃碰時會停到按鈕按下）。沒有圓框回傳 None；認不出時 tile 為 None。"""
     width, height = CLAIM_TILE_SIZE
     pad_left, pad_top, pad_right, pad_bottom = CLAIM_TILE_MARGINS
     for source, (x, y) in CLAIM_TILE_POSITIONS.items():
-        if _face_ratio(image, (x + 10, y + 10, x + width - 10, y + 30)) < TILE_FACE_MIN_RATIO:
+        if not _in_discard_circle(image, (x, y, x + width, y + height)):
             continue
         crop = image[y - pad_top:y + height + pad_bottom, x - pad_left:x + width + pad_right]
-        tile, score = classifier.classify(crop)
-        return ClaimTile(tile, score, source)
+        ranked = sorted(classifier.scores(crop).items(), key=lambda item: -item[1])
+        (tile, score), (_, second) = ranked[0], ranked[1]
+        known = score >= CLAIM_MIN_SCORE and score - second >= CLAIM_MIN_MARGIN
+        return ClaimTile(tile if known else None, score, source)
     return None
 
 
@@ -140,3 +166,16 @@ def read_chow_panels(image: np.ndarray) -> tuple[tuple[int, int], ...]:
                     panels.append(((start + end) // 2, (top + bottom) // 2))
                 start = None
     return tuple(panels)
+
+
+def read_declared(image: np.ndarray, template: np.ndarray | None) -> frozenset[str]:
+    """哪幾家（left/top/right）旁邊有「聽」標記；template 為灰階模板，沒有模板時回傳空集合。"""
+    if template is None:
+        return frozenset()
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    seats = set()
+    for seat, (left, top, right, bottom) in DECLARE_REGIONS.items():
+        region = gray[top:bottom, left:right]
+        if cv2.matchTemplate(region, template, cv2.TM_CCOEFF_NORMED).max() >= DECLARE_MIN_SCORE:
+            seats.add(seat)
+    return frozenset(seats)

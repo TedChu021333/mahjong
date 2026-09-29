@@ -5,6 +5,11 @@
 - 別家打的牌：能吃碰時會放大顯示（辨識很準），就是那家牌河接著出現的那張。
 辨識器認不出或認錯時，把這張牌存成新模板（train/river_templates/<牌>/auto_*.png），
 並以標註修正記錄。
+
+副露數：牌打出後會先落進牌河，有人吃碰才從牌河被拿走（追蹤器的 "claimed" 事件）。
+接著第一個出牌的人（牌河多一張，或出現新的放大圓框）就是吃碰的人（吃碰完要馬上打一張），
+副露數加 1；被拿走的牌之後又回到原位（其實是被蓋住）就取消。下一個出牌的是自己、而自己
+並沒有吃碰時，吃碰的一定是上家（他吃碰完打一張就輪到我們，只是那張被遮住還沒看到）。
 """
 from __future__ import annotations
 
@@ -37,20 +42,62 @@ class RiverWatch:
         self._labels: dict[str, tuple[int, int]] = {}
         """座位 → (牌, 取得標註時的幀數)。"""
         self._turn_hand: tuple[int, ...] | None = None
+        self.melds = {seat: 0 for seat in SEATS}
+        """推算的各家副露數（自己的由手牌張數得知，這裡不算）。"""
+        self._taken_from: tuple[str, int] | None = None
+        """最新一張被拿走的牌是誰打的、當時自己的副露數，等著看誰接著出牌。"""
+        self._my_melds = 0
+        self._credited: tuple[str, str] | None = None
+        """最近一次推算：(被拿走牌的那家, 算給誰)；那張牌之後又回來就撤銷。"""
+        self._last_circle: tuple[str, int] | None = None
 
     def new_hand(self) -> None:
         self.tracker.reset()
         self._labels.clear()
         self._turn_hand = None
+        self.melds = {seat: 0 for seat in SEATS}
+        self._taken_from = None
+        self._last_circle = None
+        self._credited = None
 
     def update(self, frame: np.ndarray, observation: Observation) -> list[RiverEvent]:
         self._frame += 1
+        self._my_melds = observation.meld_count
         self._collect_labels(observation)
         events = self.tracker.update(self.reader.read(frame))
         for event in events:
             if event.kind == "discard":
                 self._apply_label(frame, event)
+                self._someone_discarded(event.seat)
+            elif event.kind == "claimed":
+                self._taken_from = (event.seat, self._my_melds)
+            elif event.kind == "restored":
+                if self._taken_from and self._taken_from[0] == event.seat:
+                    self._taken_from = None
+                if self._credited and self._credited[0] == event.seat:
+                    self.melds[self._credited[1]] -= 1  # 其實只是被蓋住
+                    self._credited = None
         return events
+
+    def _someone_discarded(self, seat: str) -> None:
+        taken, self._taken_from = self._taken_from, None
+        if taken is None or seat == taken[0]:
+            return
+        claimer = seat
+        if seat == "me":
+            if self._my_melds != taken[1] or taken[0] == "left":
+                return  # 自己吃碰的
+            claimer = "left"  # 自己沒吃碰卻輪到自己：是上家吃碰
+        self.melds[claimer] += 1
+        self._credited = (taken[0], claimer)
+
+    def meld_counts(self) -> tuple[int, int, int, int]:
+        """依 advisor 的座位編號排列；自己的欄位為 0。"""
+        result = [0] * 4
+        for seat, count in self.melds.items():
+            if seat != "me":
+                result[RIVER_SEAT[seat]] = min(count, 5)
+        return tuple(result)
 
     def discards(self) -> tuple[tuple[int, ...], ...]:
         """依 advisor 的座位編號排列，未知的牌略過。"""
@@ -63,6 +110,10 @@ class RiverWatch:
         claim = observation.claim
         if claim is not None and claim.tile is not None:
             self._labels[claim.source] = (claim.tile, self._frame)
+            key = (claim.source, claim.tile)
+            if key != self._last_circle:  # 新的放大圓框：這家剛打出一張
+                self._last_circle = key
+                self._someone_discarded(claim.source)
         if observation.my_turn:
             self._turn_hand = observation.hand
         elif self._turn_hand is not None and len(observation.hand) == len(self._turn_hand) - 1:
@@ -92,5 +143,8 @@ def summary(watch: RiverWatch) -> str:
     parts = []
     for seat in SEATS:
         tiles = watch.tracker.discards[seat]
-        parts.append(f"{seat} " + "".join(tile_name(t) if t is not None else "?" for t in tiles))
+        text = f"{seat} " + "".join(tile_name(t) if t is not None else "?" for t in tiles)
+        if watch.melds[seat]:
+            text += f"（副露 {watch.melds[seat]}）"
+        parts.append(text)
     return "；".join(parts)

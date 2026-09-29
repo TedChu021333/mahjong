@@ -107,3 +107,15 @@ RIVER_GAP_MAX = 215
 RIVER_FACE_WIDTH = (40, 90)
 RIVER_TEMPLATE_DIR = TRAIN_DIR / "river_templates"
 """牌河模板：train/river_templates/<牌代碼>/*.png（`python -m perception.river_reader` 產生）。"""
+
+# 對手宣告聽牌後，他牌河旁會一直顯示「聽」圓形標記（上下跳動約 ±20px）。模板
+# train/buttons/聽.png 取自 21.12.08 影片自己的標記中間的字。上家實測在 (400~440, 300~340)；
+# 對家、下家的位置還沒出現過，先用較大範圍（避開畫面中央的「聽」字動畫與聽按鈕）。
+DECLARE_REGIONS = {
+    "left": (360, 240, 540, 440),
+    "top": (450, 120, 1450, 290),
+    "right": (1380, 240, 1720, 700),
+}
+DECLARE_TEMPLATE = TRAIN_DIR / "buttons" / "聽.png"
+DECLARE_MIN_SCORE = 0.85
+"""兩支影片：真正的標記 0.97~0.99，其他畫面最高 0.63。"""

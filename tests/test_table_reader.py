@@ -7,6 +7,7 @@ from perception.config import (
     ACTION_BUTTON_CENTERS,
     CANCEL_BUTTON_REGION,
     CLAIM_TEMPLATE_BOX,
+    DECLARE_TEMPLATE,
     GOLD_MIN_SCORE,
     GOLD_TEMPLATE_BOX,
     SCREEN_HEIGHT,
@@ -87,3 +88,18 @@ def test_real_chow_choice_screen():
     image = read_image(TRAIN_DIR / "吃牌2.png")
     assert len(read_chow_panels(image)) == 2
     assert read_chow_panels(read_image(TRAIN_DIR / "經典_碰.png")) == ()
+
+
+@pytest.mark.skipif(
+    not (TRAIN_DIR / "經典_牌河290.png").exists() or not DECLARE_TEMPLATE.exists(),
+    reason="缺少訓練截圖或聽牌標記模板",
+)
+def test_declared_markers():
+    import cv2
+    from perception.table_reader import read_declared
+
+    template = cv2.cvtColor(read_image(DECLARE_TEMPLATE), cv2.COLOR_BGR2GRAY)
+    assert read_declared(read_image(TRAIN_DIR / "經典_牌河290.png"), template) == {"left"}
+    # 95 秒是自己宣告聽牌，自己的標記不在對手的搜尋範圍內
+    assert read_declared(read_image(TRAIN_DIR / "經典_牌河95.png"), template) == frozenset()
+    assert read_declared(read_image(TRAIN_DIR / "經典_牌河95.png"), None) == frozenset()

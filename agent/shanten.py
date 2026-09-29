@@ -20,7 +20,7 @@ def _validate_counts(counts: Sequence[int], n_open_melds: int) -> tuple[int, ...
     return tuple(counts)
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=500_000)  # 不設上限時長時間模擬會用光記憶體
 def _standard_shanten(
     counts: tuple[int, ...],
     index: int,

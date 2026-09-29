@@ -36,6 +36,8 @@ from perception.config import CONTINUE_BUTTONS, NEXT_GAME_CLICKS, NEXT_GAME_DELA
 
 RETRY_AFTER = 1.5
 MAX_RETRIES = 2
+CLAIM_MEMORY = 10.0
+"""能吃碰時放大的牌可能先縮進牌河、按鈕卻還亮著；這段時間內沿用最近讀到的那張。"""
 RESULT_DIR = Path("result")
 """每局結算畫面的截圖。"""
 
@@ -111,14 +113,22 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     pending_claim = None
     """最近一次建議的吃碰：(吃碰後應有的手牌, 不能打的牌)。"""
     missed_for = None
+    last_claim = None
+    """(最近讀到的放大牌, 時間)。"""
     """已經存過「胡按鈕亮著卻沒選胡」截圖的畫面。"""
     for stamp, frame in frames:
         observation = observe_fn(frame, readers)
+        if observation is not None:
+            if observation.claim is not None and observation.claim.tile is not None:
+                last_claim = (observation.claim, clock())
+            elif observation.buttons is not None and not observation.my_turn                     and last_claim is not None and clock() - last_claim[1] <= CLAIM_MEMORY:
+                observation = replace(observation, claim=last_claim[0])
         if rivers is not None and observation is not None:
             for event in rivers.update(frame, observation):
                 name = tile_name(event.tile) if event.tile is not None else "?"
                 log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
-            observation = replace(observation, discards=rivers.discards())
+            observation = replace(observation, discards=rivers.discards(),
+                                  melds=rivers.meld_counts())
         if observation is None and find_continue is not None:
             observation = find_continue(frame)
         if observation is None and next_game_clicks and clock() - acted_at >= NEXT_GAME_DELAY:

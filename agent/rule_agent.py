@@ -171,13 +171,14 @@ def visible_tile_counts(state: GameState, player: int) -> list[int]:
     return visible
 
 
-def safe_tiles(state: GameState, player: int) -> set[int]:
+def safe_tiles(state: GameState, player: int, use_declared: bool = True) -> set[int]:
     """回傳對可觀測威脅對手都已打過的現物牌。"""
     if not 0 <= player < 4:
         raise ValueError("player 必須在 0-3 之間")
     opponents = [
         opponent_state for opponent, opponent_state in enumerate(state.players)
-        if opponent != player and len(opponent_state.melds) >= 2
+        if opponent != player and (len(opponent_state.melds) >= 2
+                                   or (use_declared and state.declared[opponent]))
     ]
     if not opponents:
         opponents = [
@@ -234,12 +235,15 @@ def danger_score(state: GameState, player: int, tile: int) -> float:
     return score
 
 
-def opponent_threat_score(state: GameState, observer: int, opponent: int) -> int:
+def opponent_threat_score(state: GameState, observer: int, opponent: int,
+                          use_declared: bool = True) -> int:
     """以公開資訊估計對手威脅，不讀取對手手牌。"""
     if not 0 <= observer < 4 or not 0 <= opponent < 4:
         raise ValueError("observer 與 opponent 必須在 0-3 之間")
     if observer == opponent:
         raise ValueError("observer 與 opponent 不可相同")
+    if use_declared and state.declared[opponent]:
+        return 5  # 宣告聽牌：確定已經聽了
     opponent_state = state.players[opponent]
     meld_count = len(opponent_state.melds)
     if meld_count >= 3:
@@ -255,24 +259,36 @@ def opponent_threat_score(state: GameState, observer: int, opponent: int) -> int
     return min(score, 5)
 
 
-def should_fold(state: GameState, player: int) -> bool:
+DECLARED_FOLD_SHANTEN = 2
+"""有對手宣告聽牌時，自己向聽數達到這個值就棄胡。"""
+
+
+def should_fold(state: GameState, player: int, use_declared: bool = True,
+                declared_fold_shanten: int | None = None) -> bool:
     """判斷是否值得放棄進攻，進入完全防守。"""
     if not 0 <= player < 4:
         raise ValueError("player 必須在 0-3 之間")
     own = state.players[player]
     own_shanten = shanten(own.hand, own.open_melds)
     highest_threat = max(
-        opponent_threat_score(state, player, opponent)
+        opponent_threat_score(state, player, opponent, use_declared)
         for opponent in range(4) if opponent != player
     )
+    if use_declared and any(state.declared[opponent] for opponent in range(4)
+                            if opponent != player):
+        if declared_fold_shanten is None:
+            declared_fold_shanten = DECLARED_FOLD_SHANTEN
+        return own_shanten >= declared_fold_shanten
     return own_shanten >= 2 and highest_threat >= 3
 
 
 def choose_rule_action_for_player(
     state: GameState, player: int, rng: Random | None = None,
-    gold_penalty: float | None = None,
+    gold_penalty: float | None = None, use_declared: bool = True,
+    declared_fold_shanten: int | None = None,
 ) -> Action | None:
-    """只替指定玩家做決策，不讀取對手隱藏手牌；gold_penalty 見 choose_discard。"""
+    """只替指定玩家做決策，不讀取對手隱藏手牌；gold_penalty 見 choose_discard。
+    use_declared=False 時忽略對手宣告聽牌（評估這項資訊的價值用）。"""
     if not 0 <= player < 4:
         raise ValueError("player 必須在 0-3 之間")
     actions = legal_actions(state, player)
@@ -303,10 +319,11 @@ def choose_rule_action_for_player(
     if state.phase == Phase.DISCARD:
         if state.declared[player]:
             return actions[0]  # 聽牌後手牌鎖住，只剩打掉摸進的牌
-        defensive = should_fold(state, player)
+        defensive = should_fold(state, player, use_declared, declared_fold_shanten)
         tile = choose_discard(state.players[player].hand,
                               state.players[player].open_melds, rng,
-                              visible_tile_counts(state, player), safe_tiles(state, player),
+                              visible_tile_counts(state, player),
+                              safe_tiles(state, player, use_declared),
                               suji_tiles(state, player), defensive=defensive,
                               forbidden=state.forbidden_discards if state.claimed else (),
                               gold_tiles=state.gold_tiles, gold_penalty=gold_penalty)
