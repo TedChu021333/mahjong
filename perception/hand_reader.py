@@ -142,7 +142,9 @@ def _unit_rows(patches: np.ndarray) -> np.ndarray:
 class TileClassifier:
     """以模板比對辨識單張牌；templates 為 (牌編碼, 圖片) 列表。"""
 
-    def __init__(self, templates: list[tuple[int, np.ndarray]]) -> None:
+    def __init__(self, templates: list[tuple[int, np.ndarray]],
+                 min_score: float = MIN_MATCH_SCORE) -> None:
+        self.min_score = min_score
         if not templates:
             raise ValueError("沒有任何牌面模板")
         m = TEMPLATE_MARGIN
@@ -160,7 +162,8 @@ class TileClassifier:
 
     @classmethod
     def from_directory(cls, directory: str | Path = TEMPLATE_DIR,
-                       template_box: Box | None = None) -> "TileClassifier":
+                       template_box: Box | None = None,
+                       min_score: float = MIN_MATCH_SCORE) -> "TileClassifier":
         """讀取 <directory>/<牌代碼>/*.png。
 
         template_box 只取模板中的一塊（left, top, right, bottom），用來辨識
@@ -177,7 +180,7 @@ class TileClassifier:
         if template_box is not None:
             left, top, right, bottom = template_box
             templates = [(tile, image[top:bottom, left:right]) for tile, image in templates]
-        return cls(templates)
+        return cls(templates, min_score)
 
     @property
     def known_tiles(self) -> set[int]:
@@ -213,7 +216,7 @@ class TileClassifier:
         scores = self.scores(tile_image)
         tile = max(scores, key=scores.__getitem__)
         score = scores[tile]
-        return (tile if score >= MIN_MATCH_SCORE else None), score
+        return (tile if score >= self.min_score else None), score
 
 
 @dataclass(frozen=True)

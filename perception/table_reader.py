@@ -28,6 +28,7 @@ BUTTON_LIT_VALUE = 120
 """亮的按鈕亮度遠高於此值，變暗的按鈕在此之下（影片量測：亮 1.0、暗 ≤0.16）。"""
 CANCEL_MIN_RED = 0.42
 TILE_FACE_MIN_RATIO = 0.6
+GOLD_MIN_FACE_RATIO = 0.3
 
 
 def _hsv(image: np.ndarray) -> np.ndarray:
@@ -94,8 +95,8 @@ def read_gold_tiles(image: np.ndarray, gold_classifier: TileClassifier) -> list[
     for index in range(GOLD_MAX_SLOTS):
         box = gold_slot_box(index)
         left, top, right, bottom = box
-        # 牌面上方留白處檢查有沒有牌
-        if _face_ratio(image, (left + 6, top + 2, right - 6, top + 8)) < TILE_FACE_MIN_RATIO:
+        # 空格是藍色面板底色；有牌時整格白色比例高（圖案可能貼近邊緣，不能只看上緣）
+        if _face_ratio(image, box) < GOLD_MIN_FACE_RATIO:
             break
         tile, _ = gold_classifier.classify(image[top:bottom, left:right])
         tiles.append(tile)

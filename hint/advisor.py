@@ -14,7 +14,7 @@ import numpy as np
 from agent.rule_agent import choose_rule_action_for_player, choose_swap_tiles
 from game.rules import Action, ActionType, GameState, Phase, legal_actions
 from game.tiles import NUM_TILE_TYPES, tile_name
-from perception.config import GOLD_TEMPLATE_BOX, TEMPLATE_DIR
+from perception.config import CLAIM_TEMPLATE_BOX, GOLD_MIN_SCORE, GOLD_TEMPLATE_BOX, TEMPLATE_DIR
 from perception.config import MAX_HAND_TILES
 from perception.hand_reader import TileClassifier, _cell_box, drawn_tile_box, read_hand
 from perception.state_parser import ObservedPlayer, ObservedTable, parse_observed_table
@@ -29,7 +29,7 @@ from perception.table_reader import (
 )
 
 ME = 0
-SOURCE_SEAT = {"left": 3, "right": 1}
+SOURCE_SEAT = {"left": 3, "top": 2, "right": 1}
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,9 @@ class Readers:
 
     def __init__(self, template_dir=TEMPLATE_DIR) -> None:
         self.tiles = TileClassifier.from_directory(template_dir)
-        self.gold = TileClassifier.from_directory(template_dir, template_box=GOLD_TEMPLATE_BOX)
+        self.claim = TileClassifier.from_directory(template_dir, template_box=CLAIM_TEMPLATE_BOX)
+        self.gold = TileClassifier.from_directory(template_dir, template_box=GOLD_TEMPLATE_BOX,
+                                                  min_score=GOLD_MIN_SCORE)
 
 
 def observe(image: np.ndarray, readers: Readers) -> Observation | None:
@@ -73,7 +75,7 @@ def observe(image: np.ndarray, readers: Readers) -> Observation | None:
         return None
     gold = tuple(t for t in read_gold_tiles(image, readers.gold) if t is not None)
     return Observation(reading.known_tiles(), read_buttons(image),
-                       read_claim_tile(image, readers.tiles), gold, reading.boxes,
+                       read_claim_tile(image, readers.claim), gold, reading.boxes,
                        read_swap_prompt(image),
                        tuple(box[1] != HAND_TILE_TOP for box in reading.boxes),
                        read_chow_panels(image))

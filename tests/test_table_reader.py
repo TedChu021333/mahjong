@@ -6,6 +6,8 @@ from perception.capture import read_image
 from perception.config import (
     ACTION_BUTTON_CENTERS,
     CANCEL_BUTTON_REGION,
+    CLAIM_TEMPLATE_BOX,
+    GOLD_MIN_SCORE,
     GOLD_TEMPLATE_BOX,
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
@@ -44,10 +46,9 @@ def test_all_lit_is_not_a_button_row():
 
 # 真實截圖：(按鈕, 可吃碰的牌, 來源, 金牌)
 SCREENSHOTS = {
-    "吃牌畫面": ({"chow"}, "8m", "left", "8p7z2z"),
-    "碰牌畫面": ({"pung"}, "1p", "right", "4m4s5s1m"),
-    "胡牌畫面": ({"win"}, "4s", "left", "3z5m8s"),
-    "副露區2": (None, None, None, "2s1p8s7z1s"),
+    "經典_碰": ({"chow", "pung"}, "2m", "left", "1s9p7s"),
+    "經典_對家碰": ({"chow", "pung"}, "2s", "top", "4z7p4p"),
+    "經典_下家打牌": (None, "5z", "right", "1s9p7s"),
 }
 
 
@@ -57,16 +58,13 @@ SCREENSHOTS = {
     reason="缺少訓練截圖或模板",
 )
 def test_real_screenshots():
-    tiles = TileClassifier.from_directory()
-    gold = TileClassifier.from_directory(template_box=GOLD_TEMPLATE_BOX)
+    claim_reader = TileClassifier.from_directory(template_box=CLAIM_TEMPLATE_BOX)
+    gold = TileClassifier.from_directory(template_box=GOLD_TEMPLATE_BOX, min_score=GOLD_MIN_SCORE)
     for name, (buttons, claim, source, gold_tiles) in SCREENSHOTS.items():
         image = read_image(TRAIN_DIR / f"{name}.png")
         assert read_buttons(image) == (None if buttons is None else frozenset(buttons)), name
-        reading = read_claim_tile(image, tiles)
-        if claim is None:
-            assert reading is None, name
-        else:
-            assert (reading.tile, reading.source) == (parse(claim)[0], source), name
+        reading = read_claim_tile(image, claim_reader)
+        assert (reading.tile, reading.source) == (parse(claim)[0], source), name
         assert read_gold_tiles(image, gold) == parse(gold_tiles), name
 
 
@@ -80,9 +78,12 @@ def test_chow_panels_are_found_only_on_the_choice_screen():
     assert [x for x, _ in centers] == [839, 1199]
 
 
-@pytest.mark.skipif(not (TRAIN_DIR / "吃牌2.png").exists(), reason="缺少訓練截圖")
+@pytest.mark.skipif(
+    not (TRAIN_DIR / "吃牌2.png").exists() or not (TRAIN_DIR / "經典_碰.png").exists(),
+    reason="缺少訓練截圖",
+)
 def test_real_chow_choice_screen():
     from perception.table_reader import read_chow_panels
     image = read_image(TRAIN_DIR / "吃牌2.png")
     assert len(read_chow_panels(image)) == 2
-    assert read_chow_panels(read_image(TRAIN_DIR / "吃牌畫面.png")) == ()
+    assert read_chow_panels(read_image(TRAIN_DIR / "經典_碰.png")) == ()

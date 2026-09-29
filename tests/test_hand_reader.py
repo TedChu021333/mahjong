@@ -32,9 +32,11 @@ def blank_screen() -> np.ndarray:
     return screen
 
 
-def draw_tile(screen: np.ndarray, box, seed: int, top: int = 832, raise_by: int = 0) -> None:
+def draw_tile(screen: np.ndarray, box, seed: int, top: int = 836, raise_by: int = 0,
+              bottom: int | None = None) -> None:
     """畫一張白色牌面，中間放由 seed 決定的彩色方塊圖樣。"""
-    left, _, right, bottom = box
+    left, _, right, box_bottom = box
+    bottom = box_bottom if bottom is None else bottom
     top, bottom = top - raise_by, bottom - raise_by
     screen[top:bottom - 3, left + 3:right - 3] = (235, 235, 235)
     pattern = np.random.default_rng(seed).integers(0, 200, (6, 4, 3), dtype=np.uint8)
@@ -50,21 +52,21 @@ def screen_with_hand(seeds: list[int]) -> np.ndarray:
     return screen
 
 
-def test_locates_hand_and_ignores_lower_meld_tiles():
+def test_locates_hand_and_ignores_upright_meld_tiles():
     screen = screen_with_hand([1, 2, 3, 4, 5, 6, 7])
-    # 副露牌較低（牌面從 y≈860 開始），緊鄰暗手牌左側
+    # 副露牌直立在暗手牌左側，但白色牌面只到 y≈960，比暗手牌短
     for index in range(7, 10):
-        draw_tile(screen, _cell_box(index), 99, top=862)
+        draw_tile(screen, _cell_box(index), 99, bottom=963)
     boxes = locate_hand_tiles(screen)
     assert len(boxes) == 7
     assert boxes == sorted(boxes)
     assert boxes[-1] == _cell_box(0)
 
 
-def test_kong_top_tile_in_meld_area_is_not_a_hand_tile():
-    # 槓子的第 4 張疊在副露中間，會蓋到偵測橫帶；它和暗手牌之間隔著空格
+def test_isolated_tile_left_of_a_gap_is_not_a_hand_tile():
+    # 動畫或副露偶爾在左側單獨被偵測到；它和暗手牌之間隔著空格
     screen = screen_with_hand([1, 2, 3, 4, 5])
-    draw_tile(screen, _cell_box(14), 9, top=800)
+    draw_tile(screen, _cell_box(14), 9)
     boxes = locate_hand_tiles(screen)
     assert len(boxes) == 5
     assert _cell_box(14) not in boxes
@@ -73,7 +75,7 @@ def test_kong_top_tile_in_meld_area_is_not_a_hand_tile():
 def test_flower_display_overlapping_tile_top_does_not_hide_tile():
     screen = screen_with_hand(list(range(16)))
     left, *_ = _cell_box(12)
-    screen[780:850, left + 5:left + 80] = (200, 120, 40)  # 壓在手牌頂端的花牌
+    screen[780:860, left + 5:left + 80] = (200, 120, 40)  # 壓在手牌頂端的花牌
     assert len(locate_hand_tiles(screen)) == 16
 
 
@@ -145,22 +147,29 @@ def test_tile_crop_stays_inside_hand_row():
     assert box[2] <= SCREEN_WIDTH
 
 
-# 訓練截圖的人工標註（暗手牌由左到右）；train/ 不進版控，沒有截圖時略過。
+# 經典版綠色桌面的人工標註（暗手牌由左到右，含第 17 張）；由影片擷取，
+# train/ 不進版控，沒有截圖時略過。名稱：a/b = 兩支影片，數字 = 秒。
 SCREENSHOT_LABELS = {
-    "副露區1": "233455668m8p588s",
-    "副露區2": "2355566m788s",
-    "吃牌畫面": "334467m888p2244568s",
-    "完整正常畫面": "257778m114p2335588s",
-    "碰牌畫面": "557778m114p2335588s",
-    "胡牌畫面": "22255p56s",
-    "第十七張": "47789m246788p13352s",  # 最後的 2s 是摸進的第 17 張
-    "缺的牌1": "244m388p35588s12345z",   # 東南西被選取上移（換三張）
-    "缺的牌2": "7m222568p2356s34655z",
-    "缺的牌3": "47789m24678p13359s5z",
-    "缺的牌4": "57m3577p2223469s147z",
-    "缺的牌5": "157m233577p2223469s",
-    "缺的牌6": "3347m8889p1244568s6z",
+    "經典_a20": "1123789m4p567789s37z",
+    "經典_a45": "112237899m4p567789s",
+    "經典_a75": "115789m4p567789s",
+    "經典_a124": "2337m7p12234688s775z",
+    "經典_a133": "2337m7p12234688s",
+    "經典_a200": "7p1223489s77z",
+    "經典_a280": "12289s77z",
+    "經典_a283": "12289s772z",
+    "經典_b10": "34489m1789p2458s465z",
+    "經典_b43": "3344899m57889p2458s",
+    "經典_b72": "3344899m557889p458s2p",
+    "經典_b99": "3344899m557889p458s4m",
 }
+
+
+def _nearby(a: str, b: str) -> bool:
+    """同一支影片相隔 15 秒內的畫面幾乎一樣，留一驗證時一起排除。"""
+    video_a, second_a = a[3], int(a[4:])
+    video_b, second_b = b[3], int(b[4:])
+    return video_a == video_b and abs(second_a - second_b) <= 15
 
 
 @pytest.mark.skipif(
@@ -168,7 +177,7 @@ SCREENSHOT_LABELS = {
     reason="缺少訓練截圖",
 )
 def test_real_screenshots_leave_one_out():
-    """每張截圖只用其他截圖的模板辨識，模擬遇到新畫面的情況。"""
+    """每張截圖只用其他（不相鄰）截圖的模板辨識，模擬遇到新畫面的情況。"""
     data = {}
     for name, labels in SCREENSHOT_LABELS.items():
         image = read_image(TRAIN_DIR / f"{name}.png")
@@ -178,7 +187,7 @@ def test_real_screenshots_leave_one_out():
     for name, (crops, labels) in data.items():
         classifier = TileClassifier([
             (tile, crop)
-            for other, (other_crops, other_labels) in data.items() if other != name
+            for other, (other_crops, other_labels) in data.items() if not _nearby(name, other)
             for tile, crop in zip(other_labels, other_crops)
         ])
         for crop, tile in zip(crops, labels):

@@ -3,7 +3,7 @@
     python -m hint                         # 即時擷取螢幕（遊戲最大化、1920x1080）
     python -m hint --image train/吃牌畫面.png
     python -m hint --video train/遊戲流程.mp4 --step 1
-    python -m hint --auto                  # 自動點擊，只在遊戲的訓練場使用
+    python -m hint --no-overlay            # 建議只印在終端機，不顯示浮動小視窗
 
 連續兩幀辨識結果相同才給建議（避開理牌、摸牌等動畫），建議改變時才印出。
 自動模式：同一個畫面只操作一次；點完 RETRY_AFTER 秒畫面沒變（例如出牌要點兩下）
@@ -49,7 +49,7 @@ def video_frames(path: Path, step: float, start: float) -> Iterator[tuple[str, n
 
 
 def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
-        actuator=None, observe_fn=observe, clock=time.monotonic) -> None:
+        actuator=None, observe_fn=observe, clock=time.monotonic, show=None) -> None:
     previous = None
     last_advice = None
     acted_for = None
@@ -68,6 +68,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         advice = describe(action) if action is not None else None
         if advice is not None and advice != last_advice:
             print(f"[{stamp}] {advice}", flush=True)
+            if show is not None:
+                show(advice)
         last_advice = advice
         if actuator is None or action is None:
             continue
@@ -90,8 +92,8 @@ def main() -> None:
     parser.add_argument("--step", type=float, default=0.5, help="影片每隔幾秒取一幀")
     parser.add_argument("--start", type=float, default=0.0, help="影片從第幾秒開始")
     parser.add_argument("--interval", type=float, default=0.3, help="即時模式擷取間隔（秒）")
-    parser.add_argument("--auto", action="store_true",
-                        help="自動點擊（只在遊戲的訓練場使用；滑鼠甩到左上角中止）")
+    parser.add_argument("--auto", action="store_true", help="自動點擊（目前停用，見說明）")
+    parser.add_argument("--no-overlay", action="store_true", help="不顯示浮動小視窗")
     args = parser.parse_args()
     readers = Readers()
     if args.image:
@@ -101,14 +103,19 @@ def main() -> None:
     elif args.video:
         run(video_frames(args.video, args.step, args.start), readers)
     elif args.auto:
-        from control.actuator import Actuator
-
-        print("自動模式啟動：只在訓練場使用。滑鼠甩到螢幕左上角可立即中止。", flush=True)
-        time.sleep(3)  # 讓使用者切回遊戲視窗
-        run(screen_frames(args.interval), readers, actuator=Actuator())
-    else:
+        # 目前支援的「經典版」桌面是與真人配桌的場（畫面顯示真人即時配對、
+        # 對手有玩家名稱與照片頭像），在這裡自動打牌等於對真人使用外掛，
+        # 因此不提供。control.actuator 保留給確認沒有真人的場景或自己的模擬器。
+        raise SystemExit("自動模式已停用：目前的桌面版型是與真人對戰的場，只提供提示模式。")
+    elif args.no_overlay:
         print("提示模式啟動，Ctrl+C 結束", flush=True)
         run(screen_frames(args.interval), readers)
+    else:
+        from hint.overlay import Overlay
+
+        print("提示模式啟動（浮動小視窗），Ctrl+C 結束", flush=True)
+        overlay = Overlay()
+        overlay.run(lambda: run(screen_frames(args.interval), readers, show=overlay.show))
 
 
 if __name__ == "__main__":
