@@ -310,3 +310,32 @@ def test_tenpai_prefers_the_wait_with_more_live_tiles():
     assert choose_rule_action_for_player(state, 0, Random(0)).tile == P("9s")
     players[1].discards = parse("1z1z1z")
     assert choose_rule_action_for_player(state, 0, Random(0)).tile == P("1z")
+
+
+def test_concealed_kong_when_it_does_not_hurt():
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = C("1111m234567p456s11z67z")
+    assert sum(players[0].hand) == 17
+    state = GameState(list(range(30)), players, phase=Phase.DISCARD)
+    action = choose_rule_action_for_player(state, 0, Random(0))
+    assert action.kind == ActionType.KONG and action.tile == P("1m")
+
+
+def test_no_kong_when_the_fourth_tile_is_needed_in_a_run():
+    from agent.rule_agent import kong_is_worth
+
+    # 一萬要和 23m 組搭子：暗槓會讓向聽數變差
+    hand = C("1111m23m45p78p12s45s567z")
+    assert sum(hand) == 17
+    assert not kong_is_worth(hand, 0, P("1m"))
+
+
+def test_kong_is_preferred_over_pung_from_a_discard():
+    players = [PlayerState() for _ in range(4)]
+    players[1].hand = C("555p123m456m789m124s7z")
+    assert sum(players[1].hand) == 16
+    players[0].discards = parse("5p")
+    state = GameState([0] * 30, players, current_player=0, phase=Phase.RESPONSE,
+                      last_discard=P("5p"), discard_player=0, response_player=1,
+                      response_players=[1])
+    assert choose_rule_action_for_player(state, 1).kind == ActionType.KONG

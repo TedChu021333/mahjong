@@ -26,7 +26,7 @@ from agent.opponent_model import (
     unseen_counts,
 )
 from agent.rollout import Seat, play_out
-from agent.rule_agent import choose_rule_action_for_player
+from agent.rule_agent import choose_rule_action_for_player, choose_self_kong
 from game.rules import Action, ActionType, GameState, Phase, legal_actions
 
 CANDIDATES = 3
@@ -164,6 +164,9 @@ def choose_mc_action_for_player(state: GameState, player: int, rng: Random | Non
     win = next((action for action in actions if action.kind == ActionType.WIN), None)
     if win is not None:
         return win
+    kong = choose_self_kong(state, player)
+    if kong is not None:
+        return kong
     calibration = calibration or default_calibration()
     scores = discard_scores(state, player, rng, calibration, risk_weight=RISK_WEIGHT,
                             undeclared_share=undeclared_share)

@@ -12,7 +12,7 @@ from random import Random
 import cv2
 import numpy as np
 
-from agent.rule_agent import choose_rule_action_for_player, choose_swap_tiles
+from agent.rule_agent import choose_rule_action_for_player, choose_swap_tiles, kong_is_worth
 from game.rules import Action, ActionType, GameState, Phase, legal_actions
 from game.tiles import NUM_TILE_TYPES, tile_name
 from perception.config import CLAIM_TEMPLATE_BOX, GOLD_MIN_SCORE, GOLD_TEMPLATE_BOX, TEMPLATE_DIR
@@ -224,6 +224,21 @@ def use_policy(name: str) -> None:
     _policy = name
 
 
+def _added_kong(observation: Observation, state: GameState) -> Action | None:
+    """輪到自己時「槓」亮著、手上卻沒有 4 張一樣的：是摸進的牌能加槓（碰過的刻子內容
+    讀不到，規則引擎列不出這個選項），划算就槓。"""
+    buttons = observation.buttons or frozenset()
+    if not observation.my_turn or observation.claimed or "kong" not in buttons:
+        return None
+    me = state.players[ME]
+    if any(count >= 4 for count in me.hand):
+        return None  # 暗槓由 AI 自己判斷
+    drawn = observation.hand[-1]
+    if kong_is_worth(me.hand, me.open_melds, drawn):
+        return Action(ActionType.KONG, tile=drawn, tiles=(drawn,) * 4)
+    return None
+
+
 def decide(observation: Observation, rng: Random | None = None) -> Action | None:
     if observation.swap_prompt is not None:
         counts = [0] * NUM_TILE_TYPES
@@ -234,6 +249,9 @@ def decide(observation: Observation, rng: Random | None = None) -> Action | None
     state = build_state(observation)
     if state is None:
         return None
+    added_kong = _added_kong(observation, state)
+    if added_kong is not None:
+        return added_kong
     if _policy == "mc":
         from agent.mc_agent import LIVE_ROLLOUTS, TIME_LIMIT, choose_mc_action_for_player
 

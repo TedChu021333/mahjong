@@ -154,6 +154,37 @@ def claim_value(hand: Sequence[int], n_open_melds: int, action: Action,
     return best
 
 
+def kong_is_worth(hand: Sequence[int], n_open_melds: int, tile: int,
+                  forbidden: Sequence[int] = ()) -> bool:
+    """輪到自己時槓 tile（手上 4 張 → 暗槓；否則是把 1 張加到碰過的刻子 → 加槓）划不划算：
+    槓完的向聽數不比最好的打法差就槓（槓牌有台、多摸一張、多翻一種金牌）。"""
+    after = list(hand)
+    if after[tile] >= 4:
+        after[tile] -= 4
+        melds = n_open_melds + 1
+    else:
+        after[tile] -= 1
+        melds = n_open_melds
+    best = min(shanten(_without(hand, t), n_open_melds)
+               for t in allowed_discards(list(hand), tuple(forbidden)))
+    return shanten(after, melds) <= best
+
+
+def _without(hand: Sequence[int], tile: int) -> list[int]:
+    result = list(hand)
+    result[tile] -= 1
+    return result
+
+
+def choose_self_kong(state: GameState, player: int) -> Action | None:
+    """輪到自己時要不要暗槓或加槓。"""
+    me = state.players[player]
+    for action in legal_actions(state, player):
+        if action.kind == ActionType.KONG and kong_is_worth(me.hand, me.open_melds, action.tile):
+            return action
+    return None
+
+
 def visible_tile_counts(state: GameState, player: int) -> list[int]:
     """以個人視角統計自己的手牌、牌河與公開副露。"""
     if not 0 <= player < 4:
@@ -312,6 +343,7 @@ def choose_rule_action_for_player(
             # 不划算）；明槓多摸一張，向聽不變差就槓
             if action.kind == ActionType.KONG:
                 worth = after[0] <= baseline[0]
+                after = (after[0], float("-inf"))  # 向聽相同時槓優先於碰（槓有台、多摸一張）
             else:
                 worth = after < baseline
             if worth and (best is None or after < best[0]):
@@ -322,6 +354,9 @@ def choose_rule_action_for_player(
     if state.phase == Phase.DISCARD:
         if state.declared[player]:
             return actions[0]  # 聽牌後手牌鎖住，只剩打掉摸進的牌
+        kong = choose_self_kong(state, player)
+        if kong is not None:
+            return kong
         defensive = should_fold(state, player, use_declared, declared_fold_shanten)
         tile = choose_discard(state.players[player].hand,
                               state.players[player].open_melds, rng,

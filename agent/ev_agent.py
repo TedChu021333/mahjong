@@ -17,6 +17,7 @@ from agent.opponent_model import (
 from agent.rule_agent import (
     GOLD_DISCARD_PENALTY,
     choose_rule_action_for_player,
+    choose_self_kong,
     visible_tile_counts,
 )
 from agent.shanten import effective_tiles, shanten
@@ -64,6 +65,9 @@ def choose_ev_action_for_player(state: GameState, player: int, rng: Random | Non
     win = next((action for action in actions if action.kind == ActionType.WIN), None)
     if win is not None:
         return win
+    kong = choose_self_kong(state, player)
+    if kong is not None:
+        return kong
     scores = discard_scores(state, player, rng, calibration, samples, risk_weight,
                             undeclared_share)
     best = max(scores.values())

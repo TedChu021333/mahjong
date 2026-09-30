@@ -2,6 +2,7 @@ import pytest
 
 from game.tiles import parse
 from hint.advisor import Observation, Readers, _consistent_layout, advise, observe
+from game.rules import ActionType
 from perception.capture import read_image
 from perception.config import TEMPLATE_DIR, TRAIN_DIR
 from perception.hand_reader import _cell_box, drawn_tile_box
@@ -209,3 +210,16 @@ def test_wall_is_estimated_from_discards_and_claims():
                         discards=(tuple(range(8)), tuple(range(9)), tuple(range(9)), tuple(range(9))),
                         melds=(0, 1, 0, 1))
     assert estimate_wall(later) == 60 - 35 + 2
+
+
+def test_added_kong_when_the_kong_button_is_lit():
+    from hint.advisor import decide
+
+    # 摸進 5z（碰過的中）：「槓」亮著、手上沒有 4 張一樣的 → 加槓
+    hand = T("123456789m123p9s5z")
+    assert len(hand) == 14
+    observation = Observation(hand, frozenset({"kong"}), None, ())
+    action = decide(observation)
+    assert action.kind == ActionType.KONG and action.tile == parse("5z")[0]
+    # 沒亮就照常打牌
+    assert decide(Observation(hand, None, None, ())).kind != ActionType.KONG
