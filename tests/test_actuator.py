@@ -144,15 +144,13 @@ def test_auto_mode_requires_confirming_a_computer_only_room():
     assert not confirm_training_room(ask=lambda _: "n")
 
 
-def test_auto_loop_presses_continue_then_next_game_after_a_delay():
-    from perception.config import NEXT_GAME_CLICKS, NEXT_GAME_DELAY, NEXT_GAME_REGION
-
+def test_auto_loop_only_presses_recognised_buttons_between_hands():
+    # 打一圈時按完「繼續」會直接發下一局：讀不到手牌的期間不能盲點任何座標
     clicks, actuator = recorder()
     button = ContinueButton("小結算繼續", (1459, 977))
-    next_game = center(NEXT_GAME_REGION)
+    again = ContinueButton("再贏一局", (1600, 952))
     now = [0.0]
-    # 每幀 0.5 秒：結算畫面 → 讀不到手牌 11 秒 → 新的一局
-    screens = [button] * 2 + [None] * 22 + [my_turn()] * 2 + [None] * 10
+    screens = [button] * 2 + [None] * 20 + [again] * 2 + [None] * 4 + [my_turn()] * 2
 
     def frames():
         for step, screen in enumerate(screens):
@@ -163,15 +161,10 @@ def test_auto_loop_presses_continue_then_next_game_after_a_delay():
     run(frames(), readers=None, actuator=actuator, observe_fn=lambda frame, readers: frame
         if isinstance(frame, Observation) else None,
         find_continue=lambda frame: frame if isinstance(frame, ContinueButton) else None,
-        clock=lambda: now[0], save_result=lambda frame: saved.append(frame) or "result/x.png")
-    assert saved == [button]                          # 每局只存一張結算截圖
-    assert clicks[0] == (1459, 977)                   # 按繼續
-    assert clicks[1] == next_game                     # 3 秒後按下一場
-    assert clicks[1:1 + NEXT_GAME_CLICKS] == [next_game] * NEXT_GAME_CLICKS
-    assert clicks[1 + NEXT_GAME_CLICKS:] == [center(drawn_tile_box())]  # 新局開始後不再點
-    assert NEXT_GAME_DELAY == 3.0
-
-
+        clock=lambda: now[0], save_result=lambda frame, prefix="": saved.append(frame) or "x",
+        log=lambda line, detail=None, echo=True: None)
+    assert clicks == [(1459, 977), (1600, 952), center(drawn_tile_box())]
+    assert button in saved
 def test_save_result_writes_a_png(tmp_path, monkeypatch):
     import numpy as np
     import hint.__main__ as hint_main

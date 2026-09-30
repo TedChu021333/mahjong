@@ -9,9 +9,9 @@
 
 連續兩幀辨識結果相同才給建議（避開理牌、摸牌等動畫），建議改變時才印出。
 自動模式：同一個畫面只操作一次；點完 RETRY_AFTER 秒畫面沒變（例如出牌要點兩下）
-才補點，最多 MAX_RETRIES 次。讀不到手牌時檢查打完後的「繼續」類按鈕，
-同樣連續兩幀一致才點；按下小結算「繼續」後等 NEXT_GAME_DELAY 秒再點下一場按鈕
-（只在讀不到手牌時點，避免點到手牌）。每局結算畫面在按「繼續」前存到 result/。
+才補點，最多 MAX_RETRIES 次。讀不到手牌時檢查打完後的「繼續」類按鈕（小結算繼續、再贏一局），
+同樣連續兩幀一致才點；不再盲點任何座標（打一圈時按完「繼續」會直接發下一局，
+盲點會點到手牌）。每局結算畫面在按「繼續」前存到 result/。
 滑鼠甩到螢幕左上角會立刻中止。
 """
 from __future__ import annotations
@@ -37,9 +37,6 @@ from perception.capture import grab_screen, read_image, write_image
 from perception.config import (
     ACTION_BUTTON_CENTERS,
     CONTINUE_BUTTONS,
-    NEXT_GAME_CLICKS,
-    NEXT_GAME_DELAY,
-    NEXT_GAME_REGION,
 )
 from perception.table_reader import read_buttons
 
@@ -121,11 +118,10 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     acted_for = None
     acted_at = 0.0
     retries = 0
-    next_game_clicks = 0
-    """按下小結算「繼續」後還要點幾次下一場按鈕。"""
     pending_claim = None
     """最近一次建議的吃碰：(吃碰後應有的手牌, 不能打的牌)。"""
     missed_for = None
+    """已經存過「胡按鈕亮著卻沒選胡」截圖的畫面。"""
     last_claim = None
     """(最近讀到的放大牌, 時間)。"""
     decided_for = decided_action = None
@@ -133,14 +129,14 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     win_pressed_at = float("-inf")
     last_readable = None
     """最近一次讀到手牌的時間；存過「讀不到」截圖後設為 None，直到再讀到手牌。"""
-    """已經存過「胡按鈕亮著卻沒選胡」截圖的畫面。"""
     for stamp, frame in frames:
         try:
             observation = observe_fn(frame, readers)
             if observation is not None:
                 if observation.claim is not None and observation.claim.tile is not None:
                     last_claim = (observation.claim, clock())
-                elif observation.buttons is not None and not observation.my_turn                     and last_claim is not None and clock() - last_claim[1] <= CLAIM_MEMORY:
+                elif observation.buttons is not None and not observation.my_turn \
+                        and last_claim is not None and clock() - last_claim[1] <= CLAIM_MEMORY:
                     observation = replace(observation, claim=last_claim[0])
             if rivers is not None and observation is not None:
                 for event in rivers.update(frame, observation):
@@ -171,14 +167,6 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 observation = find_continue(frame)
                 if observation is not None:
                     last_readable = None  # 這局結束了：結算、配桌期間讀不到手牌是正常的
-            if observation is None and next_game_clicks and clock() - acted_at >= NEXT_GAME_DELAY:
-                left, top, right, bottom = NEXT_GAME_REGION
-                log(f"[{stamp}] 按下一場")
-                actuator.click(((left + right) // 2, (top + bottom) // 2))
-                next_game_clicks -= 1
-                acted_at = clock()
-            if observation is not None and not isinstance(observation, ContinueButton):
-                next_game_clicks = 0  # 新的一局已經開始
             if observation is None or observation != previous:
                 previous = observation
                 continue
@@ -201,7 +189,6 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 if retries == 0:
                     log(f"[{stamp}] 按「{observation.name}」")
                 actuator.click(observation.center)
-                next_game_clicks = NEXT_GAME_CLICKS
                 continue
             if actuator is not None and actuator.follow_up(observation):
                 log(f"[{stamp}] 選擇吃法")
