@@ -34,7 +34,14 @@ from hint.river_watch import summary as river_summary
 from perception.continue_button import ContinueButton
 from perception.river_reader import RiverReader
 from perception.capture import grab_screen, read_image, write_image
-from perception.config import CONTINUE_BUTTONS, NEXT_GAME_CLICKS, NEXT_GAME_DELAY, NEXT_GAME_REGION
+from perception.config import (
+    ACTION_BUTTON_CENTERS,
+    CONTINUE_BUTTONS,
+    NEXT_GAME_CLICKS,
+    NEXT_GAME_DELAY,
+    NEXT_GAME_REGION,
+)
+from perception.table_reader import read_buttons
 
 RETRY_AFTER = 1.5
 MAX_RETRIES = 2
@@ -106,7 +113,9 @@ def video_frames(path: Path, step: float, start: float) -> Iterator[tuple[str, n
 
 def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         actuator=None, observe_fn=observe, clock=time.monotonic, show=None,
-        find_continue=None, save_result=save_result, log=print_log, rivers=None) -> None:
+        find_continue=None, save_result=save_result, log=print_log, rivers=None,
+        find_win=None) -> None:
+    """find_win(frame) 為「胡」按鈕是否亮著（不依賴手牌辨識）。"""
     previous = None
     last_advice = None
     acted_for = None
@@ -121,6 +130,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     """(最近讀到的放大牌, 時間)。"""
     decided_for = decided_action = None
     stuck_for = None
+    win_pressed_at = float("-inf")
     last_readable = None
     """最近一次讀到手牌的時間；存過「讀不到」截圖後設為 None，直到再讀到手牌。"""
     """已經存過「胡按鈕亮著卻沒選胡」截圖的畫面。"""
@@ -140,11 +150,23 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                                       melds=rivers.meld_counts())
             if observation is not None:
                 last_readable = clock()
-            elif last_readable is not None and clock() - last_readable >= UNREADABLE_AFTER                     and not (decided_action is not None
-                             and decided_action.kind == ActionType.DECLARE):
+            elif (last_readable is not None and clock() - last_readable >= UNREADABLE_AFTER
+                  and not (decided_action is not None
+                           and decided_action.kind == ActionType.DECLARE)):
                 last_readable = None  # 每段讀不到的期間只存一張
                 log(f"[{stamp}] 連續 {UNREADABLE_AFTER:.0f} 秒讀不到手牌，截圖存到 "
                     f"{save_result(frame, '讀不到_')}")
+            if observation is None and find_win is not None and find_win(frame):
+                # 摸牌的手、出牌動畫常蓋住手牌，而且倒數只剩一兩秒：讀不到手牌也照樣胡
+                # （曾因此錯過自摸，遊戲還會顯示「您剛剛錯過了胡牌時機」）
+                if clock() - win_pressed_at >= RETRY_AFTER:
+                    win_pressed_at = clock()
+                    log(f"[{stamp}] 胡！（手牌被動畫擋住，直接按「胡」）")
+                    if show is not None:
+                        show("胡！")
+                    if actuator is not None:
+                        actuator.click(ACTION_BUTTON_CENTERS["win"])
+                continue
             if observation is None and find_continue is not None:
                 observation = find_continue(frame)
                 if observation is not None:
@@ -311,7 +333,7 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
     if not overlay:
         print(f"{mode}啟動，Ctrl+C 結束", flush=True)
         run(screen_frames(interval), readers, actuator=actuator, find_continue=find_continue,
-            log=log, rivers=rivers)
+            log=log, rivers=rivers, find_win=win_is_lit)
         return
     from hint.overlay import Overlay
 
@@ -319,7 +341,12 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
     window = Overlay()
     window.run(lambda: run(screen_frames(interval), readers, actuator=actuator,
                            show=window.show, find_continue=find_continue, log=log,
-                           rivers=rivers))
+                           rivers=rivers, find_win=win_is_lit))
+
+
+def win_is_lit(frame: np.ndarray) -> bool:
+    buttons = read_buttons(frame)
+    return buttons is not None and "win" in buttons
 
 
 if __name__ == "__main__":

@@ -298,3 +298,35 @@ def test_settlement_does_not_count_as_unreadable():
                   clock=lambda: now[0], save_result=lambda frame, prefix="": saved.append(prefix) or "x",
                   log=lambda line, detail=None, echo=True: None)
     assert "讀不到_" not in saved
+
+
+def test_win_is_pressed_even_when_the_hand_is_covered():
+    import hint.__main__ as hint_main
+    from perception.config import ACTION_BUTTON_CENTERS
+
+    # 摸牌的手蓋住手牌、「胡」亮著、倒數只剩 1 秒（實戰截圖）
+    clicks, shown = [], []
+
+    class Recorder:
+        def click(self, point):
+            clicks.append(point)
+
+        def follow_up(self, observation):
+            return False
+
+    hint_main.run(((str(i), "covered") for i in range(3)), readers=None, actuator=Recorder(),
+                  observe_fn=lambda frame, readers: None, find_win=lambda frame: True,
+                  show=shown.append, clock=lambda: 0.0,
+                  log=lambda line, detail=None, echo=True: None)
+    assert clicks == [ACTION_BUTTON_CENTERS["win"]]  # 同一次只按一下
+    assert shown == ["胡！"]
+
+
+def test_win_button_reader_on_real_screens():
+    import pytest
+    from hint.__main__ import win_is_lit
+
+    path = TRAIN_DIR / "經典_碰.png"
+    if not path.exists():
+        pytest.skip("缺少訓練截圖")
+    assert not win_is_lit(read_image(path))  # 只有吃、碰亮著
