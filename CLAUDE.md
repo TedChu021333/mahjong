@@ -20,6 +20,10 @@
 - `control/`    actuator.py（pyautogui）：把動作轉成點擊；滑鼠甩到左上角中止
 - `eval/`      arena.py：配對比較兩種策略（同一副牌各打一次、只換一個座位的策略），
   `python -m eval.arena --variant gold:8 --baseline gold:0 --games 2000 --workers 5 --out result/x.csv`
+- `eval/stats.py`：從 `result/` 結算截圖統計實戰戰績（每圈與總輸贏、胡牌率、放槍率附 95% 誤差），
+  `python -m eval.stats --since 18:19 --until 19:53 [--csv 檔案]`。金額用 `eval/digit_templates/` 字形比對
+  （金色贏、銀色輸），自己那列用 `eval/my_name.png`（「不沾」）比對；名字被提示條蓋住時記為未知（約 15%）。
+  流局沒有結算畫面不計入；9/30 晚上以前有些小結算被同一秒的大結算截圖覆蓋，那幾圈少一局。
 - `training/`
 
 ## 視覺資料設定
