@@ -17,6 +17,7 @@ from perception.capture import read_image, write_image
 from perception.config import (
     BUTTON_TEMPLATE_DIR,
     CONTINUE_BUTTONS,
+    POPUP_CLOSERS,
     CONTINUE_MIN_SCORE,
     CONTINUE_SEARCH_MARGIN,
 )
@@ -58,12 +59,38 @@ class ContinueButtons:
         return None
 
 
+class PopupClosers:
+    """會蓋住牌桌的彈出面板：辨識到就回傳要點的位置（關閉鈕）。"""
+
+    def __init__(self, references: dict[str, np.ndarray]) -> None:
+        self.references = {name: cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                           for name, image in references.items()}
+
+    @classmethod
+    def from_directory(cls, directory: Path = BUTTON_TEMPLATE_DIR) -> "PopupClosers":
+        return cls({name: read_image(directory / f"{name}.png")
+                    for name in POPUP_CLOSERS if (directory / f"{name}.png").exists()})
+
+    def find(self, image: np.ndarray) -> ContinueButton | None:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        for name, reference in self.references.items():
+            region, click = POPUP_CLOSERS[name]
+            area = crop(gray, region, CONTINUE_SEARCH_MARGIN)
+            if area.shape[0] < reference.shape[0] or area.shape[1] < reference.shape[1]:
+                continue
+            if cv2.matchTemplate(area, reference, cv2.TM_CCOEFF_NORMED).max() >= CONTINUE_MIN_SCORE:
+                return ContinueButton(name, click)
+        return None
+
+
 def main() -> None:
-    if len(sys.argv) != 3 or sys.argv[2] not in CONTINUE_BUTTONS:
+    regions = dict(CONTINUE_BUTTONS)
+    regions.update({name: region for name, (region, _) in POPUP_CLOSERS.items()})
+    if len(sys.argv) != 3 or sys.argv[2] not in regions:
         raise SystemExit(f"用法：python -m perception.continue_button <截圖> "
-                         f"<{'|'.join(CONTINUE_BUTTONS)}>")
+                         f"<{'|'.join(regions)}>")
     path = BUTTON_TEMPLATE_DIR / f"{sys.argv[2]}.png"
-    write_image(path, crop(read_image(sys.argv[1]), CONTINUE_BUTTONS[sys.argv[2]]))
+    write_image(path, crop(read_image(sys.argv[1]), regions[sys.argv[2]]))
     print(f"已存參考圖：{path}")
 
 

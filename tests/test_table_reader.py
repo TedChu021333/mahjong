@@ -103,3 +103,30 @@ def test_declared_markers():
     # 95 秒是自己宣告聽牌，自己的標記不在對手的搜尋範圍內
     assert read_declared(read_image(TRAIN_DIR / "經典_牌河95.png"), template) == frozenset()
     assert read_declared(read_image(TRAIN_DIR / "經典_牌河95.png"), None) == frozenset()
+
+
+# 上家牌河排到第二欄，圓框兩側都壓著牌河（2026-09-30 實戰），靠淡紫色外圈認出圓框
+COVERED_CIRCLES = {"經典_上家第二欄吃": "1m", "經典_上家第二欄吃2": "8p"}
+
+
+@pytest.mark.skipif(
+    not all((TRAIN_DIR / f"{name}.png").exists() for name in COVERED_CIRCLES)
+    or not TEMPLATE_DIR.exists(),
+    reason="缺少訓練截圖或模板",
+)
+def test_claim_tile_when_river_covers_both_sides_of_the_circle():
+    claim_reader = TileClassifier.from_directory(template_box=CLAIM_TEMPLATE_BOX)
+    for name, claim in COVERED_CIRCLES.items():
+        reading = read_claim_tile(read_image(TRAIN_DIR / f"{name}.png"), claim_reader)
+        assert (reading.tile, reading.source) == (parse(claim)[0], "left"), name
+
+
+@pytest.mark.skipif(
+    not (TRAIN_DIR / "經典_圓框蓋牌河.png").exists() or not TEMPLATE_DIR.exists(),
+    reason="缺少訓練截圖或模板",
+)
+def test_claim_tile_over_the_river_is_read_without_the_dark_circle():
+    # 實戰 18:45：上家打的八筒圓框蓋在牌河上，兩側都是亮色的牌，圓框判斷失敗、吃碰沒處理
+    claim_reader = TileClassifier.from_directory(template_box=CLAIM_TEMPLATE_BOX)
+    reading = read_claim_tile(read_image(TRAIN_DIR / "經典_圓框蓋牌河.png"), claim_reader)
+    assert (reading.tile, reading.source) == (parse("8p")[0], "left")

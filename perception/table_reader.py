@@ -21,6 +21,7 @@ from perception.config import (
     GOLD_SLOT_ORIGIN,
     GOLD_SLOT_PITCH,
     GOLD_SLOT_SIZE,
+    STREAK_TEMPLATE_DIR,
     SWAP_CONFIRM_BUTTON,
     SWAP_KEEP_BUTTON,
 )
@@ -36,11 +37,25 @@ CIRCLE_PROBE_OFFSETS = (62, 95)
 CIRCLE_PROBE_HALF_HEIGHT = 40
 CIRCLE_DARK_MAX = 40
 CIRCLE_MIN_DARK_RATIO = 0.6
+RING_RADII = (104, 124, 2)
+RING_ANGLE_STEP = 5
+RING_MIN_RATIO = 0.8
+"""有圓框的畫面外圈比例 1.0；其他 60 張截圖（結算、牌河、讀不到手牌）最高 0.65。"""
 CLAIM_MIN_SCORE = 0.6
 CLAIM_MIN_MARGIN = 0.1
+CLAIM_STRONG_SCORE = 0.8
+CLAIM_STRONG_MARGIN = 0.2
+"""沒偵測到圓框也採用的門檻（21.12.08 錄影 543 幀：除了圓框縮小動畫中的真實出牌，沒有誤判）。"""
 """放大的牌：最高分 ≥0.6 且領先次高 0.1 才採用（21.12.08 影片 17 次出牌：正確牌最低 0.70，
 與次高差最小 0.12；縮放動畫中的幀分數 <0.6 或差距 <0.05）。"""
 GOLD_MIN_FACE_RATIO = 0.3
+STREAK_REGION = (-18, -33, 16, 14)
+"""連莊數的搜尋範圍，相對「莊」方塊右下角 (左, 上, 右, 下)。"""
+STREAK_WHITE_MIN = 190
+STREAK_DIGIT_MIN_X = 10
+STREAK_DIGIT_MIN_AREA = 50
+STREAK_DIGIT_SIZE = (12, 20)
+STREAK_MIN_IOU = 0.7
 
 
 def _hsv(image: np.ndarray) -> np.ndarray:
@@ -79,29 +94,52 @@ class ClaimTile:
     """"left"（上家）或 "right"（下家）。"""
 
 
+def _ring_ratio(image: np.ndarray, center_x: int, center_y: int) -> float:
+    """圓框外緣淡紫色細圈（半徑約 113）：各方向在 RING_RADII 範圍內有淡紫色像素的比例。
+    外圈畫在牌河上面，不怕被壓住；白色牌面、綠色桌面都不是這個顏色。"""
+    angles = np.deg2rad(np.arange(0, 360, RING_ANGLE_STEP))[:, None]
+    radii = np.arange(*RING_RADII)[None, :]
+    xs = np.clip((center_x + radii * np.cos(angles)).astype(int), 0, image.shape[1] - 1)
+    ys = np.clip((center_y + radii * np.sin(angles)).astype(int), 0, image.shape[0] - 1)
+    pixels = image[ys, xs].astype(int)
+    blue, green, red = pixels[..., 0], pixels[..., 1], pixels[..., 2]
+    lavender = (blue > 190) & (blue - green > 18) & (red - green > -8)
+    return float(lavender.any(axis=1).mean())
+
+
 def _in_discard_circle(image: np.ndarray, box: tuple[int, int, int, int]) -> bool:
     """放大的牌外面有半透明的暗色圓框；牌左右兩側任一側夠暗就算（另一側可能壓著牌河，
-    透出來較亮）。綠色桌面、牌河、牌面都比這亮得多。"""
+    透出來較亮）。綠色桌面、牌河、牌面都比這亮得多。上家牌河排到第二欄後兩側都壓著牌河
+    （2026-09-30 七次吃碰沒處理有六次是這樣），改看圓框的淡紫色外圈。"""
     left, top, right, bottom = box
     center_x, center_y = (left + right) // 2, (top + bottom) // 2
     rows = slice(center_y - CIRCLE_PROBE_HALF_HEIGHT, center_y + CIRCLE_PROBE_HALF_HEIGHT)
     near, far = CIRCLE_PROBE_OFFSETS
     sides = (image[rows, center_x - far:center_x - near],
              image[rows, center_x + near:center_x + far])
-    return max(float((side.max(axis=2) < CIRCLE_DARK_MAX).mean()) for side in sides)         >= CIRCLE_MIN_DARK_RATIO
+    if max(float((side.max(axis=2) < CIRCLE_DARK_MAX).mean()) for side in sides) \
+            >= CIRCLE_MIN_DARK_RATIO:
+        return True
+    return _ring_ratio(image, center_x, center_y) >= RING_MIN_RATIO
 
 
 def read_claim_tile(image: np.ndarray, classifier: TileClassifier) -> ClaimTile | None:
     """讀出圓框裡放大顯示的那張牌（別家剛打出、有人可能吃碰胡時顯示約 0.65 秒；
-    能吃碰時會停到按鈕按下）。沒有圓框回傳 None；認不出時 tile 為 None。"""
+    能吃碰時會停到按鈕按下）。沒有放大的牌回傳 None；有圓框但認不出時 tile 為 None。
+
+    圓框判斷靠牌左右的暗色內部，但圓框蓋在牌河上時兩側都是亮色的牌、判斷會失敗
+    （實戰 7 次吃碰沒處理有 6 次是這樣，都在上家的位置）；牌本身讀得很清楚
+    （≥CLAIM_STRONG_SCORE 且領先 ≥CLAIM_STRONG_MARGIN）時不需要圓框。"""
     width, height = CLAIM_TILE_SIZE
     pad_left, pad_top, pad_right, pad_bottom = CLAIM_TILE_MARGINS
     for source, (x, y) in CLAIM_TILE_POSITIONS.items():
-        if not _in_discard_circle(image, (x, y, x + width, y + height)):
-            continue
+        circle = _in_discard_circle(image, (x, y, x + width, y + height))
         crop = image[y - pad_top:y + height + pad_bottom, x - pad_left:x + width + pad_right]
         ranked = sorted(classifier.scores(crop).items(), key=lambda item: -item[1])
         (tile, score), (_, second) = ranked[0], ranked[1]
+        strong = score >= CLAIM_STRONG_SCORE and score - second >= CLAIM_STRONG_MARGIN
+        if not circle and not strong:
+            continue
         known = score >= CLAIM_MIN_SCORE and score - second >= CLAIM_MIN_MARGIN
         return ClaimTile(tile if known else None, score, source)
     return None
@@ -182,16 +220,70 @@ def read_declared(image: np.ndarray, template: np.ndarray | None) -> frozenset[s
     return frozenset(seats)
 
 
-def read_dealer(image: np.ndarray) -> str | None:
-    """誰是莊家（me/left/top/right）：找實心的紅色方塊；橫幅上的紅字、牌上的紅色筆畫都太細，
-    不會被當成方塊。認不出來時回傳 None。"""
+def _dealer_badges(image: np.ndarray) -> list[tuple[str, tuple[int, int, int, int]]]:
+    """各位置找到的「莊」方塊（座位, (左, 上, 寬, 高)）：實心的紅色方塊；橫幅上的紅字、
+    牌上的紅色筆畫都太細，不會被當成方塊。"""
     found = []
     for seat, (left, top, right, bottom) in DEALER_BADGE_REGIONS.items():
         hsv = cv2.cvtColor(image[top:bottom, left:right], cv2.COLOR_BGR2HSV)
         hue, saturation, value = hsv[..., 0], hsv[..., 1], hsv[..., 2]
         red = (((hue < 8) | (hue > 172)) & (saturation > 150) & (value > 150)).astype(np.uint8)
         count, _, stats, _ = cv2.connectedComponentsWithStats(red)
-        if any(44 <= w <= 62 and 44 <= h <= 62 and area > 1200
-               for _, _, w, h, area in stats[1:count]):
-            found.append(seat)
-    return found[0] if len(found) == 1 else None
+        for x, y, w, h, area in stats[1:count]:
+            if 44 <= w <= 62 and 44 <= h <= 62 and area > 1200:
+                found.append((seat, (left + int(x), top + int(y), int(w), int(h))))
+                break
+    return found
+
+
+def read_dealer(image: np.ndarray) -> str | None:
+    """誰是莊家（me/left/top/right）；認不出來時回傳 None。"""
+    found = _dealer_badges(image)
+    return found[0][0] if len(found) == 1 else None
+
+
+def streak_digit_mask(image: np.ndarray) -> np.ndarray | None:
+    """「莊」方塊右下角的連莊數（白字紅邊，連 1 起才出現）：回傳縮放成 STREAK_DIGIT_SIZE 的
+    字形遮罩；沒有數字（或認不出莊家）回傳 None。"""
+    found = _dealer_badges(image)
+    if len(found) != 1:
+        return None
+    _, (x, y, w, h) = found[0]
+    left, top = x + w + STREAK_REGION[0], y + h + STREAK_REGION[1]
+    region = image[top:y + h + STREAK_REGION[3], left:x + w + STREAK_REGION[2]]
+    white = (region.min(axis=2) > STREAK_WHITE_MIN).astype(np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(white)
+    # 「莊」字右下的筆畫也在區域左側，數字從方塊右緣附近開始
+    digits = [index for index in range(1, count)
+              if stats[index][0] >= STREAK_DIGIT_MIN_X and stats[index][4] >= STREAK_DIGIT_MIN_AREA]
+    if not digits:
+        return None
+    index = max(digits, key=lambda i: stats[i][4])
+    dx, dy, dw, dh, _ = stats[index]
+    mask = (labels[dy:dy + dh, dx:dx + dw] == index).astype(np.uint8) * 255
+    return cv2.resize(mask, STREAK_DIGIT_SIZE, interpolation=cv2.INTER_AREA)
+
+
+def load_streak_templates(directory=STREAK_TEMPLATE_DIR) -> dict[int, np.ndarray]:
+    """連莊數字模板：<目錄>/<數字>.png（streak_digit_mask 存下的遮罩）。"""
+    templates = {}
+    for path in sorted(directory.glob("*.png")) if directory.exists() else ():
+        if path.stem.isdigit():
+            mask = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_GRAYSCALE)
+            templates[int(path.stem)] = cv2.resize(mask, STREAK_DIGIT_SIZE)
+    return templates
+
+
+def read_dealer_streak(image: np.ndarray, templates: dict[int, np.ndarray]) -> int | None:
+    """連莊數：沒有數字為 0；有數字但和模板都不像（還沒收集到的 3 以上）回傳 None。"""
+    mask = streak_digit_mask(image)
+    if mask is None:
+        return 0
+    best, best_iou = None, 0.0
+    shape = mask > 127
+    for number, template in templates.items():
+        other = template > 127
+        iou = float((shape & other).sum()) / max(1, int((shape | other).sum()))
+        if iou > best_iou:
+            best, best_iou = number, iou
+    return best if best_iou >= STREAK_MIN_IOU else None

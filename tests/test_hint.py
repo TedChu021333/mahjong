@@ -379,3 +379,56 @@ def test_unhandled_claim_prompt_is_reported():
     assert play(None) == ([], [])
     saved, lines = play(frozenset({"chow"}))
     assert saved == ["吃碰未處理_"] and "讀不到手牌" in lines[-1]
+
+
+def test_popup_is_closed_in_auto_mode():
+    import hint.__main__ as hint_main
+    from perception.continue_button import ContinueButton
+
+    clicks = []
+
+    class Recorder:
+        def click(self, point):
+            clicks.append(point)
+
+        def follow_up(self, observation):
+            return False
+
+    now = [0.0]
+
+    def frames():
+        for step in range(10):
+            now[0] = step * 0.5
+            yield str(step), "frame"
+
+    hint_main.run(frames(), readers=None, actuator=Recorder(), observe_fn=lambda f, r: None,
+                  find_popup=lambda frame: ContinueButton("神預測", (825, 270)),
+                  clock=lambda: now[0], log=lambda line, detail=None, echo=True: None)
+    assert clicks and set(clicks) == {(825, 270)} and len(clicks) <= 4  # 每 1.5 秒最多一次
+
+def test_dealer_streak_reaches_the_state():
+    from hint.advisor import STREAK_UNKNOWN_GUESS, build_state
+
+    hand = T("123456789m12345p9s17z")
+    state = build_state(Observation(hand, None, None, (), dealer="top", dealer_streak=2))
+    assert state.known_dealer == 2 and state.dealer_streak == 2
+    # 有數字但沒有模板（3 以上）
+    state = build_state(Observation(hand, None, None, (), dealer="top", dealer_streak=None))
+    assert state.dealer_streak == STREAK_UNKNOWN_GUESS
+
+
+def test_dealer_streak_on_real_screens():
+    from perception.table_reader import load_streak_templates, read_dealer_streak
+
+    templates = load_streak_templates()
+    if set(templates) != {1, 2}:
+        pytest.skip("缺少連莊數字模板")
+    expected = {"經典_上家第二欄吃": 1, "經典_上家第二欄吃2": 2, "經典_碰": 0, "經典_牌河290": 0}
+    for name, streak in expected.items():
+        path = TRAIN_DIR / f"{name}.png"
+        if path.exists():
+            assert read_dealer_streak(read_image(path), templates) == streak, name
+    # 沒有模板時認不出數字
+    path = TRAIN_DIR / "經典_上家第二欄吃.png"
+    if path.exists():
+        assert read_dealer_streak(read_image(path), {2: templates[2]}) is None

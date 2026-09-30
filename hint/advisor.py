@@ -26,7 +26,9 @@ from perception.table_reader import (
     read_buttons,
     read_chow_panels,
     read_claim_tile,
+    load_streak_templates,
     read_dealer,
+    read_dealer_streak,
     read_declared,
     read_gold_tiles,
     read_swap_prompt,
@@ -60,6 +62,8 @@ class Observation:
     """推算的對手副露數（座位同 discards；自己的欄位不用，由手牌張數得知）。"""
     dealer: str | None = field(default=None, compare=False)
     """莊家座位（me/left/top/right），認不出來為 None。"""
+    dealer_streak: int | None = field(default=0, compare=False)
+    """連莊數（「莊」右下角的小數字）；有數字但還沒有它的模板時為 None。"""
     declared: frozenset[str] = field(default=frozenset(), compare=False)
     """旁邊有「聽」標記的對手（left/top/right）。"""
     discards: tuple[tuple[int, ...], ...] = field(default=(), compare=False)
@@ -86,6 +90,7 @@ class Readers:
         self.declare = None
         if DECLARE_TEMPLATE.exists():
             self.declare = cv2.cvtColor(read_image(DECLARE_TEMPLATE), cv2.COLOR_BGR2GRAY)
+        self.streak = load_streak_templates()
 
 
 def observe(image: np.ndarray, readers: Readers) -> Observation | None:
@@ -102,7 +107,8 @@ def observe(image: np.ndarray, readers: Readers) -> Observation | None:
                        tuple(box[1] != HAND_TILE_TOP for box in reading.boxes),
                        read_chow_panels(image),
                        declared=read_declared(image, readers.declare),
-                       dealer=read_dealer(image))
+                       dealer=read_dealer(image),
+                       dealer_streak=read_dealer_streak(image, readers.streak))
 
 
 def _consistent_layout(boxes) -> bool:
@@ -142,6 +148,8 @@ def _rivers(observation: Observation, claim_seat: int | None = None,
     return capped
 
 
+STREAK_UNKNOWN_GUESS = 3
+"""有連莊數字但沒有它的模板：目前收集到 1、2，認不出的多半是 3 以上。"""
 START_DRAWABLE = 60
 """開局可摸張數的估計：模擬器補完花後平均 59，莊家第一張不必摸再加 1。"""
 
@@ -167,7 +175,10 @@ def build_state(observation: Observation) -> GameState | None:
     for seat in observation.declared:
         declared[SOURCE_SEAT[seat]] = True
     dealer = None if observation.dealer is None else         ME if observation.dealer == "me" else SOURCE_SEAT[observation.dealer]
+    streak = STREAK_UNKNOWN_GUESS if observation.dealer_streak is None \
+        else observation.dealer_streak
     common = dict(gold_tiles=observation.gold_tiles, declared=tuple(declared), dealer=dealer,
+                  dealer_streak=streak,
                   wall_remaining=estimate_wall(observation))
     if observation.my_turn:
         if observation.claimed:

@@ -28,7 +28,16 @@ import numpy as np
 
 from game.rules import ActionType, forbidden_after_claim
 from game.tiles import tile_name
-from hint.advisor import POLICIES, Readers, decide, describe, hand_after_claim, observe, use_policy
+from hint.advisor import (
+    POLICIES,
+    STREAK_UNKNOWN_GUESS,
+    Readers,
+    decide,
+    describe,
+    hand_after_claim,
+    observe,
+    use_policy,
+)
 from hint.river_watch import RiverWatch
 from hint.river_watch import summary as river_summary
 from perception.continue_button import ContinueButton
@@ -119,8 +128,9 @@ def video_frames(path: Path, step: float, start: float) -> Iterator[tuple[str, n
 def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         actuator=None, observe_fn=observe, clock=time.monotonic, show=None,
         find_continue=None, save_result=save_result, log=print_log, rivers=None,
-        find_win=None, find_buttons=None) -> None:
-    """find_win(frame) 為「胡」按鈕是否亮著、find_buttons(frame) 讀按鈕列（都不依賴手牌辨識）。"""
+        find_win=None, find_buttons=None, find_popup=None) -> None:
+    """find_win(frame) 為「胡」按鈕是否亮著、find_buttons(frame) 讀按鈕列（都不依賴手牌辨識）；
+    find_popup(frame) 找會蓋住牌桌的彈出面板（自動模式按關閉）。"""
     previous = None
     last_advice = None
     acted_for = None
@@ -137,11 +147,20 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     win_pressed_at = float("-inf")
     river_updated_at = float("-inf")
     claim_prompt_since = None
+    popup_closed_at = float("-inf")
     claim_prompt_reported = False
     last_readable = None
     """最近一次讀到手牌的時間；存過「讀不到」截圖後設為 None，直到再讀到手牌。"""
+    streak_reported = False
     for stamp, frame in frames:
         try:
+            if (actuator is not None and find_popup is not None
+                    and clock() - popup_closed_at >= RETRY_AFTER):
+                popup = find_popup(frame)
+                if popup is not None:
+                    popup_closed_at = clock()
+                    log(f"[{stamp}] 關閉「{popup.name}」面板", echo=False)
+                    actuator.click(popup.center)
             observation = observe_fn(frame, readers)
             if observation is not None:
                 if observation.claim is not None and observation.claim.tile is not None:
@@ -160,6 +179,10 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                                       melds=rivers.meld_counts())
             if observation is not None:
                 last_readable = clock()
+                if observation.dealer_streak is None and not streak_reported:
+                    streak_reported = True  # 每次執行只存一張，補模板用
+                    log(f"[{stamp}] 認不出連莊數（先當 {STREAK_UNKNOWN_GUESS}），截圖存到 "
+                        f"{save_result(frame, '連莊_')}")
             elif (last_readable is not None and clock() - last_readable >= UNREADABLE_AFTER
                   and not (decided_action is not None
                            and decided_action.kind == ActionType.DECLARE)):
@@ -337,7 +360,7 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
         time.sleep(3)
     mode = "自動模式" if auto else "提示模式"
     readers = Readers()
-    from perception.continue_button import ContinueButtons
+    from perception.continue_button import ContinueButtons, PopupClosers
 
     # 提示模式也偵測結算畫面：存結算截圖、重置牌河；只有自動模式會按
     buttons = ContinueButtons.from_directory()
@@ -345,13 +368,15 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
     if missing:
         print(f"缺少按鈕參考圖，認不出結算畫面：{'、'.join(missing)}", flush=True)
     find_continue = buttons.find
+    popups = PopupClosers.from_directory()
     log = GameLog()
     print(f"記錄檔：{log.path}", flush=True)
     rivers = RiverWatch(RiverReader.from_directory())
     if not overlay:
         print(f"{mode}啟動，Ctrl+C 結束", flush=True)
         run(screen_frames(interval), readers, actuator=actuator, find_continue=find_continue,
-            log=log, rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons)
+            log=log, rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
+            find_popup=popups.find)
         return
     from hint.overlay import Overlay
 
@@ -359,7 +384,8 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
     window = Overlay()
     window.run(lambda: run(screen_frames(interval), readers, actuator=actuator,
                            show=window.show, find_continue=find_continue, log=log,
-                           rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons))
+                           rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
+                           find_popup=popups.find))
 
 
 def win_is_lit(frame: np.ndarray) -> bool:

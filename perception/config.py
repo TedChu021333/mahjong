@@ -84,6 +84,12 @@ CONTINUE_BUTTONS = {
     "再玩一局": (790, 805, 1030, 880),
 }
 BUTTON_TEMPLATE_DIR = TRAIN_DIR / "buttons"
+POPUP_CLOSERS = {
+    # 每局開始跳出的「神預測」下注面板（約 15 秒後自己消失），會蓋住上家的放大牌與牌河
+    # （實戰 19:33 因此讀不到上家打的牌、吃碰沒處理）。比對標題文字，按右上角的 X。
+    "神預測": ((215, 262, 755, 298), (825, 270)),
+}
+"""名稱 → (比對區域, 點擊位置)；參考圖同樣放 train/buttons/<名稱>.png。"""
 CONTINUE_MIN_SCORE = 0.9
 CONTINUE_SEARCH_MARGIN = 10
 """參考圖在區域外擴這麼多像素的範圍內搜尋，容許畫面些微位移。"""
@@ -131,3 +137,5 @@ DEALER_BADGE_REGIONS = {
     "top": (970, 0, 1070, 100),
     "right": (1810, 220, 1910, 320),
 }
+STREAK_TEMPLATE_DIR = TRAIN_DIR / "buttons" / "連莊"
+"""連莊數（「莊」方塊右下角的白色小數字）模板：<數字>.png，由 table_reader.streak_digit_mask 產生。"""
