@@ -139,3 +139,9 @@ DEALER_BADGE_REGIONS = {
 }
 STREAK_TEMPLATE_DIR = TRAIN_DIR / "buttons" / "連莊"
 """連莊數（「莊」方塊右下角的白色小數字）模板：<數字>.png，由 table_reader.streak_digit_mask 產生。"""
+
+AUTOPLAY_BUTTON_REGION = (745, 872, 1175, 968)
+"""聽牌後遊戲代打時手牌上的橘紅色「取消代打」按鈕（實測 737,864 起 445x111）。"""
+MOUSE_REST_POINT = (960, 560)
+"""自動點擊後把滑鼠移到牌桌中央：停在牌上會跳出提示小視窗，擋住右邊幾張手牌、整手讀不到
+（實戰 18:35、19:34、19:41）。"""

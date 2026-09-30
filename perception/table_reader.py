@@ -14,6 +14,7 @@ from perception.config import (
     CLAIM_TILE_MARGINS,
     CLAIM_TILE_POSITIONS,
     CLAIM_TILE_SIZE,
+    AUTOPLAY_BUTTON_REGION,
     DEALER_BADGE_REGIONS,
     DECLARE_MIN_SCORE,
     DECLARE_REGIONS,
@@ -287,3 +288,11 @@ def read_dealer_streak(image: np.ndarray, templates: dict[int, np.ndarray]) -> i
         if iou > best_iou:
             best, best_iou = number, iou
     return best if best_iou >= STREAK_MIN_IOU else None
+
+
+def autoplay_active(image: np.ndarray) -> bool:
+    """聽牌後遊戲在代打（手牌上蓋著「取消代打」按鈕）：此時讀不到手牌是正常的。"""
+    left, top, right, bottom = AUTOPLAY_BUTTON_REGION
+    hsv = cv2.cvtColor(image[top:bottom, left:right], cv2.COLOR_BGR2HSV)
+    orange = (hsv[..., 0] < 20) & (hsv[..., 1] > 150) & (hsv[..., 2] > 150)
+    return float(orange.mean()) > 0.6

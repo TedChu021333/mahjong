@@ -11,6 +11,7 @@ from typing import Callable
 from game.rules import Action, ActionType
 from hint.advisor import Observation, chow_options
 from perception.config import (
+    MOUSE_REST_POINT,
     ACTION_BUTTON_CENTERS,
     CANCEL_BUTTON_REGION,
     SWAP_CONFIRM_BUTTON,
@@ -33,6 +34,7 @@ def _pyautogui_click(point: Point) -> None:
 
     pyautogui.FAILSAFE = True
     pyautogui.click(*point)
+    pyautogui.moveTo(*MOUSE_REST_POINT)  # 停在牌上會跳出提示小視窗擋住手牌
 
 
 class Actuator:
