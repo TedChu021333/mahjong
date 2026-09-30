@@ -319,9 +319,9 @@ def test_kong_is_preferred_over_pung_from_a_discard():
     players = [PlayerState() for _ in range(4)]
     players[1].hand = C("555p123m456m789m124s7z")
     assert sum(players[1].hand) == 16
-    players[0].discards = parse("5p")
-    state = GameState([0] * 30, players, current_player=0, phase=Phase.RESPONSE,
-                      last_discard=P("5p"), discard_player=0, response_player=1,
+    players[3].discards = parse("5p")  # 對家打的（上家打的不能明槓）
+    state = GameState([0] * 30, players, current_player=3, phase=Phase.RESPONSE,
+                      last_discard=P("5p"), discard_player=3, response_player=1,
                       response_players=[1])
     assert choose_rule_action_for_player(state, 1).kind == ActionType.KONG
 

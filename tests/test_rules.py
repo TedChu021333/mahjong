@@ -127,15 +127,30 @@ def test_discard_win_adds_claimed_tile_to_winner_hand():
 def test_discard_kong_removes_claimed_tile_from_source_discard():
     players = [PlayerState() for _ in range(4)]
     players[1].hand = C("111234567m1234567p")
-    players[0].discards = parse("1m")
-    state = GameState([5], players, phase=Phase.RESPONSE, current_player=0,
-                      last_discard=parse("1m")[0], discard_player=0,
+    players[3].discards = parse("1m")  # 對家打的（上家打的不能明槓）
+    state = GameState([5], players, phase=Phase.RESPONSE, current_player=3,
+                      last_discard=parse("1m")[0], discard_player=3,
                       response_player=1, response_players=[1])
     kong = next(action for action in legal_actions(state, player=1)
                 if action.kind == ActionType.KONG)
     apply_action(state, kong, player=1)
-    assert state.players[0].discards == []
+    assert state.players[3].discards == []
     assert state.players[1].melds[0].tiles == (0, 0, 0, 0)
+
+
+def test_no_open_kong_from_the_upper_player():
+    # 遊戲畫面：「上家出牌，不可明槓。」上家打的牌只能碰；對家、下家打的可以明槓
+    def kinds(discarder):
+        players = [PlayerState() for _ in range(4)]
+        players[1].hand = C("555p123m456m789m124s7z")
+        players[discarder].discards = parse("5p")
+        state = GameState([0] * 30, players, current_player=discarder, phase=Phase.RESPONSE,
+                          last_discard=parse("5p")[0], discard_player=discarder,
+                          response_player=1, response_players=[1])
+        return {action.kind for action in legal_actions(state, 1)}
+
+    assert ActionType.KONG not in kinds(0) and ActionType.PUNG in kinds(0)  # 玩家 0 是 1 的上家
+    assert ActionType.KONG in kinds(2) and ActionType.KONG in kinds(3)
 
 
 def test_taiwan_rules_have_no_furiten():

@@ -346,7 +346,9 @@ def legal_actions(state: GameState, player: int | None = None) -> list[Action]:
         actions.append(Action(ActionType.PUNG, tile=tile,
                               tiles=(tile,) * 3,
                               from_player=state.discard_player))
-    if current.hand[tile] >= 3 and state.drawable:
+    # 明星三缺一：上家打的牌不能明槓（遊戲顯示「上家出牌，不可明槓」），只能碰
+    from_upper = actor == (state.discard_player + 1) % 4
+    if current.hand[tile] >= 3 and state.drawable and not from_upper:
         actions.append(Action(ActionType.KONG, tile=tile,
                               tiles=(tile,) * 4,
                               from_player=state.discard_player))
