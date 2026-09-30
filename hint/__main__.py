@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import time
+import traceback
 from dataclasses import replace
 from pathlib import Path
 from typing import Iterator
@@ -117,95 +118,110 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     last_claim = None
     """(最近讀到的放大牌, 時間)。"""
     decided_for = decided_action = None
+    stuck_for = None
     """已經存過「胡按鈕亮著卻沒選胡」截圖的畫面。"""
     for stamp, frame in frames:
-        observation = observe_fn(frame, readers)
-        if observation is not None:
-            if observation.claim is not None and observation.claim.tile is not None:
-                last_claim = (observation.claim, clock())
-            elif observation.buttons is not None and not observation.my_turn                     and last_claim is not None and clock() - last_claim[1] <= CLAIM_MEMORY:
-                observation = replace(observation, claim=last_claim[0])
-        if rivers is not None and observation is not None:
-            for event in rivers.update(frame, observation):
-                name = tile_name(event.tile) if event.tile is not None else "?"
-                log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
-            observation = replace(observation, discards=rivers.discards(),
-                                  melds=rivers.meld_counts())
-        if observation is None and find_continue is not None:
-            observation = find_continue(frame)
-        if observation is None and next_game_clicks and clock() - acted_at >= NEXT_GAME_DELAY:
-            left, top, right, bottom = NEXT_GAME_REGION
-            log(f"[{stamp}] 按下一場")
-            actuator.click(((left + right) // 2, (top + bottom) // 2))
-            next_game_clicks -= 1
-            acted_at = clock()
-        if observation is not None and not isinstance(observation, ContinueButton):
-            next_game_clicks = 0  # 新的一局已經開始
-        if observation is None or observation != previous:
-            previous = observation
-            continue
-        if isinstance(observation, ContinueButton):
+        try:
+            observation = observe_fn(frame, readers)
+            if observation is not None:
+                if observation.claim is not None and observation.claim.tile is not None:
+                    last_claim = (observation.claim, clock())
+                elif observation.buttons is not None and not observation.my_turn                     and last_claim is not None and clock() - last_claim[1] <= CLAIM_MEMORY:
+                    observation = replace(observation, claim=last_claim[0])
+            if rivers is not None and observation is not None:
+                for event in rivers.update(frame, observation):
+                    name = tile_name(event.tile) if event.tile is not None else "?"
+                    log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
+                observation = replace(observation, discards=rivers.discards(),
+                                      melds=rivers.meld_counts())
+            if observation is None and find_continue is not None:
+                observation = find_continue(frame)
+            if observation is None and next_game_clicks and clock() - acted_at >= NEXT_GAME_DELAY:
+                left, top, right, bottom = NEXT_GAME_REGION
+                log(f"[{stamp}] 按下一場")
+                actuator.click(((left + right) // 2, (top + bottom) // 2))
+                next_game_clicks -= 1
+                acted_at = clock()
+            if observation is not None and not isinstance(observation, ContinueButton):
+                next_game_clicks = 0  # 新的一局已經開始
+            if observation is None or observation != previous:
+                previous = observation
+                continue
+            if isinstance(observation, ContinueButton):
+                if observation == acted_for:
+                    if clock() - acted_at < RETRY_AFTER or retries >= MAX_RETRIES:
+                        continue
+                    retries += 1
+                else:
+                    retries = 0
+                    log(f"[{stamp}] 結算截圖存到 {save_result(frame)}")
+                    if rivers is not None:
+                        log(f"[{stamp}] 本局牌河：{river_summary(rivers)}"
+                            f"（累計自動收集 {rivers.saved} 張牌河模板）", echo=False)
+                        rivers.new_hand()
+                acted_for, acted_at = observation, clock()
+                if actuator is None:  # 提示模式：只記錄，由人按繼續
+                    retries = MAX_RETRIES
+                    continue
+                if retries == 0:
+                    log(f"[{stamp}] 按「{observation.name}」")
+                actuator.click(observation.center)
+                next_game_clicks = NEXT_GAME_CLICKS
+                continue
+            if actuator is not None and actuator.follow_up(observation):
+                log(f"[{stamp}] 選擇吃法")
+                acted_for, acted_at, retries = observation, clock(), 0
+                continue
+            if observation.my_turn and pending_claim is not None:
+                expected, forbidden = pending_claim
+                if tuple(sorted(observation.hand)) == expected:
+                    observation = replace(observation, claimed=True, forbidden=forbidden)
+                else:
+                    pending_claim = None
+            # 同一個畫面只決定一次：蒙地卡羅 AI 每次要約 2 秒且有隨機性，重算會讓建議閃動
+            if observation != decided_for:
+                decided_for, decided_action = observation, decide(observation)
+            action = decided_action
+            if action is not None and action.kind in (ActionType.CHOW, ActionType.PUNG):
+                pending_claim = (hand_after_claim(observation, action),
+                                 forbidden_after_claim(action, action.tile))
+            advice = describe(action) if action is not None else None
+            buttons = observation.buttons or frozenset()
+            if "win" in buttons and (action is None or action.kind != ActionType.WIN)                 and observation != missed_for:
+                missed_for = observation
+                log(f"[{stamp}] 「胡」按鈕亮著但 AI 沒選胡，截圖存到 {save_result(frame, '未胡_')}",
+                    hand_text(observation))
+            if advice != last_advice:
+                if advice is not None:
+                    log(f"[{stamp}] {advice}", hand_text(observation))
+                if show is not None:
+                    show(advice)
+            last_advice = advice
+            if actuator is None or action is None:
+                continue
             if observation == acted_for:
+                if retries >= MAX_RETRIES and clock() - acted_at >= RETRY_AFTER                         and stuck_for != observation:
+                    stuck_for = observation  # 點了幾次畫面都沒變：存下來查原因（例如槓完沒反應）
+                    log(f"[{stamp}] 「{advice}」點了 {MAX_RETRIES + 1} 次畫面都沒變，截圖存到 "
+                        f"{save_result(frame, '卡住_')}", hand_text(observation))
                 if clock() - acted_at < RETRY_AFTER or retries >= MAX_RETRIES:
                     continue
                 retries += 1
             else:
                 retries = 0
-                log(f"[{stamp}] 結算截圖存到 {save_result(frame)}")
-                if rivers is not None:
-                    log(f"[{stamp}] 本局牌河：{river_summary(rivers)}"
-                        f"（累計自動收集 {rivers.saved} 張牌河模板）", echo=False)
-                    rivers.new_hand()
-            acted_for, acted_at = observation, clock()
-            if actuator is None:  # 提示模式：只記錄，由人按繼續
-                retries = MAX_RETRIES
-                continue
-            if retries == 0:
-                log(f"[{stamp}] 按「{observation.name}」")
-            actuator.click(observation.center)
-            next_game_clicks = NEXT_GAME_CLICKS
-            continue
-        if actuator is not None and actuator.follow_up(observation):
-            log(f"[{stamp}] 選擇吃法")
-            acted_for, acted_at, retries = observation, clock(), 0
-            continue
-        if observation.my_turn and pending_claim is not None:
-            expected, forbidden = pending_claim
-            if tuple(sorted(observation.hand)) == expected:
-                observation = replace(observation, claimed=True, forbidden=forbidden)
-            else:
-                pending_claim = None
-        # 同一個畫面只決定一次：蒙地卡羅 AI 每次要約 2 秒且有隨機性，重算會讓建議閃動
-        if observation != decided_for:
-            decided_for, decided_action = observation, decide(observation)
-        action = decided_action
-        if action is not None and action.kind in (ActionType.CHOW, ActionType.PUNG):
-            pending_claim = (hand_after_claim(observation, action),
-                             forbidden_after_claim(action, action.tile))
-        advice = describe(action) if action is not None else None
-        buttons = observation.buttons or frozenset()
-        if "win" in buttons and (action is None or action.kind != ActionType.WIN)                 and observation != missed_for:
-            missed_for = observation
-            log(f"[{stamp}] 「胡」按鈕亮著但 AI 沒選胡，截圖存到 {save_result(frame, '未胡_')}",
-                hand_text(observation))
-        if advice != last_advice:
-            if advice is not None:
-                log(f"[{stamp}] {advice}", hand_text(observation))
-            if show is not None:
-                show(advice)
-        last_advice = advice
-        if actuator is None or action is None:
-            continue
-        if observation == acted_for:
-            if clock() - acted_at < RETRY_AFTER or retries >= MAX_RETRIES:
-                continue
-            retries += 1
-        else:
-            retries = 0
-        if not actuator.perform(action, observation):
-            log(f"[{stamp}] 畫面上找不到對應的按鈕或牌，略過", hand_text(observation))
-        acted_for = observation
-        acted_at = clock()
+            if not actuator.perform(action, observation):
+                log(f"[{stamp}] 畫面上找不到對應的按鈕或牌，略過", hand_text(observation))
+            acted_for = observation
+            acted_at = clock()
+        except Exception as error:  # 單一幀出錯不能讓整個迴圈停掉（浮動小視窗模式下看起來就像不動作）
+            if type(error).__name__ == "FailSafeException":
+                raise  # 滑鼠甩到左上角的緊急停止一定要生效
+            detail = traceback.format_exc()
+            try:
+                where = save_result(frame, "錯誤_")
+            except Exception:
+                where = "（截圖失敗）"
+            log(f"[{stamp}] 程式錯誤，已略過這一幀，截圖存到 {where}", detail)
 
 
 def main() -> None:

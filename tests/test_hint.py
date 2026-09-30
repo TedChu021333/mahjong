@@ -223,3 +223,36 @@ def test_added_kong_when_the_kong_button_is_lit():
     assert action.kind == ActionType.KONG and action.tile == parse("5z")[0]
     # 沒亮就照常打牌
     assert decide(Observation(hand, None, None, ())).kind != ActionType.KONG
+
+
+def test_loop_survives_errors_and_reports_stuck_screens(monkeypatch):
+    import hint.__main__ as hint_main
+
+    hand = T("123456789m12345p9s17z")
+    screens = ["boom"] + [Observation(hand, None, None, ())] * 12
+    saved, lines = [], []
+
+    def observe_fn(frame, readers):
+        if frame == "boom":
+            raise RuntimeError("辨識出錯")
+        return frame
+
+    class StuckActuator:
+        def follow_up(self, observation):
+            return False
+
+        def perform(self, action, observation):
+            return True  # 點了但遊戲沒反應
+
+    now = [0.0]
+
+    def frames():
+        for step, screen in enumerate(screens):
+            now[0] = step * 1.0
+            yield str(step), screen
+
+    hint_main.run(frames(), readers=None, actuator=StuckActuator(), observe_fn=observe_fn,
+                  clock=lambda: now[0], save_result=lambda frame, prefix="": saved.append(prefix) or "x",
+                  log=lambda line, detail=None, echo=True: lines.append(line))
+    assert saved == ["錯誤_", "卡住_"]
+    assert any("程式錯誤" in line for line in lines)

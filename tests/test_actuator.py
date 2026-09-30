@@ -75,7 +75,8 @@ def test_auto_loop_acts_once_per_screen_and_retries_later():
             yield f"{step}", None
 
     run(frames(), readers=None, actuator=actuator,
-        observe_fn=lambda frame, readers: observation, clock=lambda: now[0])
+        observe_fn=lambda frame, readers: observation, clock=lambda: now[0],
+        save_result=lambda frame, prefix="": "x", log=lambda line, detail=None, echo=True: None)
     # 第一次點擊後，每隔 RETRY_AFTER 秒補點一次，最多 MAX_RETRIES 次
     assert len(clicks) == 1 + MAX_RETRIES
     assert RETRY_AFTER > 0.3

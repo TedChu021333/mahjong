@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from multiprocessing import TimeoutError as MultiprocessingTimeout
 from random import Random
 
 from agent.ev_agent import RISK_WEIGHT, discard_scores
@@ -37,6 +38,8 @@ TIME_LIMIT = 1.5
 LIVE_ROLLOUTS = 400
 """實戰的模擬次數上限（通常先碰到時間上限）。"""
 SIGNIFICANCE = 2.0
+PARALLEL_GRACE = 1.0
+"""子程序超過 time_limit 這麼多秒還沒回來就放棄模擬，改照期望值第一名打（不能卡住牌局）。"""
 
 
 def determinize(state: GameState, player: int, rng: Random, calibration: Calibration,
@@ -133,7 +136,8 @@ def evaluate_options_parallel(pool, workers: int, state: GameState, player: int,
     tasks = [(state, player, options, rng.randrange(2**31), per_worker, undeclared_share,
               time_limit) for _ in range(workers)]
     merged: dict[Option, list[float]] = {option: [] for option in options}
-    for part in pool.starmap(_evaluate_chunk, tasks):
+    wait = None if time_limit is None else time_limit + PARALLEL_GRACE
+    for part in pool.starmap_async(_evaluate_chunk, tasks).get(wait):
         for option in options:
             merged[option].extend(part[option])
     return merged
@@ -179,8 +183,11 @@ def choose_mc_action_for_player(state: GameState, player: int, rng: Random | Non
     best = default
     if len(options) > 1:
         if pool is not None and workers > 1:
-            results = evaluate_options_parallel(pool, workers, state, player, options, rng,
-                                                rollouts, undeclared_share, time_limit)
+            try:
+                results = evaluate_options_parallel(pool, workers, state, player, options, rng,
+                                                    rollouts, undeclared_share, time_limit)
+            except MultiprocessingTimeout:
+                results = {option: [] for option in options}
         else:
             results = evaluate_options(state, player, options, rng, calibration, rollouts,
                                        undeclared_share, time_limit)
