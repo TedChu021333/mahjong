@@ -15,8 +15,8 @@ from agent.opponent_model import (
     estimate_danger,
 )
 from agent.rule_agent import (
-    GOLD_DISCARD_PENALTY,
     choose_rule_action_for_player,
+    gold_in_use,
     choose_self_kong,
     visible_tile_counts,
 )
@@ -26,6 +26,9 @@ from game.rules import Action, ActionType, GameState, Phase, allowed_discards, l
 RISK_WEIGHT = 0.5
 """放槍損失的權重（1 = 純期望值）。arena 各 1500 對、對規則式 AI：0.5 → −0.029±0.430，
 1 → −0.138±0.428，2 → −0.289±0.435，皆打平；0.5 最接近，放槍率 19.5% → 17.6%。"""
+GOLD_VALUE_SHARE = 1 / 8
+"""胡牌平均約 底 2 + 6 台，用得上的金牌多 1 台 ≈ 收益多 1/8。"""
+GOLD_WAIT_SHARE = 3 / 8
 OUTS_TIE_BREAK = 1e-3
 """表是分組的，同一組內再以精確的有效進張數區分（不改變不同組之間的排序）。"""
 
@@ -46,10 +49,14 @@ def discard_scores(state: GameState, player: int, rng: Random,
         after = list(me.hand)
         after[tile] -= 1
         outs = sum(max(0, 4 - visible[t]) for t in effective_tiles(after, me.open_melds))
-        if tile in gold:  # 金牌留著胡牌時多台、打出去被胡對方多 3 台
-            outs = max(0, outs - GOLD_DISCARD_PENALTY)
         level = shanten(after, me.open_melds)
         value = calibration.offense_value(level, outs, state.drawable)
+        if tile in gold and gold_in_use(me.hand, tile):
+            # 用得上的金牌留著，胡牌時多 1 台：打掉它約少掉進攻收益的 1 /（底 + 平均台數）
+            value *= 1 - GOLD_VALUE_SHARE
+        if level == 0 and gold.intersection(effective_tiles(after, me.open_melds)):
+            value *= 1 + GOLD_WAIT_SHARE  # 聽金牌：胡那張再多 3 台
+        # 打出金牌被胡對方多 3 台，已算在 danger.expected_loss 裡
         scores[tile] = value - risk_weight * danger.expected_loss[tile]             + OUTS_TIE_BREAK * (outs - 100 * level)
     return scores
 

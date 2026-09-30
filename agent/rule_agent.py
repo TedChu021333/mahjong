@@ -29,8 +29,10 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
                    gold_penalty: float | None = None) -> int:
     """選一張牌打出：最低向聽優先，再取有效進張最多；forbidden 是吃碰後不能打的牌。
 
-    金牌留在手上胡牌時每張 +1 台，打出去被胡則對方多 3 台，所以打金牌的代價
-    視同少了 gold_penalty 張有效進張；防守時同樣危險程度下也先打非金牌。
+    金牌留在手上胡牌時每張 +1 台，打出去被胡則對方多 3 台，所以打「用得上」的金牌（有對子、
+    刻子或相鄰數牌）的代價視同少了 gold_penalty 張有效進張；孤張金牌多半湊不進牌型，不加代價。
+    聽牌時聽的牌有金牌（胡金牌 +3 台）則加 gold_penalty。
+    防守時同樣危險程度下也先打非金牌。
     """
     if gold_penalty is None:
         gold_penalty = GOLD_DISCARD_PENALTY
@@ -66,7 +68,9 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
             outs = sum(max(0, 4 - visible_counts[tile]) for tile in effective)
         risk = 0 if tile in safe_set else 1 if tile in suji_set else 2
         is_gold = tile in gold
-        value = outs - (gold_penalty if is_gold else 0)
+        value = outs - (gold_penalty if is_gold and gold_in_use(hand, tile) else 0)
+        if next_shanten == 0 and gold.intersection(effective):
+            value += gold_penalty  # 聽金牌：胡的那張是金牌再多 3 台
         if defensive:
             best.append(((risk, is_gold), -value, next_shanten, tile))
         else:
@@ -78,6 +82,17 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
 
 GOLD_DISCARD_PENALTY = 8
 """打出一張金牌的代價，以有效進張張數計（由模擬器比較決定，見 CLAUDE.md）。"""
+
+def gold_in_use(hand: Sequence[int], tile: int) -> bool:
+    """這張牌有沒有機會組進牌型：同種 2 張以上，或（數牌）前後兩格內有牌。"""
+    if hand[tile] >= 2:
+        return True
+    if tile >= 27:
+        return False
+    rank = tile % 9
+    return any(0 <= rank + offset <= 8 and hand[tile + offset]
+               for offset in (-2, -1, 1, 2))
+
 
 SWAP_MIN_GAIN = 0.02
 """期望向聽數至少要降低這麼多才值得換。"""

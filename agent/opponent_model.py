@@ -214,12 +214,18 @@ class Danger:
     """打出這張牌因放槍預期要付的台數。"""
 
 
+GOLD_WIN_TAI = 3
+"""胡的那張是金牌再 +3 台（結算畫面「金牌胡牌 3 台」）。"""
+
+
 def estimate_danger(state: GameState, player: int, candidates: Sequence[int],
                     rng: Random, calibration: Calibration | None = None,
                     samples: int = 120,
                     undeclared_share: float = UNDECLARED_TENPAI_SHARE) -> Danger:
+    """打出金牌被胡時對方多 GOLD_WIN_TAI 台，算在損失裡。"""
     calibration = calibration or default_calibration()
     pool = unseen_counts(state, player)
+    gold = set(state.gold_tiles)
     safe_probability = {tile: 1.0 for tile in candidates}
     loss = {tile: 0.0 for tile in candidates}
     for opponent, other in enumerate(state.players):
@@ -245,5 +251,5 @@ def estimate_danger(state: GameState, player: int, candidates: Sequence[int],
         for tile in candidates:
             risk = p_tenpai * hits[tile] / valid
             safe_probability[tile] *= 1 - risk
-            loss[tile] += risk * per_loss
+            loss[tile] += risk * (per_loss + (GOLD_WIN_TAI if tile in gold else 0))
     return Danger({tile: 1 - p for tile, p in safe_probability.items()}, loss)

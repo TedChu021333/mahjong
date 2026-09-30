@@ -243,21 +243,6 @@ def test_rule_agent_plays_full_games_with_swap():
         assert result.state.phase.value == "ended"
 
 
-def test_gold_tile_is_kept_when_another_discard_is_as_good():
-    # 7s、東、南都是孤張，平常先打字牌；南是金牌時打東，東是金牌時打南
-    hand = C("123456789m123p45p7s1z2z")
-    assert sum(hand) == 17
-    east, south = P("1z"), P("2z")
-    assert choose_discard(hand, rng=Random(0), gold_tiles=(south,)) == east
-    assert choose_discard(hand, rng=Random(0), gold_tiles=(east,)) == south
-
-
-def test_gold_tile_is_kept_as_a_single_wait_instead_of_another_single():
-    # 聽 1s 單騎摸進金牌 9s：打 1s 改聽金牌，同樣是聽牌但胡了多台
-    hand = C("123456789m123456p1s9s")
-    assert choose_discard(hand, rng=Random(0), gold_tiles=(P("9s"),)) == P("1s")
-
-
 def test_gold_tile_is_discarded_if_keeping_it_costs_shanten():
     # 聽 3p、6p 兩面時摸進金牌 9s：打掉 9s 才能維持聽牌，向聽數優先
     hand = C("123456789m12345p11s9s")
@@ -339,3 +324,26 @@ def test_kong_is_preferred_over_pung_from_a_discard():
                       last_discard=P("5p"), discard_player=0, response_player=1,
                       response_players=[1])
     assert choose_rule_action_for_player(state, 1).kind == ActionType.KONG
+
+
+def test_isolated_gold_tile_is_discarded_before_breaking_runs():
+    # 12:49 實戰：南、九萬都是孤張金牌，原本留著它們去拆五六七八九條
+    hand = C("345p89p56789s2z66z9m")
+    gold = parse("9p2z1m9m")
+    assert choose_discard(hand, 1, rng=Random(0), gold_tiles=gold) in parse("2z9m")
+
+
+def test_gold_tiles_in_use():
+    from agent.rule_agent import gold_in_use
+
+    hand = C("11m35p8s1z2z")
+    assert gold_in_use(hand, P("1m"))              # 對子
+    assert gold_in_use(hand, P("3p"))              # 旁邊有 5p
+    assert not gold_in_use(hand, P("8s"))          # 孤張數牌
+    assert not gold_in_use(hand, P("1z"))          # 孤張字牌
+
+
+def test_waiting_on_a_gold_tile_is_preferred():
+    # 聽牌時單騎：打 1s 聽金牌 9s（胡金牌 +3 台），而不是打 9s 聽 1s
+    hand = C("123456789m123456p1s9s")
+    assert choose_discard(hand, rng=Random(0), gold_tiles=(P("9s"),)) == P("1s")
