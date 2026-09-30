@@ -32,8 +32,8 @@ from game.rules import Action, ActionType, GameState, Phase, legal_actions
 CANDIDATES = 3
 ROLLOUTS = 24
 """每個候選模擬幾次（實戰另有時間上限）。"""
-TIME_LIMIT = 2.0
-"""實戰每步最多用幾秒（遊戲限時 3 秒）。"""
+TIME_LIMIT = 1.5
+"""實戰每個程序最多模擬幾秒（遊戲限時 3 秒，還要留給辨識、點擊與程序間傳遞）。"""
 LIVE_ROLLOUTS = 400
 """實戰的模擬次數上限（通常先碰到時間上限）。"""
 SIGNIFICANCE = 2.0
@@ -115,6 +115,30 @@ def evaluate_options(state: GameState, player: int, options: list[Option], rng: 
     return results
 
 
+def _evaluate_chunk(state: GameState, player: int, options: list[Option], seed: int,
+                    rollouts: int, undeclared_share: float,
+                    time_limit: float | None) -> dict[Option, list[float]]:
+    """多程序用：在子程序裡跑一部分模擬（校正表由子程序自己載入）。"""
+    return evaluate_options(state, player, options, Random(seed), default_calibration(),
+                            rollouts, undeclared_share, time_limit)
+
+
+def evaluate_options_parallel(pool, workers: int, state: GameState, player: int,
+                              options: list[Option], rng: Random, rollouts: int,
+                              undeclared_share: float,
+                              time_limit: float | None) -> dict[Option, list[float]]:
+    """把模擬分給 workers 個子程序；每個子程序回傳的清單內部同一索引是同一副牌，
+    直接串接仍保持各選項之間的配對。"""
+    per_worker = max(1, -(-rollouts // workers))
+    tasks = [(state, player, options, rng.randrange(2**31), per_worker, undeclared_share,
+              time_limit) for _ in range(workers)]
+    merged: dict[Option, list[float]] = {option: [] for option in options}
+    for part in pool.starmap(_evaluate_chunk, tasks):
+        for option in options:
+            merged[option].extend(part[option])
+    return merged
+
+
 def significantly_better(challenger: list[float], default: list[float],
                          significance: float = SIGNIFICANCE) -> bool:
     diffs = [a - b for a, b in zip(challenger, default)]
@@ -130,7 +154,9 @@ def choose_mc_action_for_player(state: GameState, player: int, rng: Random | Non
                                 calibration: Calibration | None = None,
                                 rollouts: int = ROLLOUTS, candidates: int = CANDIDATES,
                                 undeclared_share: float = UNDECLARED_TENPAI_SHARE,
-                                time_limit: float | None = None) -> Action | None:
+                                time_limit: float | None = None,
+                                pool=None, workers: int = 1) -> Action | None:
+    """pool 有給時把模擬分給 workers 個子程序（實戰用；每個子程序各自受 time_limit 限制）。"""
     rng = rng or Random()
     if state.phase != Phase.DISCARD or state.declared[player] or player != state.current_player:
         return choose_rule_action_for_player(state, player, rng)
@@ -149,8 +175,12 @@ def choose_mc_action_for_player(state: GameState, player: int, rng: Random | Non
     default = Option(top, Option(top, True) in options)
     best = default
     if len(options) > 1:
-        results = evaluate_options(state, player, options, rng, calibration, rollouts,
-                                   undeclared_share, time_limit)
+        if pool is not None and workers > 1:
+            results = evaluate_options_parallel(pool, workers, state, player, options, rng,
+                                                rollouts, undeclared_share, time_limit)
+        else:
+            results = evaluate_options(state, player, options, rng, calibration, rollouts,
+                                       undeclared_share, time_limit)
         average = {option: sum(values) / max(1, len(values)) for option, values in results.items()}
         challengers = [option for option in options if option != default
                        and significantly_better(results[option], results[default])]

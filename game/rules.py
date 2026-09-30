@@ -126,6 +126,8 @@ class GameState:
     """槓牌時依序加入的金牌候選；開局就洗好，讓同一 seed 的對局可重現。"""
     declared: list[bool] = field(default_factory=lambda: [False] * 4)
     """各家是否已宣告聽牌。"""
+    early_declared: list[bool] = field(default_factory=lambda: [False] * 4)
+    """是否在第一次打牌時就宣告聽牌（地聽）。"""
     swap_players: list[int] = field(default_factory=list)
     """換三張階段還沒決定的玩家（依序）。"""
 
@@ -463,6 +465,7 @@ def apply_action(state: GameState, action: Action, player: int | None = None) ->
         assert action.tile is not None
         if action.kind == ActionType.DECLARE:
             state.declared[actor] = True
+            state.early_declared[actor] = not current.discards
         remove_tile(current, action.tile)
         current.discards.append(action.tile)
         state.claimed = False

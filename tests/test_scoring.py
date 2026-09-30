@@ -9,12 +9,12 @@ def C(value: str) -> list[int]:
     return to_counts(parse(value))
 
 
-def test_pinghu_and_menzen_are_scored():
-    # 胡 4p：456p 兩面聽（聽 4p、7p）
+def test_no_honors_no_flowers_and_menzen_are_scored():
+    # 明星三缺一沒有平胡，改為無字無花 2 台（結算畫面 6 次）
     score = score_hand(C("123456789m123456p11p"), win_tile=parse("4p")[0])
     assert score.tai == 3
-    assert "平胡" in score.patterns
-    assert "門清" in score.patterns
+    assert "無字無花" in score.patterns and "門清" in score.patterns
+    assert "平胡" not in score.patterns
 
 
 def test_all_triplets_and_mixed_one_suit_are_scored():
@@ -69,13 +69,29 @@ def test_concealed_kong_keeps_menzen_but_open_kong_does_not():
 P = lambda value: parse(value)[0]  # noqa: E731
 
 
-def test_pinghu_requires_two_sided_wait():
+def test_no_honors_no_flowers_does_not_depend_on_the_wait():
     hand = C("123456789m123456p11p")
-    # 這手萬子只能拆成 123/456/789，胡 3m 是 123m 的邊張
-    edge = score_hand(hand, win_tile=P("3m"))
-    assert "平胡" not in edge.patterns
-    closed = score_hand(hand, win_tile=P("5p"))  # 456p 中洞
-    assert "平胡" not in closed.patterns
+    for win_tile in ("3m", "5p", "1p"):
+        assert "無字無花" in score_hand(hand, win_tile=P(win_tile)).patterns
+    assert "無字無花" not in score_hand(hand, flowers=parse("1f")).patterns
+    assert "無字無花" not in score_hand(C("123456789m123456p11z")).patterns
+
+
+def test_kongs_score_extra_tai():
+    # 163815 結算：暗槓 2 台、槓牌 1 台
+    hand = C("123456789m11z")
+    melds = [Meld("kong", (P("5p"),) * 4), Meld("kong", (P("7s"),) * 4, from_player=2)]
+    score = score_hand(hand, melds, self_draw=True)
+    assert "暗槓" in score.patterns and "槓牌" in score.patterns
+
+
+def test_declaring_on_the_first_discard_is_di_ting():
+    # 161823 結算：地聽 4 台（取代聽牌 1 台）
+    hand = C("123456789m123456p11z")
+    assert "聽牌" in score_hand(hand, declared=True).patterns
+    early = score_hand(hand, declared=True, early_declared=True)
+    assert "地聽" in early.patterns and "聽牌" not in early.patterns
+    assert early.tai - score_hand(hand, declared=True).tai == 3
 
 
 def test_single_wait_scores_du_ting():

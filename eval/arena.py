@@ -4,8 +4,8 @@
 
 每個種子打兩局：四家都是 baseline、以及把一個座位換成 variant（座位與莊家依種子輪替）；
 比較該座位兩局的輸贏差。起手牌相同，運氣成分大多抵銷，比各打各的少很多局就能分出高下。
-輸贏以台灣麻將「底 + 台」計（預設底 3、每台 1，對應 300/100）：放槍由放槍者付，
-自摸三家各付；尚未計入非莊自摸時莊家多付的莊家台。
+輸贏以「底 + 台」計（底 BASE_TAI = 2 台，對應訓練場 100/50）：放槍由放槍者付，自摸三家
+各付；非莊家自摸時莊家多付莊家的 1 台（結算畫面：閒家各付 400、莊家付 450）。
 
 策略代號：
     rule          規則式 AI（目前的預設參數）
@@ -29,10 +29,10 @@ from random import Random
 
 from agent.rule_agent import choose_rule_action_for_player
 from game.rules import Action, ActionType
+from game.scoring import BASE_TAI, TAI
 from game.simulator import GameResult, PlayerPolicy, play_game
 
-BASE = 3
-"""底，以「台」為單位（人氣館 300/100 → 底 3 台）。"""
+BASE = BASE_TAI
 
 
 def make_policy(spec: str) -> PlayerPolicy:
@@ -99,9 +99,13 @@ def payments(result: GameResult, base: int = BASE) -> list[int]:
     amount = base + result.score.tai
     losers = [result.discarder] if result.win_by_discard else \
         [player for player in range(4) if player != result.winner]
+    dealer = result.state.dealer
     for loser in losers:
-        pay[loser] -= amount
-        pay[result.winner] += amount
+        # 非莊家自摸：莊家台只由莊家付（莊家胡或莊家放槍時已算在胡牌者的台數裡）
+        extra = TAI["莊家"] if not result.win_by_discard and loser == dealer \
+            and result.winner != dealer else 0
+        pay[loser] -= amount + extra
+        pay[result.winner] += amount + extra
     return pay
 
 

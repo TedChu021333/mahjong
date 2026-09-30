@@ -1,7 +1,7 @@
 from random import Random
 
 from agent.mc_agent import Option, choose_mc_action_for_player, determinize, evaluate_options
-from agent.rollout import Seat, heuristic_discard, play_out
+from agent.rollout import BASE, Seat, heuristic_discard, play_out
 from game.rules import ActionType, GameState, Phase, PlayerState
 from game.tiles import parse, to_counts
 from tests.test_opponent_model import calibration
@@ -20,7 +20,7 @@ def test_ron_ends_the_rollout_with_the_discarder_paying():
     seats = [Seat(C("123456789m123456p"), 0), Seat(C("123456789m123456p1z"), 0),
              Seat(C(junk), 0), Seat(C(junk), 0)]
     result = play_out(seats, [], 0, P("1z"), 6.0, 5.0)
-    assert result == [-8.0, 8.0, 0.0, 0.0]  # 下家單騎東胡：底 3 + 5 台
+    assert result == [-(BASE + 5.0), BASE + 5.0, 0.0, 0.0]  # 下家單騎東胡：底 + 5 台
 
 
 def test_declared_winner_gets_one_more_tai_and_tsumo_is_paid_by_all():
@@ -29,7 +29,8 @@ def test_declared_winner_gets_one_more_tai_and_tsumo_is_paid_by_all():
              Seat(C(junk), 0), Seat(C(junk), 0)]
     seats[0].hand[P("9s")] -= 1
     result = play_out(seats, [P("1z")], 0, P("9s"), 6.0, 5.0)  # 下家摸到東自摸
-    assert result[1] == 3 * (3 + 6 + 1) and result[0] == result[2] == result[3] == -(3 + 6 + 1)
+    assert result[1] == 3 * (BASE + 6 + 1)
+    assert result[0] == result[2] == result[3] == -(BASE + 6 + 1)
 
 
 def test_heuristic_discard_throws_isolated_tiles():
@@ -88,3 +89,15 @@ def test_only_significant_differences_change_the_default():
     assert not significantly_better([d + x for d, x in zip(default, small)], default)
     assert significantly_better([d + x for d, x in zip(default, large)], default)
     assert not significantly_better([d - x for d, x in zip(default, large)], default)
+
+
+def test_parallel_evaluation_keeps_options_paired():
+    from multiprocessing import Pool
+
+    from agent.mc_agent import evaluate_options_parallel
+
+    state = table_state(p1="1z2z3z")
+    options = [Option(P("1z"), False), Option(P("7z"), False)]
+    with Pool(2) as pool:
+        results = evaluate_options_parallel(pool, 2, state, 0, options, Random(0), 4, 0.0, None)
+    assert len(results[options[0]]) == len(results[options[1]]) == 4

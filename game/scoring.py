@@ -20,7 +20,7 @@ TAI = {
     "自摸": 1,
     "門清自摸": 3,
     "全求人": 2,
-    "平胡": 2,
+    "無字無花": 2,
     "獨聽": 1,
     "碰碰胡": 4,
     "三暗刻": 2,
@@ -40,6 +40,9 @@ TAI = {
     "金牌": 1,
     "胡金牌": 3,
     "聽牌": 1,
+    "地聽": 4,
+    "暗槓": 2,
+    "槓牌": 1,
     "八仙過海": 8,
     "七搶一": 8,
     "槓上開花": 1,
@@ -49,6 +52,8 @@ TAI = {
     "嚦咕嚦咕": 8,
 }
 EVENTS = ("槓上開花", "海底撈月", "河底撈魚", "搶槓")
+BASE_TAI = 2
+"""底相當於幾台：訓練場結算畫面放槍胡 = 100 + 50 × 台數（例如 7 台 +450），底 100 = 2 台。"""
 DRAGONS = range(31, 34)
 WINDS = range(27, 31)
 
@@ -100,13 +105,13 @@ def _gold_patterns(hand: Sequence[int], open_melds: Sequence[Meld],
 
 def _context_patterns(
     self_draw: bool, flowers: Sequence[int], seat_wind: int | None,
-    dealer: bool, events: Sequence[str], declared: bool,
+    dealer: bool, events: Sequence[str], declared: bool, early_declared: bool = False,
 ) -> list[str]:
     patterns = []
     if dealer:
         patterns.append("莊家")
     if declared:
-        patterns.append("聽牌")
+        patterns.append("地聽" if early_declared else "聽牌")
     patterns.extend(_flower_patterns(flowers))
     for event in events:
         if event not in EVENTS:
@@ -117,15 +122,6 @@ def _context_patterns(
             raise ValueError(f"{event} 必須是胡別人的牌")
         patterns.append(event)
     return patterns
-
-
-def _is_two_sided(start: int, win_tile: int) -> bool:
-    """以 win_tile 完成順子 start..start+2 時是否為兩面聽（非邊張、中洞）。"""
-    if win_tile == start:
-        return start % 9 != 6      # 789 胡 7 是邊張
-    if win_tile == start + 2:
-        return start % 9 != 0      # 123 胡 3 是邊張
-    return False
 
 
 def _patterns_for_decomposition(
@@ -159,12 +155,12 @@ def _patterns_for_decomposition(
 
     if all(kind == "pung" for kind, _ in sets):
         patterns.append("碰碰胡")
-    elif (all(kind == "chow" for kind, _ in sets) and not is_honor(pair)
-          and not has_flowers and not self_draw and win_tile is not None
-          and not single_wait
-          and any(kind == "chow" and start <= win_tile <= start + 2
-                  and _is_two_sided(start, win_tile) for kind, start in concealed_melds)):
-        patterns.append("平胡")
+    # 明星三缺一沒有平胡（38 張結算畫面都沒出現），改為無字無花 2 台
+    if not has_flowers and not any(is_honor(tile) for tile in tiles_used):
+        patterns.append("無字無花")
+    for meld in open_melds:
+        if meld.kind == "kong":
+            patterns.append("暗槓" if meld.from_player is None else "槓牌")
     if single_wait:
         patterns.append("獨聽")
 
@@ -235,13 +231,15 @@ def score_hand(
     events: Sequence[str] = (),
     gold_tiles: Sequence[int] = (),
     declared: bool = False,
+    early_declared: bool = False,
 ) -> Score:
     """計算胡牌台數；多種拆法時選台數最高者。
 
-    counts 為胡牌後的暗手（含胡的那張）。win_tile 用來判斷平胡的兩面聽、
+    counts 為胡牌後的暗手（含胡的那張）。win_tile 用來判斷
     獨聽與胡別人的牌完成的刻子；不提供時這些與聽牌方式有關的牌型不計。
     dealer 表示莊家有參與這次胡牌（莊家胡或莊家放槍），dealer_streak 為連莊數。
-    gold_tiles 為本局金牌牌種，declared 表示胡牌者有宣告聽牌。
+    gold_tiles 為本局金牌牌種，declared 表示胡牌者有宣告聽牌，early_declared 表示第一次
+    打牌就宣告（地聽 4 台，取代聽牌 1 台）。
     """
     hand = _validate_counts(counts)
     _validate_melds(open_melds)
@@ -251,7 +249,8 @@ def score_hand(
         raise ValueError("不是合法胡牌")
     if win_tile is not None and not hand[win_tile]:
         raise ValueError("胡的那張必須在手牌中")
-    context = _context_patterns(self_draw, flowers, seat_wind, dealer, events, declared)
+    context = _context_patterns(self_draw, flowers, seat_wind, dealer, events, declared,
+                                early_declared)
     context += _gold_patterns(hand, open_melds, gold_tiles, win_tile)
 
     if allow_lickgu and is_lickgu(hand, len(open_melds)):

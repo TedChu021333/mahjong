@@ -22,12 +22,12 @@ from random import Random
 from typing import Sequence
 
 from game.rules import GameState
+from game.scoring import BASE_TAI
 from game.tiles import NUM_TILE_TYPES
 from game.win import winning_tiles
 
 CALIBRATION = Path(__file__).with_name("calibration.json")
-BASE = 3
-"""底（台）；與 eval.arena 相同。"""
+BASE = BASE_TAI
 SAMPLE_ATTEMPTS = 4
 """組一副聽牌手牌失敗（牌不夠、違反限制）時最多重試幾次。"""
 UNDECLARED_TENPAI_SHARE = 0.4

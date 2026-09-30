@@ -14,15 +14,26 @@ from game.scoring import Score
 from game.simulator import GameResult
 
 
-def result(winner, discarder, tai):
-    return GameResult(state=None, steps=0, winner=winner, win_by_discard=discarder is not None,
-                      score=Score(tai, ()), discarder=discarder)
+class _Table:
+    def __init__(self, dealer):
+        self.dealer = dealer
+
+
+def result(winner, discarder, tai, dealer=3):
+    return GameResult(state=_Table(dealer), steps=0, winner=winner,
+                      win_by_discard=discarder is not None, score=Score(tai, ()), discarder=discarder)
 
 
 def test_payments_follow_base_plus_tai():
-    assert payments(result(1, 2, 5)) == [0, 8, -8, 0]            # 放槍：底 3 + 5 台
-    assert payments(result(0, None, 2)) == [15, -5, -5, -5]      # 自摸：三家各付
-    assert payments(GameResult(state=None, steps=0)) == [0, 0, 0, 0]  # 流局
+    assert payments(result(1, 2, 5)) == [0, 7, -7, 0]            # 放槍：底 2 + 5 台
+    assert payments(result(3, None, 2)) == [-4, -4, -4, 12]      # 莊家自摸：三家各付
+    assert payments(GameResult(state=_Table(0), steps=0)) == [0, 0, 0, 0]  # 流局
+
+
+def test_dealer_pays_the_dealer_tai_when_someone_else_self_draws():
+    # 160658 結算：西家自摸 7 台（含莊家 1），閒家各付 400、南家（莊）付 450
+    pay = payments(result(2, None, 6, dealer=1))
+    assert pay == [-8, -9, 25, -8]
 
 
 def test_policy_specs():

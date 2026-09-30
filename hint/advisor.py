@@ -205,6 +205,14 @@ def describe(action: Action) -> str:
 
 POLICIES = ("rule", "ev", "mc")
 _policy = "rule"
+_pool = None
+_workers = 1
+
+
+def use_worker_pool(pool, workers: int) -> None:
+    """蒙地卡羅 AI 用多個子程序平行模擬（由提示模式的主程式建立，必須在 __main__ 之下）。"""
+    global _pool, _workers
+    _pool, _workers = pool, workers
 
 
 def use_policy(name: str) -> None:
@@ -230,7 +238,7 @@ def decide(observation: Observation, rng: Random | None = None) -> Action | None
         from agent.mc_agent import LIVE_ROLLOUTS, TIME_LIMIT, choose_mc_action_for_player
 
         return choose_mc_action_for_player(state, ME, rng or Random(0), rollouts=LIVE_ROLLOUTS,
-                                           time_limit=TIME_LIMIT)
+                                           time_limit=TIME_LIMIT, pool=_pool, workers=_workers)
     if _policy == "ev":
         from agent.ev_agent import choose_ev_action_for_player
 

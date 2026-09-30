@@ -262,6 +262,7 @@ def play_game(
                 events=events,
                 gold_tiles=state.gold_tiles,
                 declared=state.declared[player],
+                early_declared=state.early_declared[player],
             )
             return GameResult(
                 state,

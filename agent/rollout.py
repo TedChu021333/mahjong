@@ -13,10 +13,11 @@ from functools import lru_cache
 from typing import Sequence
 
 from agent.shanten import shanten
+from game.scoring import BASE_TAI
 from game.tiles import NUM_TILE_TYPES
 from game.win import is_win
 
-BASE = 3
+BASE = BASE_TAI
 
 
 @lru_cache(maxsize=200_000)

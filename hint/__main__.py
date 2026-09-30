@@ -225,6 +225,15 @@ def main() -> None:
                         help="只展示小視窗外觀（可拖曳調整位置），不辨識畫面")
     args = parser.parse_args()
     use_policy(args.ai)
+    if args.ai == "mc":
+        import os
+        from multiprocessing import Pool
+
+        from hint.advisor import use_worker_pool
+
+        workers = max(1, (os.cpu_count() or 2) - 2)
+        use_worker_pool(Pool(workers), workers)
+        print(f"蒙地卡羅 AI：{workers} 個程序平行模擬", flush=True)
     if args.demo_overlay:
         from hint.overlay import demo
 
