@@ -47,6 +47,7 @@ RAISE_TOLERANCE = 8
 TILE_SIZE = (40, 60)  # 比對前統一縮放的 (寬, 高)
 TEMPLATE_MARGIN = 2    # 模板四邊內縮，讓比對可容忍幾個像素的位移
 HIGH_PASS_SIGMA = 3.0
+SCORE_CACHE_SIZE = 256
 MIN_MATCH_SCORE = 0.78  # 13 張截圖留一驗證：正確牌最低 0.832，錯誤種類最高 0.736
 
 
@@ -154,6 +155,7 @@ class TileClassifier:
                 raise ValueError(f"模板牌編碼無效：{tile}")
             self.templates.append((tile, _normalize(image)[m:-m, m:-m]))
         self._tiles = np.array([tile for tile, _ in self.templates])
+        self._cache: dict = {}
         middle = self.templates[0][1].shape[0] // 2
         self._halves = (
             _unit_rows(np.stack([t[:middle] for _, t in self.templates])),
@@ -187,13 +189,25 @@ class TileClassifier:
         return {tile for tile, _ in self.templates}
 
     def scores(self, tile_image: np.ndarray) -> dict[int, float]:
-        """每種牌的最佳比對分數（-1 ~ 1）。
+        """每種牌的最佳比對分數（-1 ~ 1）。畫素完全相同的圖直接用快取（連續幀之間大部分牌沒變，
+        讀一副手牌從約 130ms 降到幾 ms）。
 
         上下半張分開比對取較低者：萬子下半部的「萬」字都相同，整張比對
         會被它拉高，分開後由上半的數字決定分數。每半只在原位置上下左右
         TEMPLATE_MARGIN 內搜尋；分數等同 TM_CCOEFF_NORMED，但一次對所有模板
         以矩陣運算計算（逐一呼叫 matchTemplate 一幀要 3 秒以上）。
         """
+        key = (tile_image.shape, tile_image.tobytes())
+        cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+        result = self._scores(tile_image)
+        if len(self._cache) >= SCORE_CACHE_SIZE:
+            self._cache.pop(next(iter(self._cache)))
+        self._cache[key] = result
+        return result
+
+    def _scores(self, tile_image: np.ndarray) -> dict[int, float]:
         target = _normalize(tile_image)
         m = TEMPLATE_MARGIN
         middle = (target.shape[0] - 2 * m) // 2

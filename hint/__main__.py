@@ -42,6 +42,9 @@ from perception.table_reader import read_buttons
 
 RETRY_AFTER = 1.5
 MAX_RETRIES = 2
+CLAIM_PROMPT_REPORT = 1.5
+RIVER_INTERVAL = 0.3
+"""牌河追蹤的門檻以幀數計、依約 0.3 秒一幀調校；擷取變快後牌河仍照這個間隔更新。"""
 UNREADABLE_AFTER = 6.0
 """牌局中連續這麼多秒讀不到手牌（又不是聽牌代打）就存一張截圖，查版面認不出的原因。"""
 CLAIM_MEMORY = 10.0
@@ -111,8 +114,8 @@ def video_frames(path: Path, step: float, start: float) -> Iterator[tuple[str, n
 def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         actuator=None, observe_fn=observe, clock=time.monotonic, show=None,
         find_continue=None, save_result=save_result, log=print_log, rivers=None,
-        find_win=None) -> None:
-    """find_win(frame) 為「胡」按鈕是否亮著（不依賴手牌辨識）。"""
+        find_win=None, find_buttons=None) -> None:
+    """find_win(frame) 為「胡」按鈕是否亮著、find_buttons(frame) 讀按鈕列（都不依賴手牌辨識）。"""
     previous = None
     last_advice = None
     acted_for = None
@@ -127,6 +130,9 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     decided_for = decided_action = None
     stuck_for = None
     win_pressed_at = float("-inf")
+    river_updated_at = float("-inf")
+    claim_prompt_since = None
+    claim_prompt_reported = False
     last_readable = None
     """最近一次讀到手牌的時間；存過「讀不到」截圖後設為 None，直到再讀到手牌。"""
     for stamp, frame in frames:
@@ -138,10 +144,13 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 elif observation.buttons is not None and not observation.my_turn \
                         and last_claim is not None and clock() - last_claim[1] <= CLAIM_MEMORY:
                     observation = replace(observation, claim=last_claim[0])
-            if rivers is not None and observation is not None:
+            if (rivers is not None and observation is not None
+                    and clock() - river_updated_at >= RIVER_INTERVAL):
+                river_updated_at = clock()
                 for event in rivers.update(frame, observation):
                     name = tile_name(event.tile) if event.tile is not None else "?"
                     log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
+            if rivers is not None and observation is not None:
                 observation = replace(observation, discards=rivers.discards(),
                                       melds=rivers.meld_counts())
             if observation is not None:
@@ -152,6 +161,23 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 last_readable = None  # 每段讀不到的期間只存一張
                 log(f"[{stamp}] 連續 {UNREADABLE_AFTER:.0f} 秒讀不到手牌，截圖存到 "
                     f"{save_result(frame, '讀不到_')}")
+            # 吃碰槓按鈕亮著卻一直沒處理：存截圖查原因（手牌變暗讀不到、放大的牌讀不到…）
+            lit = observation.buttons if observation is not None else \
+                (find_buttons(frame) if find_buttons is not None else None)
+            if lit and lit & {"chow", "pung", "kong"}:
+                if claim_prompt_since is None:
+                    claim_prompt_since, claim_prompt_reported = clock(), False
+                handled = observation is not None and decided_for == observation \
+                    and decided_action is not None
+                if not handled and not claim_prompt_reported \
+                        and clock() - claim_prompt_since >= CLAIM_PROMPT_REPORT:
+                    claim_prompt_reported = True
+                    reason = "讀不到手牌" if observation is None else \
+                        "放大的牌讀不到" if observation.claim is None else "沒有建議"
+                    log(f"[{stamp}] 吃碰按鈕亮了 {CLAIM_PROMPT_REPORT} 秒還沒處理（{reason}），"
+                        f"截圖存到 {save_result(frame, '吃碰未處理_')}")
+            else:
+                claim_prompt_since = None
             if observation is None and find_win is not None and find_win(frame):
                 # 摸牌的手、出牌動畫常蓋住手牌，而且倒數只剩一兩秒：讀不到手牌也照樣胡
                 # （曾因此錯過自摸，遊戲還會顯示「您剛剛錯過了胡牌時機」）
@@ -252,7 +278,7 @@ def main() -> None:
     parser.add_argument("--video", type=Path)
     parser.add_argument("--step", type=float, default=0.5, help="影片每隔幾秒取一幀")
     parser.add_argument("--start", type=float, default=0.0, help="影片從第幾秒開始")
-    parser.add_argument("--interval", type=float, default=0.3, help="即時模式擷取間隔（秒）")
+    parser.add_argument("--interval", type=float, default=0.1, help="即時模式擷取間隔（秒）")
     parser.add_argument("--auto", action="store_true",
                         help="自動點擊（只在對手全是電腦的訓練場使用；滑鼠甩到左上角中止）")
     parser.add_argument("--no-overlay", action="store_true", help="不顯示浮動小視窗")
@@ -320,7 +346,7 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
     if not overlay:
         print(f"{mode}啟動，Ctrl+C 結束", flush=True)
         run(screen_frames(interval), readers, actuator=actuator, find_continue=find_continue,
-            log=log, rivers=rivers, find_win=win_is_lit)
+            log=log, rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons)
         return
     from hint.overlay import Overlay
 
@@ -328,7 +354,7 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
     window = Overlay()
     window.run(lambda: run(screen_frames(interval), readers, actuator=actuator,
                            show=window.show, find_continue=find_continue, log=log,
-                           rivers=rivers, find_win=win_is_lit))
+                           rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons))
 
 
 def win_is_lit(frame: np.ndarray) -> bool:

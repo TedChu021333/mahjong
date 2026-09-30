@@ -355,3 +355,27 @@ def test_dealer_badge_on_real_screens():
         path = TRAIN_DIR / f"{name}.png"
         if path.exists():
             assert read_dealer(read_image(path)) == seat, name
+
+
+def test_unhandled_claim_prompt_is_reported():
+    import hint.__main__ as hint_main
+
+    # 手牌讀不到、但吃碰按鈕亮著 2 秒：存一張截圖
+    now = [0.0]
+
+    def frames():
+        for step in range(20):
+            now[0] = step * 0.1
+            yield str(step), "frame"
+
+    def play(buttons):
+        saved, lines = [], []
+        hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: None,
+                      find_buttons=lambda frame: buttons, clock=lambda: now[0],
+                      save_result=lambda frame, prefix="": saved.append(prefix) or "x",
+                      log=lambda line, detail=None, echo=True: lines.append(line))
+        return saved, lines
+
+    assert play(None) == ([], [])
+    saved, lines = play(frozenset({"chow"}))
+    assert saved == ["吃碰未處理_"] and "讀不到手牌" in lines[-1]
