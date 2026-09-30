@@ -54,7 +54,12 @@ RESULT_DIR = Path("result")
 
 
 def save_result(frame: np.ndarray, prefix: str = "") -> Path:
-    path = RESULT_DIR / f"{prefix}{time.strftime('%Y%m%d_%H%M%S')}.png"
+    stamp = time.strftime('%Y%m%d_%H%M%S')
+    path = RESULT_DIR / f"{prefix}{stamp}.png"
+    count = 1
+    while path.exists():  # 小結算和大結算常在同一秒，不能互相覆蓋
+        count += 1
+        path = RESULT_DIR / f"{prefix}{stamp}_{count}.png"
     write_image(path, frame)
     return path
 

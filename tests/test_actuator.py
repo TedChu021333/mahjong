@@ -174,3 +174,14 @@ def test_save_result_writes_a_png(tmp_path, monkeypatch):
     path = hint_main.save_result(np.zeros((1080, 1920, 3), dtype=np.uint8))
     assert path.parent == tmp_path / "result" and path.suffix == ".png"
     assert read_image(path).shape == (1080, 1920, 3)
+
+
+def test_screenshots_in_the_same_second_do_not_overwrite(tmp_path, monkeypatch):
+    import numpy as np
+    import hint.__main__ as hint_main
+
+    monkeypatch.setattr(hint_main, "RESULT_DIR", tmp_path)
+    monkeypatch.setattr(hint_main.time, "strftime", lambda fmt: "20260930_193518")
+    frame = np.zeros((8, 8, 3), dtype=np.uint8)
+    first, second = hint_main.save_result(frame), hint_main.save_result(frame)
+    assert first != second and first.exists() and second.exists()
