@@ -46,3 +46,16 @@ def test_play_again_button_after_a_drawn_hand():
     buttons = ContinueButtons.from_directory()
     assert buttons.find(read_image(TRAIN_DIR / "經典_再贏一局.png")).name == "再贏一局"
     assert buttons.find(read_image(TRAIN_DIR / "經典_小結算.png")).name == "小結算繼續"
+
+
+def test_end_of_round_buttons():
+    # 打一圈結束：大結算「繼續戰鬥」，倒數結束後的「再玩一局」對話框
+    expected = {"經典_大結算": "繼續戰鬥", "經典_再玩一局": "再玩一局",
+                "經典_再贏一局": "再贏一局", "經典_小結算": "小結算繼續", "經典_碰": None}
+    buttons = ContinueButtons.from_directory()
+    for name, button in expected.items():
+        path = TRAIN_DIR / f"{name}.png"
+        if not path.exists() or not (BUTTON_TEMPLATE_DIR / "繼續戰鬥.png").exists():
+            pytest.skip("缺少訓練截圖或按鈕參考圖")
+        found = buttons.find(read_image(path))
+        assert (found.name if found else None) == button, name
