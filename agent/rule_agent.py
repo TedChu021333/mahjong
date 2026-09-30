@@ -77,7 +77,25 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
             best.append((-value, risk, next_shanten, tile))
     best_score = min(score[:3] for score in best)
     best_tiles = [tile for *score, tile in best if tuple(score) == best_score]
+    # 平手時先打最孤立的牌（孤張字牌 → 孤張么九 → 其他），再隨機
+    lowest = min(keep_value(hand, tile, gold) for tile in best_tiles)
+    best_tiles = [tile for tile in best_tiles if keep_value(hand, tile, gold) == lowest]
     return (rng or Random()).choice(best_tiles)
+
+
+def keep_value(hand: Sequence[int], tile: int, gold_tiles=()) -> int:
+    """這張牌留著的價值，只用來打破平手：同種越多、前後兩格內的牌越多越高；
+    孤張字牌最低（只能碰、湊不成順子，實戰曾留著孤張東西去拆萬子），孤張么九次之；
+    金牌再加 3（湊成對子、刻子時多台）。"""
+    value = hand[tile] * 6 + (3 if tile in gold_tiles else 0)
+    if tile >= 27:
+        return value - 2
+    rank = tile % 9
+    for offset, weight in ((1, 3), (2, 1)):
+        for neighbor in (rank - offset, rank + offset):
+            if 0 <= neighbor <= 8:
+                value += weight * min(hand[tile - rank + neighbor], 2)
+    return value - (1 if rank in (0, 8) else 0)
 
 
 GOLD_DISCARD_PENALTY = 8

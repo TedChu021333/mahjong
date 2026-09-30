@@ -28,6 +28,7 @@ from agent.opponent_model import (
 )
 from agent.rollout import Seat, play_out
 from agent.rule_agent import choose_rule_action_for_player, choose_self_kong
+from agent.shanten import shanten
 from game.rules import Action, ActionType, GameState, Phase, legal_actions
 
 CANDIDATES = 3
@@ -175,7 +176,17 @@ def choose_mc_action_for_player(state: GameState, player: int, rng: Random | Non
     calibration = calibration or default_calibration()
     scores = discard_scores(state, player, rng, calibration, risk_weight=RISK_WEIGHT,
                             undeclared_share=undeclared_share)
-    ranked = sorted(scores, key=scores.get, reverse=True)[:candidates]
+    # 只比較不比期望值第一名差（向聽數）的牌：模擬用的簡化打法對留哪些牌有偏好，
+    # 曾因此推翻第一名去打讓向聽變差的一萬（實戰 17:53）
+    me = state.players[player]
+
+    def level(tile: int) -> int:
+        after = list(me.hand)
+        after[tile] -= 1
+        return shanten(after, me.open_melds)
+
+    ordered = sorted(scores, key=scores.get, reverse=True)
+    ranked = [tile for tile in ordered if level(tile) <= level(ordered[0])][:candidates]
     options = [Option(tile, False) for tile in ranked]
     options += [Option(tile, True) for tile in ranked
                 if Action(ActionType.DECLARE, tile=tile) in actions]

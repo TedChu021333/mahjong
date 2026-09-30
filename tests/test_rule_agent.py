@@ -126,8 +126,9 @@ def test_visible_tiles_are_used_to_weight_effective_draws():
             1, 0, 2, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0]
     visible = [2, 2, 2, 4, 0, 3, 1, 3, 1, 0, 0, 0, 0, 1, 4, 1,
                4, 0, 4, 3, 4, 1, 2, 0, 0, 4, 2, 3, 1, 3, 1, 1, 3, 3]
-    assert choose_discard(hand, rng=Random(1)) == 16
-    assert choose_discard(hand, rng=Random(1), visible_counts=visible) == 8
+    assert choose_discard(hand, rng=Random(1)) == 28  # 平手時先打孤張的南
+    # 看得到的牌會改變進張數：這裡九萬、八筒、南、西加權後仍同分，平手照樣先打孤張字牌
+    assert choose_discard(hand, rng=Random(1), visible_counts=visible) in (28, 29)
 
 
 def test_visible_tile_counts_include_hands_discards_and_melds():
@@ -358,3 +359,12 @@ def test_swap_avoids_giving_away_middle_tiles():
     assert P("5p") not in swapped and P("5z") in swapped
     assert swap_gift_cost(P("5p")) > swap_gift_cost(P("8p")) > swap_gift_cost(P("9p")) \
         > swap_gift_cost(P("5z"))
+
+
+def test_ties_discard_the_most_isolated_tile():
+    from agent.rule_agent import keep_value
+
+    # 實戰 17:53：打六萬、南、七筒向聽與進張都相同，應先打孤張的南
+    hand = C("1255678m7999p2335s2z9m")
+    assert choose_discard(hand, rng=Random(0)) == P("2z")
+    assert keep_value(hand, P("2z")) < keep_value(hand, P("9m")) < keep_value(hand, P("6m"))

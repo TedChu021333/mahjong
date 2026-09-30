@@ -17,6 +17,7 @@ from agent.opponent_model import (
 from agent.rule_agent import (
     choose_rule_action_for_player,
     gold_in_use,
+    keep_value,
     choose_self_kong,
     visible_tile_counts,
 )
@@ -30,6 +31,8 @@ GOLD_VALUE_SHARE = 1 / 8
 """胡牌平均約 底 2 + 6 台，用得上的金牌多 1 台 ≈ 收益多 1/8。"""
 GOLD_WAIT_SHARE = 3 / 8
 OUTS_TIE_BREAK = 1e-3
+KEEP_TIE_BREAK = 1e-6
+"""進張也相同時先打最孤立的牌（孤張字牌優先），見 rule_agent.keep_value。"""
 """表是分組的，同一組內再以精確的有效進張數區分（不改變不同組之間的排序）。"""
 
 
@@ -57,7 +60,9 @@ def discard_scores(state: GameState, player: int, rng: Random,
         if level == 0 and gold.intersection(effective_tiles(after, me.open_melds)):
             value *= 1 + GOLD_WAIT_SHARE  # 聽金牌：胡那張再多 3 台
         # 打出金牌被胡對方多 3 台，已算在 danger.expected_loss 裡
-        scores[tile] = value - risk_weight * danger.expected_loss[tile]             + OUTS_TIE_BREAK * (outs - 100 * level)
+        scores[tile] = (value - risk_weight * danger.expected_loss[tile]
+                        + OUTS_TIE_BREAK * (outs - 100 * level)
+                        - KEEP_TIE_BREAK * keep_value(me.hand, tile, gold))
     return scores
 
 

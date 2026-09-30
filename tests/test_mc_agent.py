@@ -121,3 +121,16 @@ def test_dealer_involvement_costs_extra_in_rollouts_and_danger():
     state.dealer, state.dealer_streak = 2, 1
     dealer = estimate_danger(state, 0, [P("9s")], Random(0), calibration(0.0), 100)
     assert dealer.expected_loss[P("9s")] > plain.expected_loss[P("9s")]
+
+
+def test_mc_never_picks_a_tile_worse_than_the_ev_choice():
+    # 實戰 17:53：打東、西向聽 2，打一萬向聽 3，蒙地卡羅曾選一萬
+    from agent.shanten import shanten
+
+    state = table_state()
+    state.players[0].hand = C("1255789m7999p335s1z3z1s")
+    for seed in range(3):
+        action = choose_mc_action_for_player(state, 0, Random(seed), calibration(0.0), rollouts=6)
+        after = list(state.players[0].hand)
+        after[action.tile] -= 1
+        assert shanten(after) == 2
