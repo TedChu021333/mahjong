@@ -330,3 +330,10 @@ def test_win_button_reader_on_real_screens():
     if not path.exists():
         pytest.skip("缺少訓練截圖")
     assert not win_is_lit(read_image(path))  # 只有吃、碰亮著
+
+
+def test_unknown_dealer_is_not_assumed_to_be_me():
+    from hint.advisor import build_state
+
+    state = build_state(Observation(T("123456789m12345p9s17z"), None, None, ()))
+    assert state.known_dealer is None and state.dealer_streak == 0

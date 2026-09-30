@@ -113,7 +113,8 @@ def evaluate_options(state: GameState, player: int, options: list[Option], rng: 
             mine = copies[player]
             mine.hand[option.tile] -= 1
             mine.declared = mine.declared or option.declare
-            results[option].append(play_out(copies, wall, player, option.tile, tsumo, ron)[player])
+            results[option].append(play_out(copies, wall, player, option.tile, tsumo, ron,
+                                            state.known_dealer, state.dealer_streak)[player])
         done += 1
     return results
 

@@ -109,6 +109,12 @@ class GameState:
     dealer: int = 0
     dealer_streak: int = 0
     """莊家連莊次數（連 n 拉 n：莊家有參與的胡牌加 2n 台）。"""
+    dealer_known: bool = True
+    """從畫面建立的局面可能不知道誰是莊家；此時 dealer 只是佔位，AI 不加莊家台。"""
+
+    @property
+    def known_dealer(self) -> int | None:
+        return self.dealer if self.dealer_known else None
     reserve: int = 0
     """牌牆保留不摸的張數；initial_state 設為 DEAD_WALL_SIZE。"""
     last_drawn: int | None = None

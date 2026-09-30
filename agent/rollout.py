@@ -13,7 +13,7 @@ from functools import lru_cache
 from typing import Sequence
 
 from agent.shanten import shanten
-from game.scoring import BASE_TAI
+from game.scoring import BASE_TAI, TAI
 from game.tiles import NUM_TILE_TYPES
 from game.win import is_win
 
@@ -106,10 +106,17 @@ def _shanten_after_discard(hand: list[int], open_melds: int) -> int:
     return level
 
 
+def dealer_bonus(dealer: int | None, streak: int, *players: int) -> float:
+    """莊家有參與（胡牌者或付錢的人是莊家）時多的莊家台與連莊台 1 + 2n。"""
+    return TAI["莊家"] + 2 * streak if dealer is not None and dealer in players else 0.0
+
+
 def play_out(seats: list[Seat], wall: list[int], discarder: int, discard: int,
-             tsumo_tai: float, ron_tai: float) -> list[float]:
+             tsumo_tai: float, ron_tai: float, dealer: int | None = None,
+             streak: int = 0) -> list[float]:
     """discarder 剛打出 discard；從別家能不能胡這張開始模擬。回傳四家輸贏（台）。
-    tsumo_tai、ron_tai 是沒宣告聽牌時的平均台數。會改動 seats。"""
+    tsumo_tai、ron_tai 是沒宣告聽牌時、不含莊家台的平均台數；dealer、streak 用來加莊家與連莊台。
+    會改動 seats。"""
     position = len(wall)
     current, tile = discarder, discard
     while True:
@@ -122,7 +129,7 @@ def play_out(seats: list[Seat], wall: list[int], discarder: int, discard: int,
             seat.hand[tile] -= 1
             if won:
                 result = [0.0] * 4
-                amount = BASE + ron_tai + seat.declared
+                amount = BASE + ron_tai + seat.declared + dealer_bonus(dealer, streak, other, current)
                 result[other] += amount
                 result[current] -= amount
                 return result
@@ -141,8 +148,12 @@ def play_out(seats: list[Seat], wall: list[int], discarder: int, discard: int,
             seat.hand[drawn] += 1
             if _wins(tuple(seat.hand), seat.open_melds):
                 amount = BASE + tsumo_tai + seat.declared
-                result = [-amount] * 4
-                result[current] = 3 * amount
+                result = [0.0] * 4
+                for payer in range(4):
+                    if payer != current:
+                        paid = amount + dealer_bonus(dealer, streak, current, payer)
+                        result[payer] -= paid
+                        result[current] += paid
                 return result
             if seat.declared:
                 seat.hand[drawn] -= 1

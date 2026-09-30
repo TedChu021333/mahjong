@@ -20,6 +20,7 @@ from random import Random
 from agent.rule_agent import choose_rule_action_for_player
 from agent.shanten import effective_tiles, shanten
 from game.rules import ActionType, Phase
+from game.scoring import TAI
 from game.simulator import payments
 from game.simulator import play_game
 
@@ -63,8 +64,10 @@ def _play(seed: int) -> dict:
     result = play_game(Random(seed), player_policy=policy, dealer=seed % 4, swap=True)
     records["winner"] = result.winner
     records["gain"] = payments(result)[result.winner] if result.winner is not None else 0
+    # 台數不含莊家台（AI 另外依誰是莊家、連幾莊加上去）
     records["win"] = None if result.score is None else (
-        result.score.tai, bool(result.state.declared[result.winner]), not result.win_by_discard)
+        result.score.tai - TAI["莊家"] * result.score.patterns.count("莊家"),
+        bool(result.state.declared[result.winner]), not result.win_by_discard)
     records["tenpai"] = {f"{d},{m}": v for (d, m), v in tenpai.items()}
     return records
 

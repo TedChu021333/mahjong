@@ -41,6 +41,9 @@ class ObservedTable:
     forbidden_discards: tuple[int, ...] = ()
     declared: tuple[bool, bool, bool, bool] = (False, False, False, False)
     """各家是否已宣告聽牌。"""
+    dealer: int | None = None
+    """莊家座位（0 自己、1 下家、2 對家、3 上家）；None 表示畫面上沒認出來。"""
+    dealer_streak: int = 0
     wall_remaining: int = 0
     """估計的牌牆可摸張數（畫面上看不到，只影響 state.drawable；牌牆內容以 0 佔位）。"""
 
@@ -118,4 +121,7 @@ def parse_observed_table(observed: ObservedTable) -> GameState:
         claimed=observed.claimed,
         forbidden_discards=observed.forbidden_discards,
         declared=list(observed.declared),
+        dealer=observed.dealer if observed.dealer is not None else 0,
+        dealer_known=observed.dealer is not None,
+        dealer_streak=observed.dealer_streak if observed.dealer is not None else 0,
     )

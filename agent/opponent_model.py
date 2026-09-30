@@ -22,7 +22,7 @@ from random import Random
 from typing import Sequence
 
 from game.rules import GameState
-from game.scoring import BASE_TAI
+from game.scoring import BASE_TAI, TAI
 from game.tiles import NUM_TILE_TYPES
 from game.win import winning_tiles
 
@@ -248,6 +248,9 @@ def estimate_danger(state: GameState, player: int, candidates: Sequence[int],
         if not valid:
             continue
         per_loss = calibration.loss_if_dealing_in(declared)
+        if state.known_dealer in (opponent, player):
+            # 放槍給莊家、或自己是莊家放槍：多付莊家台與連莊台（論文 TaKe：只防莊家反而總分最高）
+            per_loss += TAI["莊家"] + 2 * state.dealer_streak
         for tile in candidates:
             risk = p_tenpai * hits[tile] / valid
             safe_probability[tile] *= 1 - risk

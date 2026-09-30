@@ -101,3 +101,23 @@ def test_parallel_evaluation_keeps_options_paired():
     with Pool(2) as pool:
         results = evaluate_options_parallel(pool, 2, state, 0, options, Random(0), 4, 0.0, None)
     assert len(results[options[0]]) == len(results[options[1]]) == 4
+
+
+def test_dealer_involvement_costs_extra_in_rollouts_and_danger():
+    from agent.opponent_model import estimate_danger
+    from agent.rollout import dealer_bonus
+
+    assert dealer_bonus(None, 0, 1, 2) == 0 and dealer_bonus(2, 0, 1, 3) == 0
+    assert dealer_bonus(2, 0, 1, 2) == 1 and dealer_bonus(2, 3, 2, 0) == 7
+    junk = "1479m258p369s234567z"
+    seats = [Seat(C("123456789m123456p"), 0), Seat(C("123456789m123456p1z"), 0),
+             Seat(C(junk), 0), Seat(C(junk), 0)]
+    # 下家是連 2 的莊家：放槍多付 1 + 4 台
+    assert play_out(seats, [], 0, P("1z"), 6.0, 5.0, dealer=1, streak=2)[0] == -(BASE + 5 + 5)
+
+    state = table_state(p2="1z2z3z")
+    state.declared[2] = True
+    plain = estimate_danger(state, 0, [P("9s")], Random(0), calibration(0.0), 100)
+    state.dealer, state.dealer_streak = 2, 1
+    dealer = estimate_danger(state, 0, [P("9s")], Random(0), calibration(0.0), 100)
+    assert dealer.expected_loss[P("9s")] > plain.expected_loss[P("9s")]
