@@ -432,3 +432,23 @@ def test_dealer_streak_on_real_screens():
     path = TRAIN_DIR / "經典_上家第二欄吃.png"
     if path.exists():
         assert read_dealer_streak(read_image(path), {2: templates[2]}) is None
+
+
+def test_autoplay_is_not_reported_as_unreadable():
+    import hint.__main__ as hint_main
+
+    hand = T("123456789m12345p9s17z")
+    screens = [Observation(hand, None, None, ())] * 2 + [None] * 30
+    saved = []
+    now = [0.0]
+
+    def frames():
+        for step, screen in enumerate(screens):
+            now[0] = step * 0.5
+            yield str(step), screen
+
+    hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: frame,
+                  find_autoplay=lambda frame: frame is None, clock=lambda: now[0],
+                  save_result=lambda frame, prefix="": saved.append(prefix) or "x",
+                  log=lambda line, detail=None, echo=True: None)
+    assert "讀不到_" not in saved

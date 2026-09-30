@@ -183,6 +183,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     streak_reported = True  # 每次執行只存一張，補模板用
                     log(f"[{stamp}] 認不出連莊數（先當 {STREAK_UNKNOWN_GUESS}），截圖存到 "
                         f"{save_result(frame, '連莊_')}")
+            elif find_autoplay is not None and find_autoplay(frame):
+                last_readable = clock()  # 聽牌後遊戲代打：「取消代打」蓋住手牌是正常的
             elif (last_readable is not None and clock() - last_readable >= UNREADABLE_AFTER
                   and not (decided_action is not None
                            and decided_action.kind == ActionType.DECLARE)):
