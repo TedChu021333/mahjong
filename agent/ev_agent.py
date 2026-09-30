@@ -30,16 +30,47 @@ RISK_WEIGHT = 0.5
 GOLD_VALUE_SHARE = 1 / 8
 """胡牌平均約 底 2 + 6 台，用得上的金牌多 1 台 ≈ 收益多 1/8。"""
 GOLD_WAIT_SHARE = 3 / 8
+HONOR_TAI_SHARE = GOLD_VALUE_SHARE
+"""碰出來會加台的字牌（三元牌、圈風、已知的門風）每 1 台同樣算進攻收益的 1/8；手上已成刻子
+全算，對子依還沒出現的張數打折（見 honor_pung_value）。實戰 10/1 01:06 曾為了稍微安全一點拆掉一對東
+（東風圈，碰出來有台），因為進攻收益只看向聽與進張。"""
+PAIR_PUNG_CHANCE = 0.25
+"""對子每剩一張沒出現的，約有這麼多機會湊成刻子（粗估，剩 2 張 → 0.5）。"""
 OUTS_TIE_BREAK = 1e-3
 KEEP_TIE_BREAK = 1e-6
 """進張也相同時先打最孤立的牌（孤張字牌優先），見 rule_agent.keep_value。"""
 """表是分組的，同一組內再以精確的有效進張數區分（不改變不同組之間的排序）。"""
 
 
+def honor_tai(state: GameState, player: int, tile: int) -> int:
+    """這種字牌碰成刻子能加幾台（game.scoring 的三元牌、圈風牌、門風牌）；莊家不明時門風不算。"""
+    if tile >= 31:
+        return 1
+    tai = int(tile == state.round_wind)
+    if state.known_dealer is not None and tile == state.seat_winds[player]:
+        tai += 1
+    return tai
+
+
+def honor_pung_value(state: GameState, player: int, hand, visible) -> float:
+    """手上會加台的字牌刻子與對子，換算成期望多幾台。"""
+    value = 0.0
+    for tile in range(27, 34):
+        if hand[tile] < 2:
+            continue
+        tai = honor_tai(state, player, tile)
+        if hand[tile] >= 3:
+            value += tai
+        else:
+            value += tai * PAIR_PUNG_CHANCE * max(0, 4 - visible[tile])
+    return value
+
+
 def discard_scores(state: GameState, player: int, rng: Random,
                    calibration: Calibration | None = None, samples: int = 120,
                    risk_weight: float = RISK_WEIGHT,
-                   undeclared_share: float = UNDECLARED_TENPAI_SHARE) -> dict[int, float]:
+                   undeclared_share: float = UNDECLARED_TENPAI_SHARE,
+                   honor_share: float = HONOR_TAI_SHARE) -> dict[int, float]:
     calibration = calibration or default_calibration()
     me = state.players[player]
     candidates = allowed_discards(me.hand, state.forbidden_discards if state.claimed else ())
@@ -59,6 +90,7 @@ def discard_scores(state: GameState, player: int, rng: Random,
             value *= 1 - GOLD_VALUE_SHARE
         if level == 0 and gold.intersection(effective_tiles(after, me.open_melds)):
             value *= 1 + GOLD_WAIT_SHARE  # 聽金牌：胡那張再多 3 台
+        value *= 1 + honor_share * honor_pung_value(state, player, after, visible)
         # 打出金牌被胡對方多 3 台，已算在 danger.expected_loss 裡
         scores[tile] = (value - risk_weight * danger.expected_loss[tile]
                         + OUTS_TIE_BREAK * (outs - 100 * level)
@@ -69,7 +101,8 @@ def discard_scores(state: GameState, player: int, rng: Random,
 def choose_ev_action_for_player(state: GameState, player: int, rng: Random | None = None,
                                 calibration: Calibration | None = None, samples: int = 120,
                                 risk_weight: float = RISK_WEIGHT,
-                                undeclared_share: float = UNDECLARED_TENPAI_SHARE) -> Action | None:
+                                undeclared_share: float = UNDECLARED_TENPAI_SHARE,
+                                honor_share: float = HONOR_TAI_SHARE) -> Action | None:
     rng = rng or Random()
     if state.phase != Phase.DISCARD or state.declared[player] or player != state.current_player:
         return choose_rule_action_for_player(state, player, rng)
@@ -81,7 +114,7 @@ def choose_ev_action_for_player(state: GameState, player: int, rng: Random | Non
     if kong is not None:
         return kong
     scores = discard_scores(state, player, rng, calibration, samples, risk_weight,
-                            undeclared_share)
+                            undeclared_share, honor_share)
     best = max(scores.values())
     tile = rng.choice(sorted(t for t, score in scores.items() if score >= best - 1e-9))
     declare = Action(ActionType.DECLARE, tile=tile)

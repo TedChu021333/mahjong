@@ -14,6 +14,7 @@
     fold:<n>      規則式 AI，有對手宣告聽牌時，自己向聽數 ≥n 就棄胡
     nodeclare     規則式 AI，但聽牌時不宣告（不拿聽牌 1 台，手牌不鎖、還能防守）
     ev[:<w>]      期望值打牌（agent.ev_agent），w 為放槍損失的權重（預設 RISK_WEIGHT）
+    evhonor:<h>   期望值打牌，會加台的字牌刻子／對子每台算進攻收益的 h 倍（0 = 不算）
     mc[:<n>]      蒙地卡羅打牌（agent.mc_agent），n 為每個候選的模擬次數（預設 ROLLOUTS）
     mcclaim[:<n>] 規則式 AI，但吃碰槓用蒙地卡羅判斷（單獨評估吃碰的效果）
 """
@@ -51,6 +52,10 @@ def make_policy(spec: str) -> PlayerPolicy:
         from agent.ev_agent import RISK_WEIGHT
 
         return partial(_ev_policy, risk_weight=float(arg) if arg else RISK_WEIGHT)
+    if name == "evhonor" and arg:
+        from agent.ev_agent import RISK_WEIGHT
+
+        return partial(_ev_policy, risk_weight=RISK_WEIGHT, honor_share=float(arg))
     if name == "nodeclare" and not arg:
         return _no_declare_policy
     if name == "fold" and arg:
@@ -74,12 +79,13 @@ def _mc_policy(state, player, rng, rollouts):
     return choose_mc_action_for_player(state, player, rng, rollouts=rollouts, undeclared_share=0.0)
 
 
-def _ev_policy(state, player, rng, risk_weight):
-    from agent.ev_agent import choose_ev_action_for_player
+def _ev_policy(state, player, rng, risk_weight, honor_share=None):
+    from agent.ev_agent import HONOR_TAI_SHARE, choose_ev_action_for_player
 
     # 模擬器裡的 AI 聽牌一律宣告，沒宣告的人不會已經聽牌
-    return choose_ev_action_for_player(state, player, rng, risk_weight=risk_weight,
-                                       undeclared_share=0.0)
+    return choose_ev_action_for_player(
+        state, player, rng, risk_weight=risk_weight, undeclared_share=0.0,
+        honor_share=HONOR_TAI_SHARE if honor_share is None else honor_share)
 
 
 def _no_declare_policy(state, player, rng):

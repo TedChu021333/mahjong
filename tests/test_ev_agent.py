@@ -1,6 +1,11 @@
 from random import Random
 
-from agent.ev_agent import choose_ev_action_for_player, discard_scores
+from agent.ev_agent import (
+    choose_ev_action_for_player,
+    discard_scores,
+    honor_pung_value,
+    honor_tai,
+)
 from game.rules import ActionType, GameState, Phase, PlayerState
 from game.tiles import parse, to_counts
 from tests.test_opponent_model import calibration
@@ -40,3 +45,23 @@ def test_wins_are_never_skipped():
     state.last_drawn = P("1z")
     action = choose_ev_action_for_player(state, 0, Random(0), calibration(0.0), samples=10)
     assert action.kind == ActionType.WIN
+
+
+def test_honor_tai_counts_round_wind_dragons_and_known_seat_wind():
+    state = state_with("123456789m12345p9s17z")
+    assert [honor_tai(state, 1, P(t)) for t in ("1z", "2z", "5z")] == [1, 1, 1]  # 下家門風南
+    assert honor_tai(state, 1, P("3z")) == 0
+    state.dealer_known = False  # 莊家不明：門風不算
+    assert honor_tai(state, 1, P("2z")) == 0
+
+
+def test_honor_pair_value_depends_on_unseen_copies():
+    state = state_with("123456789m12345p9s17z")
+    visible = [0] * 34
+    hand = to_counts(parse("11z555z3z"))
+    visible[P("1z")] = 2
+    visible[P("5z")] = 3
+    # 自己是莊（東風圈的東是圈風也是門風，2 台）：東對子剩 2 張 → 1 台；中刻子 1 台；西不加台
+    assert honor_pung_value(state, 0, hand, visible) == 2.0
+    visible[P("1z")] = 4
+    assert honor_pung_value(state, 0, hand, visible) == 1.0

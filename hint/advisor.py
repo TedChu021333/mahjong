@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 
 from agent.rule_agent import choose_rule_action_for_player, choose_swap_tiles, kong_is_worth
-from game.rules import Action, ActionType, GameState, Phase, legal_actions
+from game.rules import Action, ActionType, GameState, Phase, legal_actions, seat_winds_for_dealer
 from game.tiles import NUM_TILE_TYPES, tile_name
 from perception.config import CLAIM_TEMPLATE_BOX, GOLD_MIN_SCORE, GOLD_TEMPLATE_BOX, TEMPLATE_DIR
 from perception.config import MAX_HAND_TILES
@@ -180,6 +180,8 @@ def build_state(observation: Observation) -> GameState | None:
     common = dict(gold_tiles=observation.gold_tiles, declared=tuple(declared), dealer=dealer,
                   dealer_streak=streak,
                   wall_remaining=estimate_wall(observation))
+    if dealer is not None:
+        common["seat_winds"] = seat_winds_for_dealer(dealer)  # 門風跟著莊家轉，莊家是東
     if observation.my_turn:
         if observation.claimed:
             table = ObservedTable(players=tuple(players), current_player=ME, phase=Phase.DISCARD,
