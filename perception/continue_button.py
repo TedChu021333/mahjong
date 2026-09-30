@@ -47,16 +47,20 @@ class ContinueButtons:
                     for name in CONTINUE_BUTTONS if (directory / f"{name}.png").exists()})
 
     def find(self, image: np.ndarray) -> ContinueButton | None:
+        """同位置的按鈕（再贏一局、繼續戰鬥、破產後的再玩一局）字形相近，取分數最高的。"""
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        best, best_score = None, CONTINUE_MIN_SCORE
         for name, reference in self.references.items():
             area = crop(gray, CONTINUE_BUTTONS[name], CONTINUE_SEARCH_MARGIN)
             if area.shape[0] < reference.shape[0] or area.shape[1] < reference.shape[1]:
                 continue
-            scores = cv2.matchTemplate(area, reference, cv2.TM_CCOEFF_NORMED)
-            if scores.max() >= CONTINUE_MIN_SCORE:
-                left, top, right, bottom = CONTINUE_BUTTONS[name]
-                return ContinueButton(name, ((left + right) // 2, (top + bottom) // 2))
-        return None
+            score = float(cv2.matchTemplate(area, reference, cv2.TM_CCOEFF_NORMED).max())
+            if score >= best_score:
+                best, best_score = name, score
+        if best is None:
+            return None
+        left, top, right, bottom = CONTINUE_BUTTONS[best]
+        return ContinueButton(best, ((left + right) // 2, (top + bottom) // 2))
 
 
 class PopupClosers:
