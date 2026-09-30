@@ -14,6 +14,7 @@ from perception.config import (
     CLAIM_TILE_MARGINS,
     CLAIM_TILE_POSITIONS,
     CLAIM_TILE_SIZE,
+    DEALER_BADGE_REGIONS,
     DECLARE_MIN_SCORE,
     DECLARE_REGIONS,
     GOLD_MAX_SLOTS,
@@ -179,3 +180,18 @@ def read_declared(image: np.ndarray, template: np.ndarray | None) -> frozenset[s
         if cv2.matchTemplate(region, template, cv2.TM_CCOEFF_NORMED).max() >= DECLARE_MIN_SCORE:
             seats.add(seat)
     return frozenset(seats)
+
+
+def read_dealer(image: np.ndarray) -> str | None:
+    """誰是莊家（me/left/top/right）：找實心的紅色方塊；橫幅上的紅字、牌上的紅色筆畫都太細，
+    不會被當成方塊。認不出來時回傳 None。"""
+    found = []
+    for seat, (left, top, right, bottom) in DEALER_BADGE_REGIONS.items():
+        hsv = cv2.cvtColor(image[top:bottom, left:right], cv2.COLOR_BGR2HSV)
+        hue, saturation, value = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+        red = (((hue < 8) | (hue > 172)) & (saturation > 150) & (value > 150)).astype(np.uint8)
+        count, _, stats, _ = cv2.connectedComponentsWithStats(red)
+        if any(44 <= w <= 62 and 44 <= h <= 62 and area > 1200
+               for _, _, w, h, area in stats[1:count]):
+            found.append(seat)
+    return found[0] if len(found) == 1 else None

@@ -26,6 +26,7 @@ from perception.table_reader import (
     read_buttons,
     read_chow_panels,
     read_claim_tile,
+    read_dealer,
     read_declared,
     read_gold_tiles,
     read_swap_prompt,
@@ -57,6 +58,8 @@ class Observation:
     """剛吃碰後不能打的牌。"""
     melds: tuple[int, ...] = field(default=(), compare=False)
     """推算的對手副露數（座位同 discards；自己的欄位不用，由手牌張數得知）。"""
+    dealer: str | None = field(default=None, compare=False)
+    """莊家座位（me/left/top/right），認不出來為 None。"""
     declared: frozenset[str] = field(default=frozenset(), compare=False)
     """旁邊有「聽」標記的對手（left/top/right）。"""
     discards: tuple[tuple[int, ...], ...] = field(default=(), compare=False)
@@ -98,7 +101,8 @@ def observe(image: np.ndarray, readers: Readers) -> Observation | None:
                        read_swap_prompt(image),
                        tuple(box[1] != HAND_TILE_TOP for box in reading.boxes),
                        read_chow_panels(image),
-                       declared=read_declared(image, readers.declare))
+                       declared=read_declared(image, readers.declare),
+                       dealer=read_dealer(image))
 
 
 def _consistent_layout(boxes) -> bool:
@@ -162,7 +166,8 @@ def build_state(observation: Observation) -> GameState | None:
     declared = [False] * 4
     for seat in observation.declared:
         declared[SOURCE_SEAT[seat]] = True
-    common = dict(gold_tiles=observation.gold_tiles, declared=tuple(declared),
+    dealer = None if observation.dealer is None else         ME if observation.dealer == "me" else SOURCE_SEAT[observation.dealer]
+    common = dict(gold_tiles=observation.gold_tiles, declared=tuple(declared), dealer=dealer,
                   wall_remaining=estimate_wall(observation))
     if observation.my_turn:
         if observation.claimed:

@@ -337,3 +337,21 @@ def test_unknown_dealer_is_not_assumed_to_be_me():
 
     state = build_state(Observation(T("123456789m12345p9s17z"), None, None, ()))
     assert state.known_dealer is None and state.dealer_streak == 0
+
+
+def test_dealer_badge_reaches_the_state():
+    from hint.advisor import build_state
+
+    hand = T("123456789m12345p9s17z")
+    assert build_state(Observation(hand, None, None, (), dealer="right")).known_dealer == 1
+    assert build_state(Observation(hand, None, None, (), dealer="me")).known_dealer == 0
+
+
+def test_dealer_badge_on_real_screens():
+    from perception.table_reader import read_dealer
+
+    expected = {"經典_碰": "left", "經典_牌河290": "me", "經典_b10": "top", "經典_小結算": None}
+    for name, seat in expected.items():
+        path = TRAIN_DIR / f"{name}.png"
+        if path.exists():
+            assert read_dealer(read_image(path)) == seat, name
