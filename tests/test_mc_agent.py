@@ -150,7 +150,8 @@ def test_claim_evaluation_compares_pass_and_claims():
     assert {a.kind.value for a in options} == {"pass", "pung", "kong"}
     results = evaluate_claims(state, 1, options, Random(0), calibration(0.0), 5, 0.0)
     assert all(len(values) == 5 for values in results.values())
-    action = choose_mc_action_for_player(state, 1, Random(0), calibration(0.0), rollouts=5)
+    action = choose_mc_action_for_player(state, 1, Random(0), calibration(0.0), rollouts=5,
+                                         mc_claims=True)
     assert action in legal_actions(state, 1)
 
 
