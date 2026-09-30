@@ -38,6 +38,8 @@ from perception.config import CONTINUE_BUTTONS, NEXT_GAME_CLICKS, NEXT_GAME_DELA
 
 RETRY_AFTER = 1.5
 MAX_RETRIES = 2
+UNREADABLE_AFTER = 6.0
+"""牌局中連續這麼多秒讀不到手牌（又不是聽牌代打）就存一張截圖，查版面認不出的原因。"""
 CLAIM_MEMORY = 10.0
 """能吃碰時放大的牌可能先縮進牌河、按鈕卻還亮著；這段時間內沿用最近讀到的那張。"""
 RESULT_DIR = Path("result")
@@ -119,6 +121,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     """(最近讀到的放大牌, 時間)。"""
     decided_for = decided_action = None
     stuck_for = None
+    last_readable = None
+    """最近一次讀到手牌的時間；存過「讀不到」截圖後設為 None，直到再讀到手牌。"""
     """已經存過「胡按鈕亮著卻沒選胡」截圖的畫面。"""
     for stamp, frame in frames:
         try:
@@ -134,8 +138,17 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
                 observation = replace(observation, discards=rivers.discards(),
                                       melds=rivers.meld_counts())
+            if observation is not None:
+                last_readable = clock()
+            elif last_readable is not None and clock() - last_readable >= UNREADABLE_AFTER                     and not (decided_action is not None
+                             and decided_action.kind == ActionType.DECLARE):
+                last_readable = None  # 每段讀不到的期間只存一張
+                log(f"[{stamp}] 連續 {UNREADABLE_AFTER:.0f} 秒讀不到手牌，截圖存到 "
+                    f"{save_result(frame, '讀不到_')}")
             if observation is None and find_continue is not None:
                 observation = find_continue(frame)
+                if observation is not None:
+                    last_readable = None  # 這局結束了：結算、配桌期間讀不到手牌是正常的
             if observation is None and next_game_clicks and clock() - acted_at >= NEXT_GAME_DELAY:
                 left, top, right, bottom = NEXT_GAME_REGION
                 log(f"[{stamp}] 按下一場")

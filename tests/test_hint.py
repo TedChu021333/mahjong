@@ -256,3 +256,45 @@ def test_loop_survives_errors_and_reports_stuck_screens(monkeypatch):
                   log=lambda line, detail=None, echo=True: lines.append(line))
     assert saved == ["錯誤_", "卡住_"]
     assert any("程式錯誤" in line for line in lines)
+
+
+def test_long_unreadable_stretch_saves_one_screenshot():
+    import hint.__main__ as hint_main
+
+    hand = T("123456789m12345p9s17z")
+    screens = [Observation(hand, None, None, ())] * 2 + [None] * 30
+    saved = []
+    now = [0.0]
+
+    def frames():
+        for step, screen in enumerate(screens):
+            now[0] = step * 0.5
+            yield str(step), screen
+
+    hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: frame,
+                  clock=lambda: now[0], save_result=lambda frame, prefix="": saved.append(prefix) or "x",
+                  log=lambda line, detail=None, echo=True: None)
+    assert saved == ["讀不到_"]
+
+
+def test_settlement_does_not_count_as_unreadable():
+    import hint.__main__ as hint_main
+    from perception.continue_button import ContinueButton
+
+    hand = T("123456789m12345p9s17z")
+    button = ContinueButton("小結算繼續", (1459, 977))
+    screens = [Observation(hand, None, None, ())] * 2 + [button] * 3 + [None] * 30
+    saved = []
+    now = [0.0]
+
+    def frames():
+        for step, screen in enumerate(screens):
+            now[0] = step * 0.5
+            yield str(step), screen
+
+    hint_main.run(frames(), readers=None,
+                  observe_fn=lambda frame, readers: frame if isinstance(frame, Observation) else None,
+                  find_continue=lambda frame: frame if isinstance(frame, ContinueButton) else None,
+                  clock=lambda: now[0], save_result=lambda frame, prefix="": saved.append(prefix) or "x",
+                  log=lambda line, detail=None, echo=True: None)
+    assert "讀不到_" not in saved
