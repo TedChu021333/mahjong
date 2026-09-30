@@ -47,7 +47,7 @@ from perception.config import (
     ACTION_BUTTON_CENTERS,
     CONTINUE_BUTTONS,
 )
-from perception.table_reader import read_buttons
+from perception.table_reader import autoplay_active, read_buttons
 
 RETRY_AFTER = 1.5
 MAX_RETRIES = 2
@@ -128,7 +128,7 @@ def video_frames(path: Path, step: float, start: float) -> Iterator[tuple[str, n
 def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         actuator=None, observe_fn=observe, clock=time.monotonic, show=None,
         find_continue=None, save_result=save_result, log=print_log, rivers=None,
-        find_win=None, find_buttons=None, find_popup=None) -> None:
+        find_win=None, find_buttons=None, find_popup=None, find_autoplay=None) -> None:
     """find_win(frame) 為「胡」按鈕是否亮著、find_buttons(frame) 讀按鈕列（都不依賴手牌辨識）；
     find_popup(frame) 找會蓋住牌桌的彈出面板（自動模式按關閉）。"""
     previous = None
@@ -378,7 +378,7 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
         print(f"{mode}啟動，Ctrl+C 結束", flush=True)
         run(screen_frames(interval), readers, actuator=actuator, find_continue=find_continue,
             log=log, rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
-            find_popup=popups.find)
+            find_popup=popups.find, find_autoplay=autoplay_active)
         return
     from hint.overlay import Overlay
 
@@ -387,7 +387,7 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
     window.run(lambda: run(screen_frames(interval), readers, actuator=actuator,
                            show=window.show, find_continue=find_continue, log=log,
                            rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
-                           find_popup=popups.find))
+                           find_popup=popups.find, find_autoplay=autoplay_active))
 
 
 def win_is_lit(frame: np.ndarray) -> bool:
