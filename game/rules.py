@@ -107,6 +107,8 @@ class GameState:
     round_wind: int = 27
     seat_winds: tuple[int, int, int, int] = (27, 28, 29, 30)
     dealer: int = 0
+    dealer_streak: int = 0
+    """莊家連莊次數（連 n 拉 n：莊家有參與的胡牌加 2n 台）。"""
     reserve: int = 0
     """牌牆保留不摸的張數；initial_state 設為 DEAD_WALL_SIZE。"""
     last_drawn: int | None = None
@@ -164,7 +166,8 @@ def _collect_flower(state: GameState, player: int, tile: int) -> None:
 
 
 def initial_state(rng: Random | None = None, dealer: int = 0,
-                  round_wind: int = 27, swap: bool = False) -> GameState:
+                  round_wind: int = 27, swap: bool = False,
+                  dealer_streak: int = 0) -> GameState:
     """建立洗好的初始牌局；莊家 17 張，其餘玩家 16 張，花牌自動補。
 
     swap=True 時先進入換三張階段，從莊家開始每人決定一次。
@@ -177,7 +180,7 @@ def initial_state(rng: Random | None = None, dealer: int = 0,
     state = GameState(
         wall=build_wall(rng), players=[PlayerState() for _ in range(4)],
         current_player=dealer, phase=Phase.DISCARD, round_wind=round_wind,
-        seat_winds=seat_winds_for_dealer(dealer), dealer=dealer,
+        seat_winds=seat_winds_for_dealer(dealer), dealer=dealer, dealer_streak=dealer_streak,
         reserve=DEAD_WALL_SIZE,
         gold_tiles=gold_order[:GOLD_TILES_AT_START],
         gold_pool=gold_order[GOLD_TILES_AT_START:],

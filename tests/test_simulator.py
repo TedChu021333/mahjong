@@ -115,3 +115,40 @@ def test_pung_by_later_seat_beats_chow_by_next_seat():
 
     player, action = _choose_with_player_policy(state, Random(0), claim_anything)
     assert (player, action.kind) == (2, ActionType.PUNG)
+
+
+def test_full_round_rotates_dealer_and_keeps_it_on_dealer_win_or_draw():
+    from random import Random
+
+    from agent.rule_agent import choose_rule_action_for_player
+    from game.simulator import play_match, payments
+
+    match = play_match(Random(3), player_policy=choose_rule_action_for_player, first_dealer=2)
+    dealers = [hand.state.dealer for hand in match.hands]
+    streaks = [hand.state.dealer_streak for hand in match.hands]
+    assert dealers[0] == 2 and streaks[0] == 0
+    passes = 0
+    for before, after, streak_after in zip(match.hands, match.hands[1:], streaks[1:]):
+        kept = before.winner is None or before.winner == before.state.dealer
+        if kept:
+            assert after.state.dealer == before.state.dealer
+            assert streak_after == before.state.dealer_streak + 1
+        else:
+            assert after.state.dealer == (before.state.dealer + 1) % 4 and streak_after == 0
+            passes += 1
+    last = match.hands[-1]
+    assert passes == 3 and last.winner is not None and last.winner != last.state.dealer
+    assert list(match.totals) == [sum(payments(h)[s] for h in match.hands) for s in range(4)]
+    assert sum(match.totals) == 0
+
+
+def test_dealer_streak_adds_tai_and_extra_payment():
+    from game.rules import GameState, PlayerState
+    from game.scoring import Score
+    from game.simulator import GameResult, payments
+
+    state = GameState([], [PlayerState() for _ in range(4)], dealer=1, dealer_streak=2)
+    # 非莊家自摸：莊家多付莊家 1 台 + 連 2 拉 2 共 4 台
+    tsumo = GameResult(state, 0, winner=0, score=Score(3, ()))
+    pay = payments(tsumo)
+    assert pay[2] == pay[3] == -(2 + 3) and pay[1] == -(2 + 3 + 5)

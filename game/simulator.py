@@ -7,7 +7,7 @@ from random import Random
 from typing import Callable
 
 from .rules import Action, ActionType, GameState, Phase, apply_action, initial_state, legal_actions
-from .scoring import Score, score_flower_win, score_hand
+from .scoring import BASE_TAI, TAI, Score, score_flower_win, score_hand
 from .tiles import tile_name
 
 ActionChooser = Callable[[GameState, Random], tuple[int, Action] | None]
@@ -193,7 +193,8 @@ def _flower_win_result(state: GameState, steps: int, history: list[GameEvent],
     return GameResult(
         state, steps, winner=flower_win.winner,
         win_by_discard=flower_win.from_player is not None,
-        history=tuple(history), score=score_flower_win(flower_win.kind, dealer),
+        history=tuple(history),
+        score=score_flower_win(flower_win.kind, dealer, state.dealer_streak if dealer else 0),
         discarder=flower_win.from_player, discard_count=discard_count,
         discards_by_player=tuple(discards_by_player),
     )
@@ -207,13 +208,14 @@ def play_game(
     player_policy: PlayerPolicy | None = None,
     dealer: int = 0,
     swap: bool = False,
+    dealer_streak: int = 0,
 ) -> GameResult:
     """執行一局對局；摸到留牌或達到步數上限都視為流局。"""
     if max_steps <= 0:
         raise ValueError("max_steps 必須為正數")
     rng = rng or Random()
     choose_action = choose_action or choose_random_action
-    state = initial_state(rng, dealer=dealer, swap=swap)
+    state = initial_state(rng, dealer=dealer, swap=swap, dealer_streak=dealer_streak)
     history: list[GameEvent] = []
     discard_count = 0
     discards_by_player = [0, 0, 0, 0]
@@ -259,6 +261,7 @@ def play_game(
                 # 莊家有參與（莊家胡或莊家放槍）才加莊家台；非莊自摸時莊家
                 # 多付的部分屬於付款計算，不算在胡牌者的台數裡。
                 dealer=state.dealer in {player, discarder},
+                dealer_streak=state.dealer_streak if state.dealer in {player, discarder} else 0,
                 events=events,
                 gold_tiles=state.gold_tiles,
                 declared=state.declared[player],
@@ -280,6 +283,63 @@ def play_game(
     return GameResult(state, max_steps, history=tuple(history),
                       discard_count=discard_count,
                       discards_by_player=tuple(discards_by_player))
+
+
+def payments(result: GameResult, base: int = BASE_TAI) -> list[int]:
+    """每家這局的輸贏（台）：放槍由放槍者付，自摸三家各付。非莊家自摸時莊家多付莊家台
+    與連莊台（1 + 2n；莊家胡或莊家放槍時已算在胡牌者的台數裡）。"""
+    pay = [0, 0, 0, 0]
+    if result.winner is None or result.score is None:
+        return pay
+    amount = base + result.score.tai
+    losers = [result.discarder] if result.win_by_discard else         [player for player in range(4) if player != result.winner]
+    dealer = result.state.dealer
+    for loser in losers:
+        extra = 0
+        if not result.win_by_discard and loser == dealer and result.winner != dealer:
+            extra = TAI["莊家"] + 2 * getattr(result.state, "dealer_streak", 0)
+        pay[loser] -= amount + extra
+        pay[result.winner] += amount + extra
+    return pay
+
+
+MAX_HANDS = 40
+"""一圈最多打幾局（防止連莊無限延長）。"""
+
+
+@dataclass(frozen=True)
+class MatchResult:
+    hands: tuple[GameResult, ...]
+    totals: tuple[int, int, int, int]
+    """四家整圈的輸贏（台）。"""
+
+
+def play_match(
+    rng: Random | None = None,
+    player_policy: PlayerPolicy | None = None,
+    first_dealer: int = 0,
+    swap: bool = True,
+    hand_seed=None,
+) -> MatchResult:
+    """打一圈（東風圈）：莊家從 first_dealer 開始，莊家胡牌或流局就連莊（連莊數 +1），
+    否則下家接莊、連莊數歸零；四家都當過莊、莊家輪回 first_dealer 時結束。
+    hand_seed(局序) 有給時，每局用它產生的種子洗牌（配對比較用）。"""
+    rng = rng or Random()
+    dealer, streak, passes = first_dealer, 0, 0
+    hands: list[GameResult] = []
+    totals = [0, 0, 0, 0]
+    while passes < 4 and len(hands) < MAX_HANDS:
+        hand_rng = Random(hand_seed(len(hands))) if hand_seed is not None else rng
+        result = play_game(hand_rng, player_policy=player_policy, dealer=dealer, swap=swap,
+                           dealer_streak=streak)
+        hands.append(result)
+        for seat, amount in enumerate(payments(result)):
+            totals[seat] += amount
+        if result.winner is None or result.winner == dealer:
+            streak += 1
+        else:
+            dealer, streak, passes = (dealer + 1) % 4, 0, passes + 1
+    return MatchResult(tuple(hands), tuple(totals))
 
 
 def format_game_trace(result: GameResult, limit: int | None = None) -> str:

@@ -29,10 +29,7 @@ from random import Random
 
 from agent.rule_agent import choose_rule_action_for_player
 from game.rules import Action, ActionType
-from game.scoring import BASE_TAI, TAI
-from game.simulator import GameResult, PlayerPolicy, play_game
-
-BASE = BASE_TAI
+from game.simulator import PlayerPolicy, payments, play_game
 
 
 def make_policy(spec: str) -> PlayerPolicy:
@@ -89,24 +86,6 @@ def _blind_policy(state, player, rng):
 
 def _gold_policy(state, player, rng, penalty):
     return choose_rule_action_for_player(state, player, rng, gold_penalty=penalty)
-
-
-def payments(result: GameResult, base: int = BASE) -> list[int]:
-    """每家這局的輸贏（台）。"""
-    pay = [0, 0, 0, 0]
-    if result.winner is None or result.score is None:
-        return pay
-    amount = base + result.score.tai
-    losers = [result.discarder] if result.win_by_discard else \
-        [player for player in range(4) if player != result.winner]
-    dealer = result.state.dealer
-    for loser in losers:
-        # 非莊家自摸：莊家台只由莊家付（莊家胡或莊家放槍時已算在胡牌者的台數裡）
-        extra = TAI["莊家"] if not result.win_by_discard and loser == dealer \
-            and result.winner != dealer else 0
-        pay[loser] -= amount + extra
-        pay[result.winner] += amount + extra
-    return pay
 
 
 @dataclass(frozen=True)

@@ -20,7 +20,7 @@ from random import Random
 from agent.rule_agent import choose_rule_action_for_player
 from agent.shanten import effective_tiles, shanten
 from game.rules import ActionType, Phase
-from eval.arena import payments
+from game.simulator import payments
 from game.simulator import play_game
 
 OUTPUT = Path(__file__).resolve().parent.parent / "agent" / "calibration.json"
