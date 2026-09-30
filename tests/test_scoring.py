@@ -30,11 +30,11 @@ def test_highest_decomposition_is_selected():
     assert "碰碰胡" in score.patterns
 
 
-def test_lickgu_is_scored_and_can_be_disabled():
+def test_lickgu_is_off_by_default_but_can_be_enabled():
     hand = C("1133557799m1122555z")
-    assert score_hand(hand).tai == 8
+    assert score_hand(hand, allow_lickgu=True).tai == 8
     with pytest.raises(ValueError):
-        score_hand(hand, allow_lickgu=False)
+        score_hand(hand)
 
 
 def test_menzen_self_draw_and_every_flower_counts():

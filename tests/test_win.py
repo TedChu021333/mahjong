@@ -55,8 +55,8 @@ def test_nine_gates_waits():
 def test_lickgu():
     hand = C("1133557799m1122555z")
     assert is_lickgu(hand)
-    assert is_win(hand)
-    assert not is_win(hand, allow_lickgu=False)
+    assert is_win(hand, allow_lickgu=True)
+    assert not is_win(hand)  # 明星三缺一沒有嚦咕嚦咕，預設關閉
 
 
 def test_flower_win():

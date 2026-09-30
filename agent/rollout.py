@@ -22,7 +22,7 @@ BASE = BASE_TAI
 
 @lru_cache(maxsize=200_000)
 def _wins(counts: tuple[int, ...], open_melds: int) -> bool:
-    return is_win(list(counts), open_melds, True)
+    return is_win(list(counts), open_melds)
 
 
 def keep_score(hand: Sequence[int], tile: int) -> int:

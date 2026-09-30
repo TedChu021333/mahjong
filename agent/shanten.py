@@ -4,6 +4,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Sequence
 
+from game import win as win_module
 from game.tiles import NUM_TILE_TYPES, is_suited
 
 
@@ -104,7 +105,7 @@ def seven_pairs_shanten(counts: Sequence[int]) -> int:
 @lru_cache(maxsize=1_000_000)
 def _shanten_cached(counts: tuple[int, ...], n_open_melds: int) -> int:
     standard = standard_shanten(counts, n_open_melds)
-    if n_open_melds:
+    if n_open_melds or not win_module.LICKGU_ENABLED:
         return standard
     return min(standard, _seven_pairs_shanten_validated(counts))
 

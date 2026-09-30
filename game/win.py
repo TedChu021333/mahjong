@@ -90,14 +90,21 @@ def is_lickgu(counts: list[int], n_open_melds: int = 0) -> bool:
     return sum(c // 2 for c in counts if c != 3) == 7
 
 
-def is_win(counts: list[int], n_open_melds: int = 0, allow_lickgu: bool = True) -> bool:
+LICKGU_ENABLED = False
+"""明星三缺一沒有嚦咕嚦咕：這種牌型遊戲不讓聽（實戰曾建議聽嚦咕嚦咕，按鈕沒亮），也沒出現在
+結算畫面。allow_lickgu 不指定時照這個設定。"""
+
+
+def is_win(counts: list[int], n_open_melds: int = 0, allow_lickgu: bool | None = None) -> bool:
     if is_standard_win(counts, n_open_melds):
         return True
+    if allow_lickgu is None:
+        allow_lickgu = LICKGU_ENABLED
     return allow_lickgu and is_lickgu(counts, n_open_melds)
 
 
 def winning_tiles(counts: list[int], n_open_melds: int = 0,
-                  allow_lickgu: bool = True) -> list[int]:
+                  allow_lickgu: bool | None = None) -> list[int]:
     """聽哪些牌（手上已有 4 張的牌不算）"""
     if sum(counts) != _expected_size(n_open_melds) - 1:
         raise ValueError("聽牌判定時手牌張數不對")

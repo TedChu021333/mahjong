@@ -35,3 +35,11 @@ def test_lickgu_shanten_needs_seven_pairs_and_one_triplet():
 def test_invalid_hand_size_is_rejected():
     with pytest.raises(ValueError):
         shanten(C("123m"))
+
+def test_seven_pairs_do_not_count_as_tenpai_in_this_game():
+    # 實戰 16:06：44m 88m 55p 66p 777p 44s 5s 88s 是嚦咕嚦咕聽 5s，但遊戲不能聽
+    from agent.shanten import seven_pairs_shanten
+
+    hand = to_counts(parse("44m88m55p66p777p44s5s88s"))
+    assert seven_pairs_shanten(hand) == 0
+    assert shanten(hand) > 0

@@ -232,7 +232,7 @@ def test_should_fold_when_behind_against_high_public_threat():
 def test_swap_chooses_isolated_tiles_and_keeps_good_hands():
     from agent.rule_agent import choose_swap_tiles
     assert set(choose_swap_tiles(C("123456789m1234p19s1z"))) == set(parse("19s1z"))
-    assert choose_swap_tiles(C("1133557799m113355p")) == ()  # 已聽嚦咕嚦咕
+    assert choose_swap_tiles(C("123456789m123456p1z")) == ()  # 已聽牌
 
 
 def test_rule_agent_plays_full_games_with_swap():

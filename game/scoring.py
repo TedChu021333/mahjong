@@ -11,6 +11,7 @@ from typing import Sequence
 
 from .rules import Meld
 from .tiles import NUM_TILE_TYPES, is_flower, is_honor, is_suited
+from . import win as win_module
 from .win import decompose, is_lickgu, is_win, winning_tiles
 
 
@@ -222,7 +223,7 @@ def score_hand(
     open_melds: Sequence[Meld] = (),
     flowers: Sequence[int] = (),
     self_draw: bool = False,
-    allow_lickgu: bool = True,
+    allow_lickgu: bool | None = None,
     seat_wind: int | None = None,
     round_wind: int | None = None,
     win_tile: int | None = None,
@@ -245,6 +246,8 @@ def score_hand(
     _validate_melds(open_melds)
     if dealer_streak < 0 or (dealer_streak and not dealer):
         raise ValueError("連莊數必須搭配莊家")
+    if allow_lickgu is None:
+        allow_lickgu = win_module.LICKGU_ENABLED
     if not is_win(hand, len(open_melds), allow_lickgu):
         raise ValueError("不是合法胡牌")
     if win_tile is not None and not hand[win_tile]:
