@@ -34,3 +34,15 @@ def test_settlement_screen_has_continue_and_no_hand():
     assert observe(settlement, Readers()) is None
     for name in ("經典_碰", "經典_a200", "經典_換三張"):
         assert buttons.find(read_image(TRAIN_DIR / f"{name}.png")) is None
+
+
+@pytest.mark.skipif(
+    not (TRAIN_DIR / "經典_再贏一局.png").exists()
+    or not (BUTTON_TEMPLATE_DIR / "再贏一局.png").exists(),
+    reason="缺少訓練截圖或按鈕參考圖",
+)
+def test_play_again_button_after_a_drawn_hand():
+    # 流局沒有小結算，直接出現「再贏一局 (倒數)」
+    buttons = ContinueButtons.from_directory()
+    assert buttons.find(read_image(TRAIN_DIR / "經典_再贏一局.png")).name == "再贏一局"
+    assert buttons.find(read_image(TRAIN_DIR / "經典_小結算.png")).name == "小結算繼續"
