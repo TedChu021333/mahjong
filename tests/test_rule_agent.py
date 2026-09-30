@@ -347,3 +347,14 @@ def test_waiting_on_a_gold_tile_is_preferred():
     # 聽牌時單騎：打 1s 聽金牌 9s（胡金牌 +3 台），而不是打 9s 聽 1s
     hand = C("123456789m123456p1s9s")
     assert choose_discard(hand, rng=Random(0), gold_tiles=(P("9s"),)) == P("1s")
+
+
+def test_swap_avoids_giving_away_middle_tiles():
+    from agent.rule_agent import choose_swap_tiles, swap_gift_cost
+
+    # 15:23 實戰：中、五筒、八筒原本分數相同，五筒被換出去；五筒對別人最好用
+    hand = C("4557m25899p256677s5z")
+    swapped = choose_swap_tiles(hand, gold_tiles=parse("3m9p7p"))
+    assert P("5p") not in swapped and P("5z") in swapped
+    assert swap_gift_cost(P("5p")) > swap_gift_cost(P("8p")) > swap_gift_cost(P("9p")) \
+        > swap_gift_cost(P("5z"))

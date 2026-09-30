@@ -126,10 +126,24 @@ def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP,
             total += copies
             hand[new_tile] -= 1
         hand[tile] += 1
-        expected = weighted / total
+        # 換出去的牌別人可能拿到：中張最好用，要自己明顯變好才值得送出去
+        expected = weighted / total + swap_gift_cost(tile)
         if expected < current - SWAP_MIN_GAIN:
             candidates.append((round(expected, 6), weighted_standard / total, tile))
     return tuple(tile for *_, tile in sorted(candidates)[:limit])
+
+
+def swap_gift_cost(tile: int) -> float:
+    """換出這張牌的代價（以期望向聽數計）：對別人越好用的牌越高。
+    中張 3～7 最容易組順子，2、8 次之，1、9 只能組邊張，字牌只能碰。"""
+    if tile >= 27:
+        return 0.0
+    rank = tile % 9 + 1
+    if rank in (1, 9):
+        return 0.03
+    if rank in (2, 8):
+        return 0.08
+    return 0.15
 
 
 def hand_value(hand: Sequence[int], n_open_melds: int) -> tuple[int, int]:
