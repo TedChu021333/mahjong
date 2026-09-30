@@ -26,10 +26,18 @@ from agent.opponent_model import (
     sample_tenpai_hand,
     unseen_counts,
 )
-from agent.rollout import Seat, play_out
-from agent.rule_agent import choose_rule_action_for_player, choose_self_kong
+from agent.rollout import BASE, Seat, dealer_bonus, heuristic_discard, play_out
+from agent.rule_agent import choose_discard, choose_rule_action_for_player, choose_self_kong
 from agent.shanten import shanten
-from game.rules import Action, ActionType, GameState, Phase, legal_actions
+from game.rules import (
+    Action,
+    ActionType,
+    GameState,
+    Phase,
+    forbidden_after_claim,
+    legal_actions,
+)
+from game.win import is_win
 
 CANDIDATES = 3
 ROLLOUTS = 24
@@ -145,6 +153,135 @@ def evaluate_options_parallel(pool, workers: int, state: GameState, player: int,
     return merged
 
 
+def _discard_after_claim(state: GameState, player: int, action: Action) -> int:
+    """吃碰後要打的牌：照規則式 AI 的選法（遵守吃碰後的禁打牌），每個選項只算一次。"""
+    me = state.players[player]
+    hand = list(me.hand)
+    used = list(action.tiles)
+    used.remove(action.tile)
+    for tile in used:
+        hand[tile] -= 1
+    return choose_discard(hand, me.open_melds + 1, Random(0),
+                          forbidden=forbidden_after_claim(action, action.tile),
+                          gold_tiles=state.gold_tiles)
+
+
+def evaluate_claims(state: GameState, player: int, actions: list[Action], rng: Random,
+                    calibration: Calibration, rollouts: int, undeclared_share: float,
+                    time_limit: float | None = None) -> dict[Action, list[float]]:
+    """吃碰階段：「不要」與各種吃碰槓在同一批補完牌局中的輸贏（同一個索引是同一副牌）。
+    別家能胡這張時，不管自己選什麼結果都一樣（胡牌優先）。"""
+    tsumo = _average_tai(calibration, self_draw=True)
+    ron = _average_tai(calibration, self_draw=False)
+    discarder, claimed = state.discard_player, state.last_discard
+    # 明槓要先補牌才打，打哪張在模擬中補牌後才決定
+    after = {action: _discard_after_claim(state, player, action)
+             for action in actions if action.kind in (ActionType.CHOW, ActionType.PUNG)}
+    results: dict[Action, list[float]] = {action: [] for action in actions}
+    started = time.perf_counter()
+    done = 0
+    for _ in range(rollouts):
+        if time_limit is not None and done and time.perf_counter() - started > time_limit:
+            break
+        seats, wall = determinize(state, player, rng, calibration, undeclared_share)
+        for action in actions:
+            copies = [Seat(list(seat.hand), seat.open_melds, seat.declared) for seat in seats]
+            if action.kind == ActionType.PASS or _someone_else_wins(copies, player, discarder,
+                                                                     claimed):
+                value = play_out(copies, list(wall), discarder, claimed, tsumo, ron,
+                                 state.known_dealer, state.dealer_streak, passed=player)
+            else:
+                value = _play_claim(copies, list(wall), player, action, after.get(action),
+                                    tsumo, ron, state.known_dealer, state.dealer_streak)
+            results[action].append(value[player])
+        done += 1
+    return results
+
+
+def _someone_else_wins(seats: list[Seat], player: int, discarder: int, tile: int) -> bool:
+    for step in (1, 2, 3):
+        other = (discarder + step) % 4
+        if other == player:
+            continue
+        seat = seats[other]
+        seat.hand[tile] += 1
+        won = is_win(seat.hand, seat.open_melds)
+        seat.hand[tile] -= 1
+        if won:
+            return True
+    return False
+
+
+def _play_claim(seats: list[Seat], wall: list[int], player: int, action: Action,
+                discard: int | None, tsumo: float, ron: float, dealer: int | None,
+                streak: int) -> list[float]:
+    mine = seats[player]
+    used = list(action.tiles)
+    used.remove(action.tile)
+    for tile in used:
+        mine.hand[tile] -= 1
+    mine.open_melds += 1
+    if action.kind == ActionType.KONG:
+        # 明槓補一張：自摸就結束；否則打孤張分數最低的（補牌前選好的那張可能已不是最好）
+        if not wall:
+            return [0.0] * 4
+        drawn = wall.pop()
+        mine.hand[drawn] += 1
+        if is_win(mine.hand, mine.open_melds):
+            amount = BASE + tsumo
+            result = [0.0] * 4
+            for payer in range(4):
+                if payer != player:
+                    paid = amount + dealer_bonus(dealer, streak, player, payer)
+                    result[payer] -= paid
+                    result[player] += paid
+            return result
+        discard = heuristic_discard(mine.hand, mine.open_melds)
+    mine.hand[discard] -= 1
+    return play_out(seats, wall, player, discard, tsumo, ron, dealer, streak)
+
+
+def _claims_chunk(state: GameState, player: int, actions: list[Action], seed: int,
+                  rollouts: int, undeclared_share: float,
+                  time_limit: float | None) -> dict[Action, list[float]]:
+    return evaluate_claims(state, player, actions, Random(seed), default_calibration(),
+                           rollouts, undeclared_share, time_limit)
+
+
+def choose_mc_claim(state: GameState, player: int, rng: Random, calibration: Calibration,
+                    rollouts: int, undeclared_share: float, time_limit: float | None,
+                    pool=None, workers: int = 1) -> Action | None:
+    """吃碰階段：預設照規則式 AI，只有模擬顯示其他選項顯著較好才改。"""
+    default = choose_rule_action_for_player(state, player, rng)
+    actions = legal_actions(state, player)
+    if default is None or default.kind == ActionType.WIN:
+        return default
+    options = [action for action in actions
+               if action.kind in (ActionType.PASS, ActionType.CHOW, ActionType.PUNG,
+                                  ActionType.KONG)]
+    if len(options) < 2 or default not in options:
+        return default
+    if pool is not None and workers > 1:
+        per_worker = max(1, -(-rollouts // workers))
+        tasks = [(state, player, options, rng.randrange(2**31), per_worker, undeclared_share,
+                  time_limit) for _ in range(workers)]
+        results = {action: [] for action in options}
+        try:
+            wait = None if time_limit is None else time_limit + PARALLEL_GRACE
+            for part in pool.starmap_async(_claims_chunk, tasks).get(wait):
+                for action in options:
+                    results[action].extend(part[action])
+        except MultiprocessingTimeout:
+            return default
+    else:
+        results = evaluate_claims(state, player, options, rng, calibration, rollouts,
+                                  undeclared_share, time_limit)
+    average = {action: sum(v) / max(1, len(v)) for action, v in results.items()}
+    challengers = [action for action in options if action != default
+                   and significantly_better(results[action], results[default])]
+    return max(challengers, key=average.get) if challengers else default
+
+
 def significantly_better(challenger: list[float], default: list[float],
                          significance: float = SIGNIFICANCE) -> bool:
     diffs = [a - b for a, b in zip(challenger, default)]
@@ -164,6 +301,9 @@ def choose_mc_action_for_player(state: GameState, player: int, rng: Random | Non
                                 pool=None, workers: int = 1) -> Action | None:
     """pool 有給時把模擬分給 workers 個子程序（實戰用；每個子程序各自受 time_limit 限制）。"""
     rng = rng or Random()
+    if state.phase == Phase.RESPONSE and not state.robbing_kong and not state.declared[player]             and state.last_discard is not None:
+        return choose_mc_claim(state, player, rng, calibration or default_calibration(),
+                               rollouts, undeclared_share, time_limit, pool, workers)
     if state.phase != Phase.DISCARD or state.declared[player] or player != state.current_player:
         return choose_rule_action_for_player(state, player, rng)
     actions = legal_actions(state, player)

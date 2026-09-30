@@ -37,7 +37,7 @@ def test_dealer_pays_the_dealer_tai_when_someone_else_self_draws():
 
 
 def test_policy_specs():
-    assert all(make_policy(spec) is not None for spec in ("rule", "gold:8", "blind", "fold:1", "nodeclare", "ev", "ev:0.5", "mc", "mc:8"))
+    assert all(make_policy(spec) is not None for spec in ("rule", "gold:8", "blind", "fold:1", "nodeclare", "ev", "ev:0.5", "mc", "mc:8", "mcclaim", "mcclaim:10"))
     for bad in ("gold", "rule:1", "nope"):
         with pytest.raises(ValueError):
             make_policy(bad)

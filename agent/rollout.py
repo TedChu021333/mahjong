@@ -113,11 +113,12 @@ def dealer_bonus(dealer: int | None, streak: int, *players: int) -> float:
 
 def play_out(seats: list[Seat], wall: list[int], discarder: int, discard: int,
              tsumo_tai: float, ron_tai: float, dealer: int | None = None,
-             streak: int = 0) -> list[float]:
+             streak: int = 0, passed: int | None = None) -> list[float]:
     """discarder 剛打出 discard；從別家能不能胡這張開始模擬。回傳四家輸贏（台）。
     tsumo_tai、ron_tai 是沒宣告聽牌時、不含莊家台的平均台數；dealer、streak 用來加莊家與連莊台。
-    會改動 seats。"""
+    passed 是對這第一張牌已經放棄吃碰的座位（蒙地卡羅比較「不要」用）。會改動 seats。"""
     position = len(wall)
+    skip = passed
     current, tile = discarder, discard
     while True:
         # 放槍：依打牌者的下家順序
@@ -134,7 +135,9 @@ def play_out(seats: list[Seat], wall: list[int], discarder: int, discard: int,
                 result[current] -= amount
                 return result
         claimer = next((other for step in (1, 2, 3)
-                        if _claim(seats[(other := (current + step) % 4)], tile, step == 1)), None)
+                        if (other := (current + step) % 4) != skip
+                        and _claim(seats[other], tile, step == 1)), None)
+        skip = None
         if claimer is not None:
             current = claimer
             seat = seats[current]

@@ -134,3 +134,29 @@ def test_mc_never_picks_a_tile_worse_than_the_ev_choice():
         after = list(state.players[0].hand)
         after[action.tile] -= 1
         assert shanten(after) == 2
+
+
+def test_claim_evaluation_compares_pass_and_claims():
+    from agent.mc_agent import evaluate_claims
+    from game.rules import Action, legal_actions
+
+    players = [PlayerState() for _ in range(4)]
+    players[1].hand = C("555p123m456m789m124s7z")
+    players[3].discards = parse("5p")
+    state = GameState(list(range(40)), players, current_player=3, phase=Phase.RESPONSE,
+                      last_discard=P("5p"), discard_player=3, response_player=1,
+                      response_players=[1])
+    options = [a for a in legal_actions(state, 1) if a.kind.value in ("pass", "pung", "kong")]
+    assert {a.kind.value for a in options} == {"pass", "pung", "kong"}
+    results = evaluate_claims(state, 1, options, Random(0), calibration(0.0), 5, 0.0)
+    assert all(len(values) == 5 for values in results.values())
+    action = choose_mc_action_for_player(state, 1, Random(0), calibration(0.0), rollouts=5)
+    assert action in legal_actions(state, 1)
+
+
+def test_passing_seat_does_not_claim_its_first_tile_in_rollouts():
+    # 下家手上有兩張 1z，但已經放棄碰：模擬中不能再碰這張
+    junk = "1479m258p369s234567z"
+    seats = [Seat(C(junk), 0), Seat(C("1479m258p369s1134z"), 0), Seat(C(junk), 0), Seat(C(junk), 0)]
+    play_out(seats, [], 0, P("1z"), 6.0, 5.0, passed=1)
+    assert seats[1].open_melds == 0

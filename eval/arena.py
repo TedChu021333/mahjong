@@ -15,6 +15,7 @@
     nodeclare     規則式 AI，但聽牌時不宣告（不拿聽牌 1 台，手牌不鎖、還能防守）
     ev[:<w>]      期望值打牌（agent.ev_agent），w 為放槍損失的權重（預設 RISK_WEIGHT）
     mc[:<n>]      蒙地卡羅打牌（agent.mc_agent），n 為每個候選的模擬次數（預設 ROLLOUTS）
+    mcclaim[:<n>] 規則式 AI，但吃碰槓用蒙地卡羅判斷（單獨評估吃碰的效果）
 """
 from __future__ import annotations
 
@@ -40,6 +41,8 @@ def make_policy(spec: str) -> PlayerPolicy:
         return partial(_gold_policy, penalty=float(arg))
     if name == "blind" and not arg:
         return _blind_policy
+    if name == "mcclaim":
+        return partial(_mc_claim_policy, rollouts=int(arg) if arg else 40)
     if name == "mc":
         from agent.mc_agent import ROLLOUTS
 
@@ -53,6 +56,16 @@ def make_policy(spec: str) -> PlayerPolicy:
     if name == "fold" and arg:
         return partial(_fold_policy, shanten=int(arg))
     raise ValueError(f"未知的策略代號：{spec}")
+
+
+def _mc_claim_policy(state, player, rng, rollouts):
+    from agent.mc_agent import choose_mc_claim
+    from agent.opponent_model import default_calibration
+    from game.rules import Phase
+
+    if state.phase == Phase.RESPONSE and not state.robbing_kong and not state.declared[player]             and state.last_discard is not None:
+        return choose_mc_claim(state, player, rng, default_calibration(), rollouts, 0.0, None)
+    return choose_rule_action_for_player(state, player, rng)
 
 
 def _mc_policy(state, player, rng, rollouts):
