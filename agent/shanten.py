@@ -102,7 +102,7 @@ def seven_pairs_shanten(counts: Sequence[int]) -> int:
     return _seven_pairs_shanten_validated(validated)
 
 
-@lru_cache(maxsize=1_000_000)
+@lru_cache(maxsize=200_000)  # 每筆約 0.5KB；100 萬筆時 15 個 arena 子程序用光記憶體
 def _shanten_cached(counts: tuple[int, ...], n_open_melds: int) -> int:
     standard = standard_shanten(counts, n_open_melds)
     if n_open_melds or not win_module.LICKGU_ENABLED:
@@ -116,7 +116,7 @@ def shanten(counts: Sequence[int], n_open_melds: int = 0) -> int:
     return _shanten_cached(validated, n_open_melds)
 
 
-@lru_cache(maxsize=1_000_000)
+@lru_cache(maxsize=200_000)
 def _effective_tiles_cached(counts: tuple[int, ...], n_open_melds: int) -> tuple[int, ...]:
     current = _shanten_cached(counts, n_open_melds)
     mutable = list(counts)
