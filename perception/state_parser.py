@@ -22,6 +22,9 @@ class ObservedPlayer:
     melds: tuple[Meld, ...] = ()
     unknown_melds: int = 0
     """只知道組數、還沒辨識出內容的副露。"""
+    exposed: tuple[int, ...] = ()
+    """內容未知的副露裡已經知道的牌（例如推算出碰了哪張；被吃碰的那張已算在別家牌河，不重複列）。
+    只用來計算看得到的牌，放進第一組佔位副露。"""
 
 
 @dataclass(frozen=True)
@@ -66,6 +69,10 @@ def _validate_player(observed: ObservedPlayer) -> None:
             raise ValueError(f"未知副露種類：{meld.kind}")
         for tile in meld.tiles:
             _validate_tile(tile)
+    for tile in observed.exposed:
+        _validate_tile(tile)
+    if observed.exposed and not observed.unknown_melds:
+        raise ValueError("exposed 需要至少一組內容未知的副露")
 
 
 def parse_observed_table(observed: ObservedTable) -> GameState:
@@ -97,7 +104,8 @@ def parse_observed_table(observed: ObservedTable) -> GameState:
         if player.unknown_melds < 0 or len(player.melds) + player.unknown_melds > 5:
             raise ValueError("副露組數必須在 0-5 之間")
         # 內容未知的副露用空牌組佔位：規則引擎只需要組數來判斷手牌張數與胡牌
-        placeholders = [Meld(UNKNOWN_MELD, ()) for _ in range(player.unknown_melds)]
+        placeholders = [Meld(UNKNOWN_MELD, tuple(player.exposed) if index == 0 else ())
+                        for index in range(player.unknown_melds)]
         players.append(PlayerState(
             hand=counts,
             flowers=[],

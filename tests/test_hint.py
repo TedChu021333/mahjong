@@ -452,3 +452,24 @@ def test_autoplay_is_not_reported_as_unreadable():
                   save_result=lambda frame, prefix="": saved.append(prefix) or "x",
                   log=lambda line, detail=None, echo=True: None)
     assert "讀不到_" not in saved
+
+
+def test_exposed_tiles_count_as_visible():
+    from agent.rule_agent import visible_tile_counts
+    from hint.advisor import build_state
+
+    # 自己吃過一組（用掉六萬八萬），推算對家碰了東：東另外兩張看得到，加上牌河一張、手上一張 = 4
+    hand = T("123456789m123p9s1z")
+    assert len(hand) == 14
+    observation = Observation(hand, None, None, (),
+                              discards=((), (), (), tuple(parse("1z"))),
+                              melds=(0, 0, 1, 0),
+                              exposed=(tuple(parse("68m")), (), tuple(parse("11z")), ()))
+    visible = visible_tile_counts(build_state(observation), 0)
+    assert visible[parse("1z")[0]] == 4 and visible[parse("6m")[0]] == 2
+    # 推算有誤、會超過 4 張的丟掉；沒有副露組數可放的也丟掉
+    wrong = Observation(hand, None, None, (), discards=((), (), (), tuple(parse("11z"))),
+                        melds=(0, 0, 1, 0), exposed=((), tuple(parse("9s")), tuple(parse("11z")), ()))
+    state = build_state(wrong)
+    assert visible_tile_counts(state, 0)[parse("1z")[0]] == 4
+    assert state.players[1].melds == []

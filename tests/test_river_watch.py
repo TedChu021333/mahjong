@@ -104,6 +104,8 @@ def test_claimer_is_the_next_one_to_discard():
     frames(watch, waiting(claim=ClaimTile(P("7s"), 0.9, "left")), 1)  # 上家接著打七條（圓框）
     assert watch.melds == {"me": 0, "right": 0, "top": 0, "left": 1}
     assert watch.meld_counts() == (0, 0, 0, 1)
+    # 上家不是下家的下家，不能吃：一定是碰，另外兩張中也看得到了
+    assert watch.exposed_tiles() == ((), (), (), (P("5z"), P("5z")))
 
 
 def test_tile_that_comes_back_was_only_covered():
@@ -143,6 +145,7 @@ def test_hidden_claim_by_the_left_player():
     reader.current["me"] = [RiverTile(P("8m"), 0.9, (580, 651, 650, 717))]
     frames(watch, waiting())                         # 手牌張數沒變：自己沒吃碰
     assert watch.melds["left"] == 1
+    assert watch.exposed["left"] == [P("1m"), P("1m")]
 
 
 def test_credit_is_undone_when_the_tile_comes_back_later():
@@ -154,7 +157,26 @@ def test_credit_is_undone_when_the_tile_comes_back_later():
     frames(watch, waiting())                          # 北看起來被拿走
     reader.current["top"] = [RiverTile(P("1z"), 0.9, (660, 284, 717, 334))]
     frames(watch, waiting())                          # 對家出牌 → 先算給對家
-    assert watch.melds["top"] == 1
+    assert watch.melds["top"] == 1 and watch.exposed["top"] == [P("4z"), P("4z")]
     reader.current["left"] = left_river(P("4z"))
     frames(watch, waiting(), 1)                       # 北又回來：只是被蓋住
-    assert watch.melds["top"] == 0
+    assert watch.melds["top"] == 0 and watch.exposed["top"] == []
+
+
+def test_claim_by_the_next_player_may_be_a_chow():
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    reader.current["top"] = [RiverTile(P("3m"), 0.9, (660, 284, 717, 334))]
+    frames(watch, waiting())
+    reader.current["top"] = []
+    frames(watch, waiting())                          # 對家的三萬被拿走
+    frames(watch, waiting(claim=ClaimTile(P("7s"), 0.9, "left")), 1)  # 上家（對家的下家）接著出牌
+    assert watch.melds["left"] == 1 and watch.exposed["left"] == []  # 可能是吃，不知道另外兩張
+
+
+def test_own_claim_tiles_are_exposed():
+    watch, _ = watch_with(FakeReader())
+    watch.own_claim((P("6m"), P("8m")))
+    assert watch.exposed_tiles()[0] == (P("6m"), P("8m"))
+    watch.new_hand()
+    assert watch.exposed_tiles() == ((), (), (), ())

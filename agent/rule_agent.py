@@ -16,6 +16,7 @@ from game.rules import (
     legal_actions,
 )
 from game.tiles import is_honor, is_suited
+from game.win import winning_tiles
 
 
 def choose_discard(hand: list[int], n_open_melds: int = 0,
@@ -362,6 +363,26 @@ def should_fold(state: GameState, player: int, use_declared: bool = True,
     return own_shanten >= 2 and highest_threat >= 3
 
 
+DECLARE_MIN_LIVE = 0
+"""聽的牌還剩（看不到的）幾張以上才宣告聽牌；0 = 一律宣告。宣告後手牌鎖住、不能再換成更好的聽，
+沒宣告也能胡（沒有振聽），只是少 1 台。第一次打牌就聽（地聽 4 台）一律宣告。"""
+
+
+def declare_is_worth(state: GameState, player: int, tile: int,
+                     min_live: int | None = None) -> bool:
+    """打出 tile 後聽牌時，要不要宣告。"""
+    if min_live is None:
+        min_live = DECLARE_MIN_LIVE
+    me = state.players[player]
+    if min_live <= 0 or not me.discards:
+        return True
+    after = list(me.hand)
+    after[tile] -= 1
+    visible = visible_tile_counts(state, player)
+    live = sum(max(0, 4 - visible[wait]) for wait in winning_tiles(after, me.open_melds))
+    return live >= min_live
+
+
 def choose_rule_action_for_player(
     state: GameState, player: int, rng: Random | None = None,
     gold_penalty: float | None = None, use_declared: bool = True,
@@ -413,8 +434,8 @@ def choose_rule_action_for_player(
                               forbidden=state.forbidden_discards if state.claimed else (),
                               gold_tiles=state.gold_tiles, gold_penalty=gold_penalty)
         declare = Action(ActionType.DECLARE, tile=tile)
-        if not defensive and declare in actions:
-            return declare  # 聽牌 +1 台；暫時一律宣告，取捨留給之後的策略
+        if not defensive and declare in actions and declare_is_worth(state, player, tile):
+            return declare  # 聽牌 +1 台；聽的牌太少時先不宣告，留著換更好的聽
         return Action(ActionType.DISCARD, tile=tile)
     action = next((action for action in actions if action.kind == ActionType.DRAW), None)
     return action

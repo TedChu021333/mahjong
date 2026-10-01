@@ -176,7 +176,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
             if rivers is not None and observation is not None:
                 observation = replace(observation, discards=rivers.discards(),
-                                      melds=rivers.meld_counts())
+                                      melds=rivers.meld_counts(),
+                                      exposed=rivers.exposed_tiles())
             if observation is not None:
                 last_readable = clock()
                 if observation.dealer_streak is None and not streak_reported:
@@ -251,8 +252,12 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 acted_for, acted_at, retries = observation, clock(), 0
                 continue
             if observation.my_turn and pending_claim is not None:
-                expected, forbidden = pending_claim
+                expected, forbidden, used = pending_claim
                 if tuple(sorted(observation.hand)) == expected:
+                    if rivers is not None and used is not None:
+                        rivers.own_claim(used)  # 每次吃碰只記一次
+                        observation = replace(observation, exposed=rivers.exposed_tiles())
+                        pending_claim = (expected, forbidden, None)
                     observation = replace(observation, claimed=True, forbidden=forbidden)
                 else:
                     pending_claim = None
@@ -261,8 +266,10 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 decided_for, decided_action = observation, decide(observation)
             action = decided_action
             if action is not None and action.kind in (ActionType.CHOW, ActionType.PUNG):
+                used = list(action.tiles)
+                used.remove(action.tile)
                 pending_claim = (hand_after_claim(observation, action),
-                                 forbidden_after_claim(action, action.tile))
+                                 forbidden_after_claim(action, action.tile), tuple(used))
             advice = describe(action) if action is not None else None
             buttons = observation.buttons or frozenset()
             if "win" in buttons and (action is None or action.kind != ActionType.WIN)                 and observation != missed_for:

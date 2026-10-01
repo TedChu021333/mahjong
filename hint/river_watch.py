@@ -10,6 +10,7 @@
 接著第一個出牌的人（牌河多一張，或出現新的放大圓框）就是吃碰的人（吃碰完要馬上打一張），
 副露數加 1；被拿走的牌之後又回到原位（其實是被蓋住）就取消。下一個出牌的是自己、而自己
 並沒有吃碰時，吃碰的一定是上家（他吃碰完打一張就輪到我們，只是那張被遮住還沒看到）。
+吃只能吃上家的牌：拿走牌的人不是打牌者的下家，就一定是碰（或槓），那種牌另外兩張也看得到了。
 """
 from __future__ import annotations
 
@@ -26,6 +27,8 @@ from perception.config import RIVER_TEMPLATE_DIR
 from perception.river_reader import SEATS, RiverReader, crop_face
 from perception.river_tracker import RiverEvent, RiverTracker
 
+NEXT_SEAT = {"me": "right", "right": "top", "top": "left", "left": "me"}
+"""出牌順序：自己 → 下家 → 對家 → 上家。"""
 LABEL_FRAMES = 15
 """標註在這麼多幀內等不到那家牌河多一張就作廢。"""
 
@@ -44,11 +47,13 @@ class RiverWatch:
         self._turn_hand: tuple[int, ...] | None = None
         self.melds = {seat: 0 for seat in SEATS}
         """推算的各家副露數（自己的由手牌張數得知，這裡不算）。"""
-        self._taken_from: tuple[str, int] | None = None
-        """最新一張被拿走的牌是誰打的、當時自己的副露數，等著看誰接著出牌。"""
+        self.exposed: dict[str, list[int]] = {seat: [] for seat in SEATS}
+        """各家副露裡已知、不在牌河的牌：推算出的碰（另外兩張）、自己吃碰用掉的手牌。"""
+        self._taken_from: tuple[str, int, int | None] | None = None
+        """最新一張被拿走的牌是誰打的、當時自己的副露數、那張牌，等著看誰接著出牌。"""
         self._my_melds = 0
-        self._credited: tuple[str, str] | None = None
-        """最近一次推算：(被拿走牌的那家, 算給誰)；那張牌之後又回來就撤銷。"""
+        self._credited: tuple[str, str, tuple[int, ...]] | None = None
+        """最近一次推算：(被拿走牌的那家, 算給誰, 加進 exposed 的牌)；那張牌之後又回來就撤銷。"""
         self._last_circle: tuple[str, int] | None = None
 
     def new_hand(self) -> None:
@@ -56,6 +61,7 @@ class RiverWatch:
         self._labels.clear()
         self._turn_hand = None
         self.melds = {seat: 0 for seat in SEATS}
+        self.exposed = {seat: [] for seat in SEATS}
         self._taken_from = None
         self._last_circle = None
         self._credited = None
@@ -70,12 +76,15 @@ class RiverWatch:
                 self._apply_label(frame, event)
                 self._someone_discarded(event.seat)
             elif event.kind == "claimed":
-                self._taken_from = (event.seat, self._my_melds)
+                self._taken_from = (event.seat, self._my_melds, event.tile)
             elif event.kind == "restored":
                 if self._taken_from and self._taken_from[0] == event.seat:
                     self._taken_from = None
                 if self._credited and self._credited[0] == event.seat:
-                    self.melds[self._credited[1]] -= 1  # 其實只是被蓋住
+                    _, claimer, tiles = self._credited
+                    self.melds[claimer] -= 1  # 其實只是被蓋住
+                    for tile in tiles:
+                        self.exposed[claimer].remove(tile)
                     self._credited = None
         return events
 
@@ -89,7 +98,21 @@ class RiverWatch:
                 return  # 自己吃碰的
             claimer = "left"  # 自己沒吃碰卻輪到自己：是上家吃碰
         self.melds[claimer] += 1
-        self._credited = (taken[0], claimer)
+        tile = taken[2]
+        tiles = (tile, tile) if tile is not None and claimer != NEXT_SEAT[taken[0]] else ()
+        self.exposed[claimer] += tiles
+        self._credited = (taken[0], claimer, tiles)
+
+    def own_claim(self, tiles) -> None:
+        """自己吃碰完成：用掉的手牌（被吃碰的那張已在別家牌河）。"""
+        self.exposed["me"] += list(tiles)
+
+    def exposed_tiles(self) -> tuple[tuple[int, ...], ...]:
+        """依 advisor 的座位編號排列。"""
+        result = [()] * 4
+        for seat, tiles in self.exposed.items():
+            result[RIVER_SEAT[seat]] = tuple(tiles)
+        return tuple(result)
 
     def meld_counts(self) -> tuple[int, int, int, int]:
         """依 advisor 的座位編號排列；自己的欄位為 0。"""

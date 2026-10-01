@@ -27,7 +27,12 @@ from agent.opponent_model import (
     unseen_counts,
 )
 from agent.rollout import BASE, Seat, dealer_bonus, heuristic_discard, play_out
-from agent.rule_agent import choose_discard, choose_rule_action_for_player, choose_self_kong
+from agent.rule_agent import (
+    choose_discard,
+    choose_rule_action_for_player,
+    choose_self_kong,
+    declare_is_worth,
+)
 from agent.shanten import shanten
 from game.rules import (
     Action,
@@ -335,7 +340,7 @@ def choose_mc_action_for_player(state: GameState, player: int, rng: Random | Non
     options += [Option(tile, True) for tile in ranked
                 if Action(ActionType.DECLARE, tile=tile) in actions]
     top = ranked[0]
-    default = Option(top, Option(top, True) in options)
+    default = Option(top, Option(top, True) in options and declare_is_worth(state, player, top))
     best = default
     if len(options) > 1:
         if pool is not None and workers > 1:

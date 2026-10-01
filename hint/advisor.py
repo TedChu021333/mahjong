@@ -69,6 +69,9 @@ class Observation:
     discards: tuple[tuple[int, ...], ...] = field(default=(), compare=False)
     """各家打過的牌（座位同 SOURCE_SEAT：0 自己、1 下家、2 對家、3 上家），由牌河追蹤補上；
     不參與比較，牌河變動不會讓同一個畫面重新給建議。"""
+    exposed: tuple[tuple[int, ...], ...] = field(default=(), compare=False)
+    """各家副露裡已知、又不在牌河的牌（座位同 discards）：自己吃碰用掉的手牌、推算出別家碰的
+    那種牌另外兩張。用來扣掉看得到的牌（例如聽的牌其實已經被碰走）。"""
 
     @property
     def my_turn(self) -> bool:
@@ -148,6 +151,28 @@ def _rivers(observation: Observation, claim_seat: int | None = None,
     return capped
 
 
+def _exposed(observation: Observation, rivers: list[list[int]],
+             melds: list[int]) -> list[tuple[int, ...]]:
+    """副露裡已知的牌；沒有副露組數可放、或加上手牌與牌河會超過 4 張的丟掉（推算可能有誤）。"""
+    seen = [0] * NUM_TILE_TYPES
+    for tile in observation.hand:
+        seen[tile] += 1
+    for tiles in rivers:
+        for tile in tiles:
+            seen[tile] += 1
+    result = []
+    for seat in range(4):
+        kept = []
+        known = observation.exposed[seat] if seat < len(observation.exposed) else ()
+        if melds[seat]:
+            for tile in known:
+                if seen[tile] < 4:
+                    seen[tile] += 1
+                    kept.append(tile)
+        result.append(tuple(kept))
+    return result
+
+
 STREAK_UNKNOWN_GUESS = 3
 """有連莊數字但沒有它的模板：目前收集到 1、2，認不出的多半是 3 以上。"""
 START_DRAWABLE = 60
@@ -167,10 +192,13 @@ def build_state(observation: Observation) -> GameState | None:
     source = SOURCE_SEAT[claim.source] if responding else None
     rivers = _rivers(observation, source, claim.tile if responding else None)
     melds = list(observation.melds) + [0] * (4 - len(observation.melds))
-    players = [ObservedPlayer(discards=tuple(rivers[seat]), unknown_melds=melds[seat])
+    melds[ME] = observation.meld_count
+    exposed = _exposed(observation, rivers, melds)
+    players = [ObservedPlayer(discards=tuple(rivers[seat]), unknown_melds=melds[seat],
+                              exposed=exposed[seat])
                for seat in range(4)]
     players[ME] = ObservedPlayer(hand=observation.hand, unknown_melds=observation.meld_count,
-                                 discards=tuple(rivers[ME]))
+                                 discards=tuple(rivers[ME]), exposed=exposed[ME])
     declared = [False] * 4
     for seat in observation.declared:
         declared[SOURCE_SEAT[seat]] = True

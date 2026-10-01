@@ -15,6 +15,8 @@
     nodeclare     規則式 AI，但聽牌時不宣告（不拿聽牌 1 台，手牌不鎖、還能防守）
     ev[:<w>]      期望值打牌（agent.ev_agent），w 為放槍損失的權重（預設 RISK_WEIGHT）
     evhonor:<h>   期望值打牌，會加台的字牌刻子／對子每台算進攻收益的 h 倍（0 = 不算）
+    evdeclare:<k>[:<s>] 期望值打牌，聽的牌剩 k 張以上才宣告（0 = 一律宣告）；s 為估計對手放槍危險時
+                  「沒宣告的人已經聽牌」的比例（預設 0：其他 AI 都一律宣告時，沒宣告就是沒聽）
     mc[:<n>]      蒙地卡羅打牌（agent.mc_agent），n 為每個候選的模擬次數（預設 ROLLOUTS）
     mcclaim[:<n>] 規則式 AI，但吃碰槓用蒙地卡羅判斷（單獨評估吃碰的效果）
 """
@@ -52,6 +54,12 @@ def make_policy(spec: str) -> PlayerPolicy:
         from agent.ev_agent import RISK_WEIGHT
 
         return partial(_ev_policy, risk_weight=float(arg) if arg else RISK_WEIGHT)
+    if name == "evdeclare" and arg:
+        from agent.ev_agent import RISK_WEIGHT
+
+        live, _, share = arg.partition(":")
+        return partial(_ev_policy, risk_weight=RISK_WEIGHT, declare_min_live=int(live),
+                       undeclared_share=float(share) if share else 0.0)
     if name == "evhonor" and arg:
         from agent.ev_agent import RISK_WEIGHT
 
@@ -79,13 +87,15 @@ def _mc_policy(state, player, rng, rollouts):
     return choose_mc_action_for_player(state, player, rng, rollouts=rollouts, undeclared_share=0.0)
 
 
-def _ev_policy(state, player, rng, risk_weight, honor_share=None):
+def _ev_policy(state, player, rng, risk_weight, honor_share=None, declare_min_live=None,
+               undeclared_share=0.0):
     from agent.ev_agent import HONOR_TAI_SHARE, choose_ev_action_for_player
 
     # 模擬器裡的 AI 聽牌一律宣告，沒宣告的人不會已經聽牌
     return choose_ev_action_for_player(
-        state, player, rng, risk_weight=risk_weight, undeclared_share=0.0,
-        honor_share=HONOR_TAI_SHARE if honor_share is None else honor_share)
+        state, player, rng, risk_weight=risk_weight, undeclared_share=undeclared_share,
+        honor_share=HONOR_TAI_SHARE if honor_share is None else honor_share,
+        declare_min_live=declare_min_live)
 
 
 def _no_declare_policy(state, player, rng):
@@ -107,12 +117,20 @@ def _gold_policy(state, player, rng, penalty):
     return choose_rule_action_for_player(state, player, rng, gold_penalty=penalty)
 
 
+RAKE = 0.15
+"""實戰贏的錢遊戲抽 15%（eval.stats 由金幣餘額對出），輸的照付；比較策略時照實戰算。"""
+
+
+def after_rake(net: float) -> float:
+    return net * (1 - RAKE) if net > 0 else net
+
+
 @dataclass(frozen=True)
 class PairedGame:
     seed: int
     seat: int
-    variant_net: int
-    baseline_net: int
+    variant_net: float
+    baseline_net: float
     variant_won: bool
     variant_dealt_in: bool
     baseline_won: bool = False
@@ -128,7 +146,8 @@ def play_pair(seed: int, variant: str, baseline: str) -> PairedGame:
 
     reference = play_game(Random(seed), player_policy=base_policy, dealer=dealer, swap=True)
     trial = play_game(Random(seed), player_policy=mixed, dealer=dealer, swap=True)
-    return PairedGame(seed, seat, payments(trial)[seat], payments(reference)[seat],
+    return PairedGame(seed, seat, after_rake(payments(trial)[seat]),
+                      after_rake(payments(reference)[seat]),
                       trial.winner == seat, trial.discarder == seat,
                       reference.winner == seat, reference.discarder == seat)
 

@@ -19,6 +19,7 @@ from agent.rule_agent import (
     gold_in_use,
     keep_value,
     choose_self_kong,
+    declare_is_worth,
     visible_tile_counts,
 )
 from agent.shanten import effective_tiles, shanten
@@ -102,7 +103,8 @@ def choose_ev_action_for_player(state: GameState, player: int, rng: Random | Non
                                 calibration: Calibration | None = None, samples: int = 120,
                                 risk_weight: float = RISK_WEIGHT,
                                 undeclared_share: float = UNDECLARED_TENPAI_SHARE,
-                                honor_share: float = HONOR_TAI_SHARE) -> Action | None:
+                                honor_share: float = HONOR_TAI_SHARE,
+                                declare_min_live: int | None = None) -> Action | None:
     rng = rng or Random()
     if state.phase != Phase.DISCARD or state.declared[player] or player != state.current_player:
         return choose_rule_action_for_player(state, player, rng)
@@ -118,6 +120,6 @@ def choose_ev_action_for_player(state: GameState, player: int, rng: Random | Non
     best = max(scores.values())
     tile = rng.choice(sorted(t for t, score in scores.items() if score >= best - 1e-9))
     declare = Action(ActionType.DECLARE, tile=tile)
-    if declare in actions:
-        return declare  # 與規則式 AI 相同：聽牌就宣告
+    if declare in actions and declare_is_worth(state, player, tile, declare_min_live):
+        return declare  # 與規則式 AI 相同：聽的牌夠多才宣告
     return Action(ActionType.DISCARD, tile=tile)
