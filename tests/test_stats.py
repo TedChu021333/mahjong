@@ -22,7 +22,14 @@ def test_report_counts():
     rounds = [Round([Hand("20260930_180000", 500, "胡牌"), Hand("20260930_180500", -300, "放槍")]),
               Round([Hand("20260930_190000", 0, "沒輸贏")])]
     text = report(rounds)
-    assert "共 2 圈、3 局，總輸贏 +200" in text and "第 1 圈 18:00–18:05  2 局  +200" in text
+    # 贏的 500 抽 15% 實得 425
+    assert "共 2 圈、3 局，實際輸贏 +125（畫面金額合計 +200" in text
+    assert "第 1 圈 18:00–18:05  2 局  +125" in text
+
+
+def test_rake_rounds_down_like_the_game():
+    # 實測：+130 → 金幣 +111、+310 → +264、+3900 → +3315；輸的照扣
+    assert [Hand("x", a, "").net for a in (130, 310, 3900, -700)] == [111, 264, 3315, -700]
 
 
 @pytest.mark.parametrize("name, amounts, me", [

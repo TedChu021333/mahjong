@@ -37,6 +37,9 @@ NAME_MIN_SCORE = 0.8
 """實測：自己那列 ≥0.98，其他列 ≤0.55；名字被提示條或卡片蓋住時讀不出來（約 15%）。"""
 DIGIT_SIZE = (24, 36)
 DIGIT_MIN_IOU = 0.7
+RAKE_PERCENT = 15
+"""贏的錢遊戲抽 15%（無條件捨去）：結算畫面寫 +130、+3900，金幣只多 111、3315（10/1 由畫面下方的
+金幣餘額逐局對出）。輸的錢照畫面扣。"""
 ROUND_END = {"繼續戰鬥", "再玩一局", "再贏一局", "破產再玩一局", "再拚一局"}
 FILE_PATTERN = re.compile(r"^(\d{8})_(\d{6})(?:_\d+)?$")
 
@@ -125,6 +128,13 @@ class Hand:
     outcome: str
     """自摸、胡牌、放槍、被自摸、沒輸贏；讀不出自己那列時為「未知」。"""
 
+    @property
+    def net(self) -> int:
+        """實際進帳：贏的錢扣掉抽成。"""
+        if self.my_amount > 0:
+            return self.my_amount - self.my_amount * RAKE_PERCENT // 100
+        return self.my_amount
+
 
 def classify(rows: list[Row]) -> tuple[int, str]:
     me = [row for row in rows if row.is_me]
@@ -145,7 +155,7 @@ class Round:
 
     @property
     def net(self) -> int:
-        return sum(hand.my_amount for hand in self.hands)
+        return sum(hand.net for hand in self.hands)
 
 
 def collect(directory: Path, date: str, since: str | None, until: str | None,
@@ -199,7 +209,8 @@ def report(rounds: list[Round]) -> str:
     wins = counts["胡牌"] + counts["自摸"]
     lines += [
         "",
-        f"共 {len(rounds)} 圈、{total} 局，總輸贏 {sum(h.my_amount for h in hands):+d}",
+        f"共 {len(rounds)} 圈、{total} 局，實際輸贏 {sum(h.net for h in hands):+d}"
+        f"（畫面金額合計 {sum(h.my_amount for h in hands):+d}，贏的錢抽 {RAKE_PERCENT}%）",
         f"胡牌率 {_rate(wins, total)}（胡 {counts['胡牌']}、自摸 {counts['自摸']}）",
         f"放槍率 {_rate(counts['放槍'], total)}",
         f"被自摸 {_rate(counts['被自摸'], total)}、沒輸贏 {_rate(counts['沒輸贏'], total)}",
@@ -230,10 +241,10 @@ def main() -> None:
     if args.csv:
         with args.csv.open("w", newline="", encoding="utf-8-sig") as file:
             writer = csv.writer(file)
-            writer.writerow(["圈", "截圖", "輸贏", "結果"])
+            writer.writerow(["圈", "截圖", "輸贏", "結果", "實際進帳"])
             for index, rnd in enumerate(rounds, 1):
                 for hand in rnd.hands:
-                    writer.writerow([index, hand.stamp, hand.my_amount, hand.outcome])
+                    writer.writerow([index, hand.stamp, hand.my_amount, hand.outcome, hand.net])
 
 
 if __name__ == "__main__":
