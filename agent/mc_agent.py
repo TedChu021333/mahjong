@@ -34,6 +34,7 @@ from agent.rule_agent import (
     declare_is_worth,
 )
 from agent.shanten import shanten
+from game.simulator import after_rake
 from game.rules import (
     Action,
     ActionType,
@@ -130,8 +131,9 @@ def evaluate_options(state: GameState, player: int, options: list[Option], rng: 
             mine = copies[player]
             mine.hand[option.tile] -= 1
             mine.declared = mine.declared or option.declare
-            results[option].append(play_out(copies, wall, player, option.tile, tsumo, ron,
-                                            state.known_dealer, state.dealer_streak)[player])
+            value = play_out(copies, wall, player, option.tile, tsumo, ron,
+                             state.known_dealer, state.dealer_streak)[player]
+            results[option].append(after_rake(value))
         done += 1
     return results
 
@@ -201,7 +203,7 @@ def evaluate_claims(state: GameState, player: int, actions: list[Action], rng: R
             else:
                 value = _play_claim(copies, list(wall), player, action, after.get(action),
                                     tsumo, ron, state.known_dealer, state.dealer_streak)
-            results[action].append(value[player])
+            results[action].append(after_rake(value[player]))
         done += 1
     return results
 

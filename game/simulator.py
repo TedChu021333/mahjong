@@ -285,6 +285,14 @@ def play_game(
                       discards_by_player=tuple(discards_by_player))
 
 
+RAKE = 0.15
+"""實戰贏的錢遊戲抽 15%（eval.stats 由金幣餘額對出），輸的照付；比較策略、蒙地卡羅模擬都照實戰算。"""
+
+
+def after_rake(net: float) -> float:
+    return net * (1 - RAKE) if net > 0 else net
+
+
 def payments(result: GameResult, base: int = BASE_TAI) -> list[int]:
     """每家這局的輸贏（台）：放槍由放槍者付，自摸三家各付。非莊家自摸時莊家多付莊家台
     與連莊台（1 + 2n；莊家胡或莊家放槍時已算在胡牌者的台數裡）。"""

@@ -368,3 +368,19 @@ def test_ties_discard_the_most_isolated_tile():
     hand = C("1255678m7999p2335s2z9m")
     assert choose_discard(hand, rng=Random(0)) == P("2z")
     assert keep_value(hand, P("2z")) < keep_value(hand, P("9m")) < keep_value(hand, P("6m"))
+
+
+def test_claim_modes():
+    # 經典_碰.png：碰二萬向聽不變、進張變多 → 只有 loose 會碰
+    state = response_state("11223789m99m4p56779s", "2m")
+    assert choose_rule_action_for_player(state, 1, claim_mode="loose").kind == ActionType.PUNG
+    assert choose_rule_action_for_player(state, 1, claim_mode="improve").kind == ActionType.PASS
+    # 碰完聽牌（一向聽 → 聽牌）：near 也碰
+    state = response_state("111222333m44p77p5s89s", "4p", source=2)
+    assert choose_rule_action_for_player(state, 1, claim_mode="near").kind == ActionType.PUNG
+    # 很散的手（八向聽 → 七向聽）：improve 碰；near 只碰會加台的中，不碰西（玩家 1 門風是南）
+    def far(pair, tile):
+        return response_state(f"1479m258p369s12z{pair}67z", tile, source=2)
+    assert choose_rule_action_for_player(far("33z", "3z"), 1, claim_mode="improve").kind         == ActionType.PUNG
+    assert choose_rule_action_for_player(far("33z", "3z"), 1, claim_mode="near").kind         == ActionType.PASS
+    assert choose_rule_action_for_player(far("55z", "5z"), 1, claim_mode="near").kind         == ActionType.PUNG

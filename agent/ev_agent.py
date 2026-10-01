@@ -104,10 +104,11 @@ def choose_ev_action_for_player(state: GameState, player: int, rng: Random | Non
                                 risk_weight: float = RISK_WEIGHT,
                                 undeclared_share: float = UNDECLARED_TENPAI_SHARE,
                                 honor_share: float = HONOR_TAI_SHARE,
-                                declare_min_live: int | None = None) -> Action | None:
+                                declare_min_live: int | None = None,
+                                claim_mode: str | None = None) -> Action | None:
     rng = rng or Random()
     if state.phase != Phase.DISCARD or state.declared[player] or player != state.current_player:
-        return choose_rule_action_for_player(state, player, rng)
+        return choose_rule_action_for_player(state, player, rng, claim_mode=claim_mode)
     actions = legal_actions(state, player)
     win = next((action for action in actions if action.kind == ActionType.WIN), None)
     if win is not None:

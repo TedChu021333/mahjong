@@ -383,10 +383,37 @@ def declare_is_worth(state: GameState, player: int, tile: int,
     return live >= min_live
 
 
+CLAIM_MODE = "loose"
+"""吃碰的標準：
+- loose：向聽變好，或向聽相同但有效進張變多（原本的做法）
+- improve：向聽一定要變好
+- near：向聽變好且吃碰完不超過一向聽；碰會加台的字牌（三元、圈風、已知門風）只要向聽變好
+實戰 10/1：建議過吃碰的局放槍率 16~21%、平均每局 −23~−106，沒吃碰的局 12%、+165（有選擇偏差）。"""
+
+
+def claim_is_worth(state: GameState, player: int, action: Action, before: tuple[int, int],
+                   after: tuple[int, int], mode: str | None = None) -> bool:
+    """吃碰值不值得（明槓另外判斷）。"""
+    mode = mode or CLAIM_MODE
+    if mode == "loose":
+        return after < before
+    if after[0] >= before[0]:
+        return False
+    if mode == "improve":
+        return True
+    if mode == "near":
+        tile = state.last_discard
+        valued = action.kind == ActionType.PUNG and tile is not None and tile >= 27 and (
+            tile >= 31 or tile == state.round_wind
+            or (state.known_dealer is not None and tile == state.seat_winds[player]))
+        return valued or after[0] <= 1
+    raise ValueError(f"未知的吃碰標準：{mode}")
+
+
 def choose_rule_action_for_player(
     state: GameState, player: int, rng: Random | None = None,
     gold_penalty: float | None = None, use_declared: bool = True,
-    declared_fold_shanten: int | None = None,
+    declared_fold_shanten: int | None = None, claim_mode: str | None = None,
 ) -> Action | None:
     """只替指定玩家做決策，不讀取對手隱藏手牌；gold_penalty 見 choose_discard。
     use_declared=False 時忽略對手宣告聽牌（評估這項資訊的價值用）。"""
@@ -413,7 +440,7 @@ def choose_rule_action_for_player(
                 worth = after[0] <= baseline[0]
                 after = (after[0], float("-inf"))  # 向聽相同時槓優先於碰（槓有台、多摸一張）
             else:
-                worth = after < baseline
+                worth = claim_is_worth(state, player, action, baseline, after, claim_mode)
             if worth and (best is None or after < best[0]):
                 best = (after, action)
         if best is not None:
