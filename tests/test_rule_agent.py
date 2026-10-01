@@ -82,9 +82,14 @@ def test_rule_agent_skips_a_pung_that_does_not_help():
     assert choose_rule_action_for_player(state, 1).kind == ActionType.PASS
 
 
-def test_rule_agent_pungs_when_it_widens_the_hand():
-    # 經典_碰.png：碰二萬向聽不變，但有效進張由 7 張增加為 15 張
+def test_rule_agent_pungs_when_it_widens_the_hand(monkeypatch):
+    # 經典_碰.png：碰二萬向聽不變，但有效進張由 7 張增加為 15 張；舊標準（loose）會碰，
+    # 預設（improve）向聽沒變好就不碰
+    import agent.rule_agent
+
     state = response_state("11223789m99m4p56779s", "2m")
+    assert choose_rule_action(state, Random(1))[1].kind == ActionType.PASS
+    monkeypatch.setattr(agent.rule_agent, "CLAIM_MODE", "loose")
     _, action = choose_rule_action(state, Random(1))
     assert action.kind == ActionType.PUNG
     apply_action(state, action, 1)

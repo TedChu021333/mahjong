@@ -21,7 +21,7 @@ from game.tiles import NUM_TILE_TYPES
 from game.win import is_win
 
 BASE = BASE_TAI
-SMART = False
+SMART = True
 """模擬裡的人會不會宣告聽牌、防守（見模組說明）。"""
 FOLD_SHANTEN = 2
 

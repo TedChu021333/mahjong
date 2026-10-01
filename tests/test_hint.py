@@ -56,7 +56,10 @@ def test_layout_rejects_partially_hidden_hands():
     not (TRAIN_DIR / "經典_碰.png").exists() or not TEMPLATE_DIR.exists(),
     reason="缺少訓練截圖或模板",
 )
-def test_real_screenshot_end_to_end():
+def test_real_screenshot_end_to_end(monkeypatch):
+    import agent.rule_agent
+
+    monkeypatch.setattr(agent.rule_agent, "CLAIM_MODE", "loose")  # 這手碰了只是進張變多
     readers = Readers()
     observation = observe(read_image(TRAIN_DIR / "經典_碰.png"), readers)
     assert advise(observation) == "碰 二萬"
@@ -87,7 +90,10 @@ def test_overlay_colors_and_position_file(tmp_path):
 
 
 def test_loop_remembers_claim_and_forbids_tiles_on_the_next_discard(monkeypatch):
+    import agent.rule_agent
     import hint.__main__ as hint_main
+
+    monkeypatch.setattr(agent.rule_agent, "CLAIM_MODE", "loose")  # 測流程：這手照舊標準會碰
 
     # 影片 55.5→57.5 秒：上家打二萬，碰；碰完遊戲把最右邊的九條移到第 17 張位置
     waiting = Observation(T("11223789m99m4p56779s"), frozenset({"pung", "chow"}),

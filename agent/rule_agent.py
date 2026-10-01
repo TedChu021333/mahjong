@@ -383,7 +383,7 @@ def declare_is_worth(state: GameState, player: int, tile: int,
     return live >= min_live
 
 
-CLAIM_MODE = "loose"
+CLAIM_MODE = "improve"
 """吃碰的標準：
 - loose：向聽變好，或向聽相同但有效進張變多（原本的做法）
 - improve：向聽一定要變好
