@@ -161,3 +161,23 @@ def test_passing_seat_does_not_claim_its_first_tile_in_rollouts():
     seats = [Seat(C(junk), 0), Seat(C("1479m258p369s1134z"), 0), Seat(C(junk), 0), Seat(C(junk), 0)]
     play_out(seats, [], 0, P("1z"), 6.0, 5.0, passed=1)
     assert seats[1].open_melds == 0
+
+
+def test_smart_rollout_folds_with_safe_tiles_and_declares(monkeypatch):
+    from agent import rollout
+    from agent.rollout import smart_discard
+
+    junk = "1479m258p369s234567z"  # 離聽牌很遠
+    threat = Seat(C("123456789m123456p1z"), 0, declared=True, discards={P("9m"), P("4z")})
+    seats = [Seat(C(junk + "9m"), 0), threat, Seat(C(junk), 0), Seat(C(junk), 0)]
+    assert smart_discard(seats, 0) in (P("9m"), P("4z"))  # 有人宣告、自己很遠：打現物
+    seats[1].declared = False
+    assert smart_discard(seats, 0) == heuristic_discard(seats[0].hand, 0)
+    # SMART 模擬裡打完聽牌就宣告（宣告的人胡牌多 1 台）
+    monkeypatch.setattr(rollout, "SMART", True)
+    almost = Seat(C("123456789m1235p1z99s"), 0)  # 摸進四筒、打掉東就聽三六筒
+    assert sum(almost.hand) == 16
+    seats = [Seat(C(junk + "9m"), 0), almost, Seat(C(junk), 0), Seat(C(junk), 0)]
+    seats[0].hand[P("7z")] -= 1
+    play_out(seats, [P("2m"), P("8s"), P("5z"), P("4p")], 0, P("7z"), 6.0, 5.0)
+    assert seats[1].declared and P("1z") in seats[1].discards

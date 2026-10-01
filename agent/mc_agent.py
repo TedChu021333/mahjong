@@ -65,7 +65,7 @@ def determinize(state: GameState, player: int, rng: Random, calibration: Calibra
     pool = unseen_counts(state, player)
     seats: list[Seat | None] = [None] * 4
     me = state.players[player]
-    seats[player] = Seat(list(me.hand), me.open_melds, state.declared[player])
+    seats[player] = Seat(list(me.hand), me.open_melds, state.declared[player], set(me.discards))
     order = sorted((opponent for opponent in range(4) if opponent != player),
                    key=lambda opponent: not state.declared[opponent])  # 有限制的先抽
     for opponent in order:
@@ -84,7 +84,7 @@ def determinize(state: GameState, player: int, rng: Random, calibration: Calibra
             hand = _random_hand(pool, size, rng)
         for tile, count in enumerate(hand):
             pool[tile] -= count
-        seats[opponent] = Seat(hand, len(other.melds), declared)
+        seats[opponent] = Seat(hand, len(other.melds), declared, set(other.discards))
     wall = [tile for tile, count in enumerate(pool) for _ in range(count)]
     rng.shuffle(wall)
     return seats, wall[:max(0, state.drawable)]
@@ -127,7 +127,7 @@ def evaluate_options(state: GameState, player: int, options: list[Option], rng: 
             break
         seats, wall = determinize(state, player, rng, calibration, undeclared_share)
         for option in options:
-            copies = [Seat(list(seat.hand), seat.open_melds, seat.declared) for seat in seats]
+            copies = [seat.copy() for seat in seats]
             mine = copies[player]
             mine.hand[option.tile] -= 1
             mine.declared = mine.declared or option.declare
@@ -195,7 +195,7 @@ def evaluate_claims(state: GameState, player: int, actions: list[Action], rng: R
             break
         seats, wall = determinize(state, player, rng, calibration, undeclared_share)
         for action in actions:
-            copies = [Seat(list(seat.hand), seat.open_melds, seat.declared) for seat in seats]
+            copies = [seat.copy() for seat in seats]
             if action.kind == ActionType.PASS or _someone_else_wins(copies, player, discarder,
                                                                      claimed):
                 value = play_out(copies, list(wall), discarder, claimed, tsumo, ron,

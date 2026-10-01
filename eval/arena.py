@@ -19,6 +19,7 @@
     evdeclare:<k>[:<s>] 期望值打牌，聽的牌剩 k 張以上才宣告（0 = 一律宣告）；s 為估計對手放槍危險時
                   「沒宣告的人已經聽牌」的比例（預設 0：其他 AI 都一律宣告時，沒宣告就是沒聽）
     mc[:<n>]      蒙地卡羅打牌（agent.mc_agent），n 為每個候選的模擬次數（預設 ROLLOUTS）
+    mcsmart[:<n>] / mcplain[:<n>] 蒙地卡羅，模擬裡的人會／不會宣告與防守（agent.rollout.SMART）
     mcclaim[:<n>] 規則式 AI，但吃碰槓用蒙地卡羅判斷（單獨評估吃碰的效果）
 """
 from __future__ import annotations
@@ -47,10 +48,11 @@ def make_policy(spec: str) -> PlayerPolicy:
         return _blind_policy
     if name == "mcclaim":
         return partial(_mc_claim_policy, rollouts=int(arg) if arg else 40)
-    if name == "mc":
+    if name in ("mc", "mcsmart", "mcplain"):
         from agent.mc_agent import ROLLOUTS
 
-        return partial(_mc_policy, rollouts=int(arg) if arg else ROLLOUTS)
+        smart = None if name == "mc" else name == "mcsmart"
+        return partial(_mc_policy, rollouts=int(arg) if arg else ROLLOUTS, smart=smart)
     if name == "ev":
         from agent.ev_agent import RISK_WEIGHT
 
@@ -86,9 +88,12 @@ def _mc_claim_policy(state, player, rng, rollouts):
     return choose_rule_action_for_player(state, player, rng)
 
 
-def _mc_policy(state, player, rng, rollouts):
+def _mc_policy(state, player, rng, rollouts, smart=None):
+    from agent import rollout
     from agent.mc_agent import choose_mc_action_for_player
 
+    if smart is not None:
+        rollout.SMART = smart  # 在子程序裡、每次決定前設定（兩邊策略在同一個程序輪流用）
     return choose_mc_action_for_player(state, player, rng, rollouts=rollouts, undeclared_share=0.0)
 
 

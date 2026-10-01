@@ -5,10 +5,13 @@
 台數用校正表的平均值（自摸三家各付、放槍一家付，有宣告聽牌再加 1 台）。宣告聽牌的人
 手牌鎖住，摸到不胡就打掉；其他人從孤張分數最低的幾張中挑打掉後向聽數最低的。這個策略
 比真正的 AI 弱（從隨機起手打，約九成的局有人胡），但各候選牌用同一批模擬比較，偏差大多抵銷。
+
+SMART = True 時接近真正的 AI：打完聽牌就宣告；有人宣告時，自己還差兩向聽以上就棄胡，
+先打宣告者都打過的牌（現物），沒有現物才照常打。
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Sequence
 
@@ -18,6 +21,9 @@ from game.tiles import NUM_TILE_TYPES
 from game.win import is_win
 
 BASE = BASE_TAI
+SMART = False
+"""模擬裡的人會不會宣告聽牌、防守（見模組說明）。"""
+FOLD_SHANTEN = 2
 
 
 @lru_cache(maxsize=200_000)
@@ -68,6 +74,23 @@ class Seat:
     hand: list[int]
     open_melds: int
     declared: bool = False
+    discards: set[int] = field(default_factory=set)
+    """打過的牌（SMART 防守時當現物）。"""
+
+    def copy(self) -> "Seat":
+        return Seat(list(self.hand), self.open_melds, self.declared, set(self.discards))
+
+
+def smart_discard(seats: list[Seat], current: int) -> int:
+    """SMART：有人宣告、自己還遠就打現物；否則照 heuristic_discard。"""
+    seat = seats[current]
+    threats = [other for index, other in enumerate(seats) if index != current and other.declared]
+    if threats and _shanten(tuple(seat.hand), seat.open_melds) >= FOLD_SHANTEN:
+        safe = [tile for tile in range(NUM_TILE_TYPES)
+                if seat.hand[tile] and all(tile in other.discards for other in threats)]
+        if safe:
+            return min(safe, key=lambda tile: keep_score(seat.hand, tile))
+    return heuristic_discard(seat.hand, seat.open_melds)
 
 
 def _claim(seat: Seat, tile: int, can_chow: bool) -> bool:
@@ -120,6 +143,7 @@ def play_out(seats: list[Seat], wall: list[int], discarder: int, discard: int,
     position = len(wall)
     skip = passed
     current, tile = discarder, discard
+    seats[discarder].discards.add(discard)
     while True:
         # 放槍：依打牌者的下家順序
         for step in (1, 2, 3):
@@ -161,6 +185,14 @@ def play_out(seats: list[Seat], wall: list[int], discarder: int, discard: int,
             if seat.declared:
                 seat.hand[drawn] -= 1
                 tile = drawn
+                seat.discards.add(tile)
                 continue
-        tile = heuristic_discard(seat.hand, seat.open_melds)
-        seat.hand[tile] -= 1
+        if SMART:
+            tile = smart_discard(seats, current)
+            seat.hand[tile] -= 1
+            seat.discards.add(tile)
+            if _shanten(tuple(seat.hand), seat.open_melds) == 0:
+                seat.declared = True  # 和 AI 一樣聽牌就宣告
+        else:
+            tile = heuristic_discard(seat.hand, seat.open_melds)
+            seat.hand[tile] -= 1
