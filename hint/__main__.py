@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import time
 import traceback
+from collections import deque
 from dataclasses import replace
 from pathlib import Path
 from typing import Iterator
@@ -27,7 +28,7 @@ import cv2
 import numpy as np
 
 from game.rules import ActionType, forbidden_after_claim
-from game.tiles import tile_name
+from game.tiles import tile_code, tile_name
 from hint.advisor import (
     POLICIES,
     STREAK_UNKNOWN_GUESS,
@@ -71,6 +72,14 @@ def save_result(frame: np.ndarray, prefix: str = "") -> Path:
         path = RESULT_DIR / f"{prefix}{stamp}_{count}.png"
     write_image(path, frame)
     return path
+
+
+BANNER_COOLDOWN = 3.0
+"""同一次吃碰只存一次。"""
+BANNER_DELAYS = (0.6, 1.0)
+"""吃碰時吃碰者那邊會出現「吃」（紫）／「碰」（綠灰）大字約 1.5 秒，牌河要確認幾幀才報「被拿走」，
+所以存這麼多秒之前的畫面（收集起來做吃／碰與吃碰者的辨識）。"""
+RECENT_SECONDS = 2.0
 
 
 def print_log(line: str, detail: str | None = None, echo: bool = True) -> None:
@@ -137,7 +146,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     acted_at = 0.0
     retries = 0
     pending_claim = None
-    """最近一次建議的吃碰：(吃碰後應有的手牌, 不能打的牌)。"""
+    """最近一次建議的吃碰：(吃碰後應有的手牌, 不能打的牌, 用掉的手牌)。"""
     missed_for = None
     """已經存過「胡按鈕亮著卻沒選胡」截圖的畫面。"""
     last_claim = None
@@ -148,6 +157,9 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     river_updated_at = float("-inf")
     claim_prompt_since = None
     popup_closed_at = float("-inf")
+    banner_saved_at = float("-inf")
+    recent = deque()
+    """最近幾秒的畫面（牌河更新時記一張），吃碰時存下之前的畫面。"""
     claim_prompt_reported = False
     last_readable = None
     """最近一次讀到手牌的時間；存過「讀不到」截圖後設為 None，直到再讀到手牌。"""
@@ -171,9 +183,19 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             if (rivers is not None and observation is not None
                     and clock() - river_updated_at >= RIVER_INTERVAL):
                 river_updated_at = clock()
+                recent.append((clock(), frame))
+                while recent and clock() - recent[0][0] > RECENT_SECONDS:
+                    recent.popleft()
                 for event in rivers.update(frame, observation):
                     name = tile_name(event.tile) if event.tile is not None else "?"
                     log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
+                    if event.kind == "claimed" and clock() - banner_saved_at >= BANNER_COOLDOWN:
+                        banner_saved_at = clock()
+                        for delay in BANNER_DELAYS:
+                            _, earlier = min(recent, key=lambda item: abs(clock() - delay - item[0]))
+                            code = tile_code(event.tile) if event.tile is not None else "x"
+                            path = save_result(earlier, f"吃碰動畫_{event.seat}_{code}_")
+                            log(f"[{stamp}] 有人吃碰，{delay} 秒前的畫面存到 {path}", echo=False)
             if rivers is not None and observation is not None:
                 observation = replace(observation, discards=rivers.discards(),
                                       melds=rivers.meld_counts(),

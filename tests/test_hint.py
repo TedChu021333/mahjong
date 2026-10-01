@@ -473,3 +473,40 @@ def test_exposed_tiles_count_as_visible():
     state = build_state(wrong)
     assert visible_tile_counts(state, 0)[parse("1z")[0]] == 4
     assert state.players[1].melds == []
+
+
+def test_loop_saves_frames_from_before_a_claim(monkeypatch):
+    import hint.__main__ as hint_main
+    from perception.river_tracker import RiverEvent
+
+    now = [0.0]
+    hands = [Observation(T("11223789m99m4p56779s"), None, None, ()) for _ in range(8)]
+
+    def frames():
+        for i, observation in enumerate(hands):
+            now[0] = i * 0.35
+            yield str(i), observation
+
+    class FakeRivers:
+        def update(self, frame, observation):
+            return [RiverEvent("claimed", "left", parse("7s")[0], (0, 0, 1, 1))] \
+                if frame is hands[6] else []
+
+        def discards(self):
+            return ((), (), (), ())
+
+        def meld_counts(self):
+            return (0, 0, 0, 0)
+
+        def exposed_tiles(self):
+            return ((), (), (), ())
+
+    monkeypatch.setattr(hint_main, "decide", lambda observation: None)
+    saved = []
+    hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: frame,
+                  clock=lambda: now[0], rivers=FakeRivers(), show=lambda advice: None,
+                  save_result=lambda frame, prefix="": saved.append((frame, prefix)) or prefix,
+                  log=lambda *args, **kwargs: None)
+    # 2.1 秒時發現被拿走：存 0.6、1.0 秒前（1.5、1.1 秒）最接近的畫面（1.4、1.05 秒）
+    index = [next(i for i, hand in enumerate(hands) if hand is frame) for frame, _ in saved]
+    assert index == [4, 3] and {prefix for _, prefix in saved} == {"吃碰動畫_left_7s_"}
