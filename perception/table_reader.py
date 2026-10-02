@@ -15,6 +15,8 @@ from perception.config import (
     CLAIM_TILE_POSITIONS,
     CLAIM_TILE_SIZE,
     AUTOPLAY_BUTTON_REGION,
+    CLAIM_BANNER_MIN_PIXELS,
+    CLAIM_BANNER_REGIONS,
     DEALER_BADGE_REGIONS,
     DECLARE_MIN_SCORE,
     DECLARE_REGIONS,
@@ -296,3 +298,19 @@ def autoplay_active(image: np.ndarray) -> bool:
     hsv = cv2.cvtColor(image[top:bottom, left:right], cv2.COLOR_BGR2HSV)
     orange = (hsv[..., 0] < 20) & (hsv[..., 1] > 150) & (hsv[..., 2] > 150)
     return float(orange.mean()) > 0.6
+
+
+def read_claim_banner(image: np.ndarray) -> tuple[str, str] | None:
+    """別家吃碰的大字：回傳 (吃碰者 left/top/right, "chow"/"pung")；沒有就是 None。
+    10/2 的 1116 張截圖中與牌河事件一致的 530 張全對；另外 54 張是牌河把被拿牌的那家記錯，大字才是對的。"""
+    found = []
+    for seat, (left, top, right, bottom) in CLAIM_BANNER_REGIONS.items():
+        region = image[top:bottom, left:right].astype(np.int16)
+        blue, green, red = region[..., 0], region[..., 1], region[..., 2]
+        purple = int(((red > 170) & (blue > 170) & (green < 120)).sum())
+        greenish = int(((green > 150) & (green - red > 50) & (green - blue > 50)).sum())
+        if purple >= CLAIM_BANNER_MIN_PIXELS["chow"]:
+            found.append((seat, "chow"))
+        if greenish >= CLAIM_BANNER_MIN_PIXELS["pung"]:
+            found.append((seat, "pung"))
+    return found[0] if len(found) == 1 else None

@@ -130,3 +130,23 @@ def test_claim_tile_over_the_river_is_read_without_the_dark_circle():
     claim_reader = TileClassifier.from_directory(template_box=CLAIM_TEMPLATE_BOX)
     reading = read_claim_tile(read_image(TRAIN_DIR / "經典_圓框蓋牌河.png"), claim_reader)
     assert (reading.tile, reading.source) == (parse("8p")[0], "left")
+
+
+@pytest.mark.parametrize("seat, kind", [(seat, kind) for seat in ("left", "top", "right")
+                                        for kind in ("chow", "pung")])
+def test_claim_banner_on_real_screens(seat, kind):
+    from perception.table_reader import read_claim_banner
+
+    path = TRAIN_DIR / f"經典_吃碰字_{seat}_{kind}.png"
+    if not path.exists():
+        pytest.skip("缺少訓練截圖")
+    assert read_claim_banner(read_image(path)) == (seat, kind)
+
+
+def test_no_claim_banner_on_ordinary_screens():
+    from perception.table_reader import read_claim_banner
+
+    for name in ("經典_吃碰字_none", "經典_碰", "經典_暗槓", "經典_小結算", "經典_上訴"):
+        path = TRAIN_DIR / f"{name}.png"
+        if path.exists():
+            assert read_claim_banner(read_image(path)) is None, name

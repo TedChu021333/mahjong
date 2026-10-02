@@ -11,6 +11,8 @@
 副露數加 1；被拿走的牌之後又回到原位（其實是被蓋住）就取消。下一個出牌的是自己、而自己
 並沒有吃碰時，吃碰的一定是上家（他吃碰完打一張就輪到我們，只是那張被遮住還沒看到）。
 吃只能吃上家的牌：拿走牌的人不是打牌者的下家，就一定是碰（或槓），那種牌另外兩張也看得到了。
+別家吃碰時吃碰者那邊會出現「吃」／「碰」大字（read_claim_banner）：剛出現的大字之後幾秒內有牌被拿走，
+直接照大字算給那家（碰的話另外兩張也看得到），不必等下一個出牌的人；大字比牌河記的「被拿牌的那家」可靠。
 """
 from __future__ import annotations
 
@@ -26,17 +28,28 @@ from perception.capture import write_image
 from perception.config import RIVER_TEMPLATE_DIR
 from perception.river_reader import SEATS, RiverReader, crop_face
 from perception.river_tracker import RiverEvent, RiverTracker
+from perception.table_reader import read_claim_banner
 
 NEXT_SEAT = {"me": "right", "right": "top", "top": "left", "left": "me"}
 """出牌順序：自己 → 下家 → 對家 → 上家。"""
+BANNER_FRAMES = 10
+"""大字出現後這麼多次更新（約 3 秒）內的「被拿走」才算這次吃碰。"""
 LABEL_FRAMES = 15
 """標註在這麼多幀內等不到那家牌河多一張就作廢。"""
 
 
+def _read_banner(frame):
+    return read_claim_banner(frame) if frame is not None else None
+
+
 class RiverWatch:
     def __init__(self, reader: RiverReader, template_dir: Path = RIVER_TEMPLATE_DIR,
-                 save=write_image) -> None:
+                 save=write_image, read_banner=None) -> None:
         self.reader = reader
+        self.read_banner = read_banner or _read_banner
+        self._banner: tuple[str, str, int] | None = None
+        """剛出現、還沒對到被拿走的牌的大字：(吃碰者, chow/pung, 出現時的更新次數)。"""
+        self._banner_visible = False
         self.tracker = RiverTracker()
         self.template_dir = template_dir
         self.save = save
@@ -65,17 +78,29 @@ class RiverWatch:
         self._taken_from = None
         self._last_circle = None
         self._credited = None
+        self._banner = None
 
     def update(self, frame: np.ndarray, observation: Observation) -> list[RiverEvent]:
         self._frame += 1
         self._my_melds = observation.meld_count
         self._collect_labels(observation)
+        banner = self.read_banner(frame)
+        if banner is not None and not self._banner_visible:
+            self._banner = (*banner, self._frame)  # 只記剛出現的那一次
+        self._banner_visible = banner is not None
         events = self.tracker.update(self.reader.read(frame))
         for event in events:
             if event.kind == "discard":
                 self._apply_label(frame, event)
                 self._someone_discarded(event.seat)
             elif event.kind == "claimed":
+                if self._banner and self._frame - self._banner[2] <= BANNER_FRAMES                         and self._banner[0] != event.seat:
+                    claimer, kind, _ = self._banner
+                    self._banner = self._taken_from = None
+                    tile = event.tile
+                    self._credit(event.seat, claimer,
+                                 (tile, tile) if kind == "pung" and tile is not None else ())
+                    continue
                 self._taken_from = (event.seat, self._my_melds, event.tile)
             elif event.kind == "restored":
                 if self._taken_from and self._taken_from[0] == event.seat:
@@ -97,11 +122,14 @@ class RiverWatch:
             if self._my_melds != taken[1] or taken[0] == "left":
                 return  # 自己吃碰的
             claimer = "left"  # 自己沒吃碰卻輪到自己：是上家吃碰
-        self.melds[claimer] += 1
         tile = taken[2]
         tiles = (tile, tile) if tile is not None and claimer != NEXT_SEAT[taken[0]] else ()
+        self._credit(taken[0], claimer, tiles)
+
+    def _credit(self, source: str, claimer: str, tiles: tuple[int, ...]) -> None:
+        self.melds[claimer] += 1
         self.exposed[claimer] += tiles
-        self._credited = (taken[0], claimer, tiles)
+        self._credited = (source, claimer, tiles)
 
     def own_claim(self, tiles) -> None:
         """自己吃碰完成：用掉的手牌（被吃碰的那張已在別家牌河）。"""

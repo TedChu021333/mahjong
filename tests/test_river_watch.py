@@ -180,3 +180,43 @@ def test_own_claim_tiles_are_exposed():
     assert watch.exposed_tiles()[0] == (P("6m"), P("8m"))
     watch.new_hand()
     assert watch.exposed_tiles() == ((), (), (), ())
+
+
+def watch_with_banner(reader, banners):
+    """banners：每次 update 依序回傳的大字（用完後為 None）。"""
+    queue = list(banners)
+    watch = RiverWatch(reader, save=lambda path, image: None,
+                       read_banner=lambda frame: queue.pop(0) if queue else None)
+    return watch
+
+
+def test_banner_tells_a_pung_by_the_next_player():
+    # 下家的五萬被對家（下家的下家）拿走：只看出牌順序分不出吃碰，大字是「碰」
+    reader = FakeReader()
+    reader.current["right"] = [RiverTile(P("5m"), 0.9, (1151, 398, 1212, 450))]
+    watch = watch_with_banner(reader, [None] * CONFIRM_FRAMES + [("top", "pung")])
+    frames(watch, waiting(), CONFIRM_FRAMES)            # 下家打五萬
+    reader.current["right"] = []
+    frames(watch, waiting(), CONFIRM_FRAMES + 1)        # 大字出現、五萬被拿走
+    assert watch.melds["top"] == 1 and watch.exposed["top"] == [P("5m"), P("5m")]
+
+
+def test_banner_chow_counts_a_meld_without_known_tiles():
+    reader = FakeReader()
+    reader.current["right"] = [RiverTile(P("5m"), 0.9, (1151, 398, 1212, 450))]
+    watch = watch_with_banner(reader, [None] * CONFIRM_FRAMES + [("top", "chow")])
+    frames(watch, waiting(), CONFIRM_FRAMES)
+    reader.current["right"] = []
+    frames(watch, waiting(), CONFIRM_FRAMES + 1)
+    assert watch.melds["top"] == 1 and watch.exposed["top"] == []
+
+
+def test_frame_is_passed_to_the_banner_reader(monkeypatch):
+    import hint.river_watch as river_watch
+
+    seen = []
+    monkeypatch.setattr(river_watch, "read_claim_banner", lambda frame: seen.append(frame))
+    watch = RiverWatch(FakeReader(), save=lambda path, image: None)
+    watch.update("frame", waiting())
+    watch.update(None, waiting())  # 沒有畫面（測試）就不讀
+    assert seen == ["frame"]
