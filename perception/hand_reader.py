@@ -252,6 +252,11 @@ class HandReading:
         return tuple(tile for tile in self.tiles if tile is not None)
 
 
+CONCEALED_KONG_MAX_SCORE = 0.5
+"""暗槓的三張牌背（第 4 張正面疊在中間上方）下緣是淺灰色，會被當成暗手牌；牌背的最高分只有 0.1～0.3
+（實戰 10/2 14:03 槓北後整手讀不到），變暗的牌也有 0.7 以上。"""
+
+
 def read_hand(image: np.ndarray, classifier: TileClassifier) -> HandReading:
     boxes = locate_hand_tiles(image)
     tiles, scores = [], []
@@ -259,7 +264,13 @@ def read_hand(image: np.ndarray, classifier: TileClassifier) -> HandReading:
         tile, score = classifier.classify(crop_tile(image, box))
         tiles.append(tile)
         scores.append(score)
-    return HandReading(tuple(boxes), tuple(tiles), tuple(scores))
+    # 暗手牌左邊每三格都認不出來的是暗槓牌背（副露一定是 3 格一組）
+    start = 0
+    while start + 3 <= len(boxes) and all(tile is None and score < CONCEALED_KONG_MAX_SCORE
+                                          for tile, score in zip(tiles[start:start + 3],
+                                                                 scores[start:start + 3])):
+        start += 3
+    return HandReading(tuple(boxes[start:]), tuple(tiles[start:]), tuple(scores[start:]))
 
 
 def format_reading(reading: HandReading) -> str:

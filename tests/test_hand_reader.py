@@ -218,3 +218,14 @@ def test_dimmed_hand_while_claim_buttons_are_shown():
     for predicted, tile in zip(reading.tiles, expected):
         # 只在這一刻出現過的牌種（6萬）沒有其他模板，應回報無法辨識而不是猜錯
         assert predicted == (tile if tile in classifier.known_tiles else None)
+
+
+@pytest.mark.skipif(
+    not (TRAIN_DIR / "經典_暗槓.png").exists() or not TEMPLATE_DIR.exists(),
+    reason="缺少訓練截圖或模板",
+)
+def test_concealed_kong_backs_are_not_hand_tiles():
+    # 實戰 10/2 14:03 暗槓北：三張牌背下緣是淺灰色，曾被當成三張認不出的暗手牌
+    reading = read_hand(read_image(TRAIN_DIR / "經典_暗槓.png"),
+                        TileClassifier.from_directory(TEMPLATE_DIR))
+    assert reading.known_tiles() == tuple(parse("22367m267p278s33z"))
