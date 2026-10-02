@@ -127,7 +127,8 @@ def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP,
     新牌的機率依自己看不到的張數（4 - 手上張數）估計。各張分開評估，
     取期望向聽數最低的幾張；沒有值得換的就不換。對子多時向聽數由嚦咕嚦咕
     決定，所有單張的期望值都一樣，此時再以一般牌型的期望向聽數區分
-    （例如孤張字牌比能搭子的數牌更該換）。金牌留著胡牌時每張 +1 台，不換。
+    （例如孤張字牌比能搭子的數牌更該換）。用得上的金牌（gold_in_use）留著胡牌時每張 +1 台，不換；
+    孤張金牌照常可以換（實戰 10/2 17:28 曾換出五筒、留下孤張金牌中）。
     會加台的字牌（valued_honors，見 honor_tai）成對以上也不換：向聽數只把它當普通對子，
     實戰 10/2 12:57 曾把東風圈的一對東換掉一張。
     """
@@ -138,7 +139,7 @@ def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP,
     unseen = [4 - count for count in hand]
     candidates = []
     for tile, count in enumerate(hand):
-        if not count or tile in gold or (tile in valued and count >= 2):
+        if not count or (tile in gold and gold_in_use(hand, tile))                 or (tile in valued and count >= 2):
             continue
         hand[tile] -= 1
         total = weighted = weighted_standard = 0
@@ -152,7 +153,7 @@ def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP,
             hand[new_tile] -= 1
         hand[tile] += 1
         # 換出去的牌別人可能拿到：中張最好用，要自己明顯變好才值得送出去
-        expected = weighted / total + swap_gift_cost(tile)
+        expected = weighted / total + swap_gift_cost(tile)             + (GOLD_SWAP_COST if tile in gold else 0.0)
         if expected < current - SWAP_MIN_GAIN:
             candidates.append((round(expected, 6), weighted_standard / total, tile))
     return tuple(tile for *_, tile in sorted(candidates)[:limit])
@@ -166,6 +167,11 @@ def honor_tai(state: GameState, player: int, tile: int) -> int:
     if state.known_dealer is not None and tile == state.seat_winds[player]:
         tai += 1
     return tai
+
+
+GOLD_SWAP_COST = 0.2
+"""換掉孤張金牌的代價（期望向聽數）。0.2 同時符合兩局實戰：9/29 21:12 留金牌南、西（≤0.14 會換掉），
+10/2 17:28 換掉孤張金牌中（之前金牌一律不換，換出五筒留著它）。"""
 
 
 def swap_gift_cost(tile: int) -> float:

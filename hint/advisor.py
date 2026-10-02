@@ -253,6 +253,19 @@ POLICIES = ("rule", "ev", "mc")
 _policy = "rule"
 _pool = None
 _workers = 1
+_time_limit = None
+_rollouts = None
+MOVE_OVERHEAD = 1.5
+"""每手限時中要留給辨識、點擊與程序間傳遞的秒數（3 秒場模擬 1.5 秒）。"""
+
+
+def use_move_seconds(seconds: float) -> None:
+    """依遊戲每手限時設定蒙地卡羅的模擬時間與次數上限（6 秒場：模擬 4.5 秒、次數上限 ×3）。"""
+    from agent.mc_agent import LIVE_ROLLOUTS, TIME_LIMIT
+
+    global _time_limit, _rollouts
+    _time_limit = max(0.5, seconds - MOVE_OVERHEAD)
+    _rollouts = round(LIVE_ROLLOUTS * _time_limit / TIME_LIMIT)
 
 
 def use_worker_pool(pool, workers: int) -> None:
@@ -307,8 +320,10 @@ def decide(observation: Observation, rng: Random | None = None) -> Action | None
     if _policy == "mc":
         from agent.mc_agent import LIVE_ROLLOUTS, TIME_LIMIT, choose_mc_action_for_player
 
-        return choose_mc_action_for_player(state, ME, rng or Random(0), rollouts=LIVE_ROLLOUTS,
-                                           time_limit=TIME_LIMIT, pool=_pool, workers=_workers)
+        return choose_mc_action_for_player(state, ME, rng or Random(0),
+                                           rollouts=_rollouts or LIVE_ROLLOUTS,
+                                           time_limit=_time_limit or TIME_LIMIT,
+                                           pool=_pool, workers=_workers)
     if _policy == "ev":
         from agent.ev_agent import choose_ev_action_for_player
 

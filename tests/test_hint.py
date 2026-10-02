@@ -516,3 +516,16 @@ def test_loop_saves_frames_from_before_a_claim(monkeypatch):
     # 2.1 秒時發現被拿走：存 0.6、1.0 秒前（1.5、1.1 秒）最接近的畫面（1.4、1.05 秒）
     index = [next(i for i, hand in enumerate(hands) if hand is frame) for frame, _ in saved]
     assert index == [4, 3] and {prefix for _, prefix in saved} == {"吃碰動畫_left_7s_"}
+
+
+def test_move_seconds_scale_the_monte_carlo_budget():
+    import hint.advisor as advisor
+    from agent.mc_agent import LIVE_ROLLOUTS, TIME_LIMIT
+
+    try:
+        advisor.use_move_seconds(6)
+        assert advisor._time_limit == 4.5 and advisor._rollouts == LIVE_ROLLOUTS * 3
+        advisor.use_move_seconds(3)
+        assert advisor._time_limit == TIME_LIMIT and advisor._rollouts == LIVE_ROLLOUTS
+    finally:
+        advisor._time_limit = advisor._rollouts = None

@@ -344,6 +344,8 @@ def main() -> None:
     parser.add_argument("--ai", choices=POLICIES, default="rule",
                         help="打牌 AI：rule 規則式（預設）、ev 期望值打牌（估計放槍風險）、"
                              "mc 蒙地卡羅（模擬比較，每步約 2 秒）")
+    parser.add_argument("--move-seconds", type=float, default=3.0,
+                        help="遊戲每手限時（秒）；6 秒場給 6，蒙地卡羅會模擬約 4.5 秒")
     parser.add_argument("--demo-overlay", action="store_true",
                         help="只展示小視窗外觀（可拖曳調整位置），不辨識畫面")
     args = parser.parse_args()
@@ -354,9 +356,13 @@ def main() -> None:
 
         from hint.advisor import use_worker_pool
 
+        from hint.advisor import use_move_seconds
+
         workers = max(1, (os.cpu_count() or 2) - 2)
         use_worker_pool(Pool(workers), workers)
-        print(f"蒙地卡羅 AI：{workers} 個程序平行模擬", flush=True)
+        use_move_seconds(args.move_seconds)
+        print(f"蒙地卡羅 AI：{workers} 個程序平行模擬，每手限時 {args.move_seconds:g} 秒",
+              flush=True)
     if args.demo_overlay:
         from hint.overlay import demo
 

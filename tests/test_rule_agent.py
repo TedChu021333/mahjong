@@ -412,3 +412,14 @@ def test_isolated_gold_tile_gets_no_keep_bonus():
     assert keep_value(hand, P("4z"), gold) > keep_value(hand, P("4z"))
     # 成對的金牌南仍然加分
     assert keep_value(hand, P("2z"), gold) == keep_value(hand, P("2z")) + 3
+
+
+def test_swap_can_give_away_an_isolated_gold_tile():
+    # 實戰 10/2 17:28：金牌中是孤張，卻換出五筒留著它
+    from agent.rule_agent import choose_swap_tiles
+
+    hand = C("2348m11p4556p46s6665z")
+    swapped = choose_swap_tiles(hand, gold_tiles=parse("6p2m5z"), valued_honors=parse("1z5z6z7z"))
+    assert P("5z") in swapped
+    # 用得上的金牌（六筒在四五五六筒裡）不換
+    assert P("6p") not in swapped
