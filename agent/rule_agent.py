@@ -87,8 +87,10 @@ def choose_discard(hand: list[int], n_open_melds: int = 0,
 def keep_value(hand: Sequence[int], tile: int, gold_tiles=()) -> int:
     """這張牌留著的價值，只用來打破平手：同種越多、前後兩格內的牌越多越高；
     孤張字牌最低（只能碰、湊不成順子，實戰曾留著孤張東西去拆萬子），孤張么九次之；
-    金牌再加 3（湊成對子、刻子時多台）。"""
-    value = hand[tile] * 6 + (3 if tile in gold_tiles else 0)
+    用得上的金牌（gold_in_use）再加 3（湊成對子、刻子時多台）；孤張金牌只加 1，兩張孤張字牌中留金牌，
+    但不會為了它打掉孤張中張（實戰 10/2 14:07 向聽、進張都一樣時，留著孤張金牌北、打掉六萬）。"""
+    bonus = (3 if gold_in_use(hand, tile) else 1) if tile in gold_tiles else 0
+    value = hand[tile] * 6 + bonus
     if tile >= 27:
         return value - 2
     rank = tile % 9

@@ -400,3 +400,15 @@ def test_swap_keeps_a_valued_honor_pair():
     assert P("1z") in choose_swap_tiles(hand, gold_tiles=gold)
     kept = choose_swap_tiles(hand, gold_tiles=gold, valued_honors=parse("1z5z6z7z"))
     assert P("1z") not in kept and P("2z") in kept  # 孤張南（不加台）照換
+
+
+def test_isolated_gold_tile_gets_no_keep_bonus():
+    from agent.rule_agent import keep_value
+
+    # 實戰 10/2 14:07：金牌北是孤張，六萬也是孤張 → 先打北（字牌湊不成順子）；孤張字牌中仍留金牌
+    hand = C("6m12p99p567s22z4z")
+    gold = parse("8p2z4z")
+    assert keep_value(hand, P("4z"), gold) < keep_value(hand, P("6m"), gold)
+    assert keep_value(hand, P("4z"), gold) > keep_value(hand, P("4z"))
+    # 成對的金牌南仍然加分
+    assert keep_value(hand, P("2z"), gold) == keep_value(hand, P("2z")) + 3
