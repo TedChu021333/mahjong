@@ -17,6 +17,7 @@ from perception.capture import read_image, write_image
 from perception.config import (
     BUTTON_TEMPLATE_DIR,
     CONTINUE_BUTTONS,
+    CONTINUE_SCREENS,
     POPUP_CLOSERS,
     CONTINUE_MIN_SCORE,
     CONTINUE_SEARCH_MARGIN,
@@ -43,15 +44,18 @@ class ContinueButtons:
 
     @classmethod
     def from_directory(cls, directory: Path = BUTTON_TEMPLATE_DIR) -> "ContinueButtons":
+        names = list(CONTINUE_BUTTONS) + list(CONTINUE_SCREENS)
         return cls({name: read_image(directory / f"{name}.png")
-                    for name in CONTINUE_BUTTONS if (directory / f"{name}.png").exists()})
+                    for name in names if (directory / f"{name}.png").exists()})
 
     def find(self, image: np.ndarray) -> ContinueButton | None:
-        """同位置的按鈕（再贏一局、繼續戰鬥、破產後的再玩一局）字形相近，取分數最高的。"""
+        """同位置的按鈕（再贏一局、繼續戰鬥、破產後的再玩一局）字形相近，取分數最高的；
+        大結算以畫面上固定的字辨識（CONTINUE_SCREENS），按右下角的按鈕。"""
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         best, best_score = None, CONTINUE_MIN_SCORE
         for name, reference in self.references.items():
-            area = crop(gray, CONTINUE_BUTTONS[name], CONTINUE_SEARCH_MARGIN)
+            region = CONTINUE_BUTTONS[name] if name in CONTINUE_BUTTONS else CONTINUE_SCREENS[name][0]
+            area = crop(gray, region, CONTINUE_SEARCH_MARGIN)
             if area.shape[0] < reference.shape[0] or area.shape[1] < reference.shape[1]:
                 continue
             score = float(cv2.matchTemplate(area, reference, cv2.TM_CCOEFF_NORMED).max())
@@ -59,6 +63,8 @@ class ContinueButtons:
                 best, best_score = name, score
         if best is None:
             return None
+        if best in CONTINUE_SCREENS:
+            return ContinueButton(best, CONTINUE_SCREENS[best][1])
         left, top, right, bottom = CONTINUE_BUTTONS[best]
         return ContinueButton(best, ((left + right) // 2, (top + bottom) // 2))
 
@@ -89,6 +95,7 @@ class PopupClosers:
 
 def main() -> None:
     regions = dict(CONTINUE_BUTTONS)
+    regions.update({name: region for name, (region, _) in CONTINUE_SCREENS.items()})
     regions.update({name: region for name, (region, _) in POPUP_CLOSERS.items()})
     if len(sys.argv) != 3 or sys.argv[2] not in regions:
         raise SystemExit(f"用法：python -m perception.continue_button <截圖> "
