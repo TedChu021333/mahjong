@@ -15,6 +15,7 @@
     nodeclare     規則式 AI，但聽牌時不宣告（不拿聽牌 1 台，手牌不鎖、還能防守）
     ev[:<w>]      期望值打牌（agent.ev_agent），w 為放槍損失的權重（預設 RISK_WEIGHT）
     evhonor:<h>   期望值打牌，會加台的字牌刻子／對子每台算進攻收益的 h 倍（0 = 不算）
+    evimprove:<w> 期望值打牌，每張改良牌加 w 台進攻收益（ev_agent.IMPROVE_WEIGHT）
     evclaim:<mode> 期望值打牌，吃碰標準 loose / improve / near（見 rule_agent.CLAIM_MODE）
     evdeclare:<k>[:<s>] 期望值打牌，聽的牌剩 k 張以上才宣告（0 = 一律宣告）；s 為估計對手放槍危險時
                   「沒宣告的人已經聽牌」的比例（預設 0：其他 AI 都一律宣告時，沒宣告就是沒聽）
@@ -57,6 +58,10 @@ def make_policy(spec: str) -> PlayerPolicy:
         from agent.ev_agent import RISK_WEIGHT
 
         return partial(_ev_policy, risk_weight=float(arg) if arg else RISK_WEIGHT)
+    if name == "evimprove" and arg:
+        from agent.ev_agent import RISK_WEIGHT
+
+        return partial(_ev_policy, risk_weight=RISK_WEIGHT, improve_weight=float(arg))
     if name == "evclaim" and arg:
         from agent.ev_agent import RISK_WEIGHT
 
@@ -98,14 +103,15 @@ def _mc_policy(state, player, rng, rollouts, smart=None):
 
 
 def _ev_policy(state, player, rng, risk_weight, honor_share=None, declare_min_live=None,
-               undeclared_share=0.0, claim_mode=None):
+               undeclared_share=0.0, claim_mode=None, improve_weight=None):
     from agent.ev_agent import HONOR_TAI_SHARE, choose_ev_action_for_player
 
     # 模擬器裡的 AI 聽牌一律宣告，沒宣告的人不會已經聽牌
     return choose_ev_action_for_player(
         state, player, rng, risk_weight=risk_weight, undeclared_share=undeclared_share,
         honor_share=HONOR_TAI_SHARE if honor_share is None else honor_share,
-        declare_min_live=declare_min_live, claim_mode=claim_mode)
+        declare_min_live=declare_min_live, claim_mode=claim_mode,
+        improve_weight=improve_weight)
 
 
 def _no_declare_policy(state, player, rng):

@@ -135,3 +135,34 @@ def effective_tiles(counts: Sequence[int], n_open_melds: int = 0) -> list[int]:
     """列出摸到後能降低向聽數的牌種。"""
     validated = _validate_counts(counts, n_open_melds)
     return list(_effective_tiles_cached(validated, n_open_melds))
+
+def improvement_count(counts: Sequence[int], n_open_melds: int, visible: Sequence[int]) -> int:
+    """改良牌：摸到後（再打掉一張）向聽數不變、但有效進張變多的牌，回傳看不到的張數。
+    counts 是打完牌、等著摸牌的手牌；有效進張以 4 − visible 計。進張數相同時，
+    改良牌多的手以後比較容易變好（例如留孤張六萬比留孤張字牌好）。"""
+    hand = list(counts)
+    level = shanten(hand, n_open_melds)
+    effective = set(effective_tiles(hand, n_open_melds))
+    base = sum(max(0, 4 - visible[tile]) for tile in effective)
+    total = 0
+    for drawn in range(len(hand)):
+        live = 4 - visible[drawn]
+        if live <= 0 or drawn in effective or hand[drawn] >= 4:
+            continue
+        hand[drawn] += 1
+        better = False
+        for discard in range(len(hand)):
+            if not hand[discard] or discard == drawn:
+                continue
+            hand[discard] -= 1
+            if shanten(hand, n_open_melds) == level:
+                outs = sum(max(0, 4 - visible[tile] - (tile == drawn))
+                           for tile in effective_tiles(hand, n_open_melds))
+                better = outs > base
+            hand[discard] += 1
+            if better:
+                break
+        hand[drawn] -= 1
+        if better:
+            total += live
+    return total

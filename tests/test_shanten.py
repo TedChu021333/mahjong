@@ -43,3 +43,18 @@ def test_seven_pairs_do_not_count_as_tenpai_in_this_game():
     hand = to_counts(parse("44m88m55p66p777p44s5s88s"))
     assert seven_pairs_shanten(hand) == 0
     assert shanten(hand) > 0
+
+
+def test_improvement_count_prefers_keeping_a_flexible_tile():
+    # 實戰 10/2 14:07（副露 2 組）：進張相同時，打六萬後的改良牌比打北後少
+    from agent.shanten import improvement_count
+
+    hand = to_counts(parse("6m12p99p567s22z4z"))
+    visible = list(hand)
+
+    def after(tile):
+        rest = list(hand)
+        rest[parse(tile)[0]] -= 1
+        return improvement_count(rest, 2, visible)
+
+    assert after("4z") > after("6m")

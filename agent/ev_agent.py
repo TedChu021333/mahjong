@@ -23,7 +23,7 @@ from agent.rule_agent import (
     honor_tai,
     visible_tile_counts,
 )
-from agent.shanten import effective_tiles, shanten
+from agent.shanten import effective_tiles, improvement_count, shanten
 from game.rules import Action, ActionType, GameState, Phase, allowed_discards, legal_actions
 
 RISK_WEIGHT = 0.5
@@ -36,6 +36,10 @@ HONOR_TAI_SHARE = GOLD_VALUE_SHARE
 """碰出來會加台的字牌（三元牌、圈風、已知的門風）每 1 台同樣算進攻收益的 1/8；手上已成刻子
 全算，對子依還沒出現的張數打折（見 honor_pung_value）。實戰 10/1 01:06 曾為了稍微安全一點拆掉一對東
 （東風圈，碰出來有台），因為進攻收益只看向聽與進張。"""
+IMPROVE_WEIGHT = 0.0
+"""每張改良牌（improvement_count）加這麼多台的進攻收益；只算向聽最好、分數前 IMPROVE_CANDIDATES 名
+（一張約 0.1～0.25 秒）。實戰 10/2 14:07 進張相同時留孤張金牌北、打六萬：打六萬後改良牌 14 張、打北後 22 張。"""
+IMPROVE_CANDIDATES = 4
 PAIR_PUNG_CHANCE = 0.25
 """對子每剩一張沒出現的，約有這麼多機會湊成刻子（粗估，剩 2 張 → 0.5）。"""
 OUTS_TIE_BREAK = 1e-3
@@ -62,7 +66,8 @@ def discard_scores(state: GameState, player: int, rng: Random,
                    calibration: Calibration | None = None, samples: int = 120,
                    risk_weight: float = RISK_WEIGHT,
                    undeclared_share: float = UNDECLARED_TENPAI_SHARE,
-                   honor_share: float = HONOR_TAI_SHARE) -> dict[int, float]:
+                   honor_share: float = HONOR_TAI_SHARE,
+                   improve_weight: float | None = None) -> dict[int, float]:
     calibration = calibration or default_calibration()
     me = state.players[player]
     candidates = allowed_discards(me.hand, state.forbidden_discards if state.claimed else ())
@@ -87,6 +92,20 @@ def discard_scores(state: GameState, player: int, rng: Random,
         scores[tile] = (value - risk_weight * danger.expected_loss[tile]
                         + OUTS_TIE_BREAK * (outs - 100 * level)
                         - KEEP_TIE_BREAK * keep_value(me.hand, tile, gold))
+    if improve_weight is None:
+        improve_weight = IMPROVE_WEIGHT
+    if improve_weight > 0:
+        levels = {}
+        for tile in scores:
+            after = list(me.hand)
+            after[tile] -= 1
+            levels[tile] = (shanten(after, me.open_melds), after)
+        best_level = min(level for level, _ in levels.values())
+        top = sorted((tile for tile in scores if levels[tile][0] == best_level),
+                     key=scores.get, reverse=True)[:IMPROVE_CANDIDATES]
+        for tile in top:
+            scores[tile] += improve_weight * improvement_count(levels[tile][1], me.open_melds,
+                                                               visible)
     return scores
 
 
@@ -96,7 +115,8 @@ def choose_ev_action_for_player(state: GameState, player: int, rng: Random | Non
                                 undeclared_share: float = UNDECLARED_TENPAI_SHARE,
                                 honor_share: float = HONOR_TAI_SHARE,
                                 declare_min_live: int | None = None,
-                                claim_mode: str | None = None) -> Action | None:
+                                claim_mode: str | None = None,
+                                improve_weight: float | None = None) -> Action | None:
     rng = rng or Random()
     if state.phase != Phase.DISCARD or state.declared[player] or player != state.current_player:
         return choose_rule_action_for_player(state, player, rng, claim_mode=claim_mode)
@@ -108,7 +128,7 @@ def choose_ev_action_for_player(state: GameState, player: int, rng: Random | Non
     if kong is not None:
         return kong
     scores = discard_scores(state, player, rng, calibration, samples, risk_weight,
-                            undeclared_share, honor_share)
+                            undeclared_share, honor_share, improve_weight)
     best = max(scores.values())
     tile = rng.choice(sorted(t for t, score in scores.items() if score >= best - 1e-9))
     declare = Action(ActionType.DECLARE, tile=tile)
