@@ -530,3 +530,13 @@ def test_move_seconds_scale_the_monte_carlo_budget():
         assert advisor._time_limit == TIME_LIMIT and advisor._rollouts == LIVE_ROLLOUTS
     finally:
         advisor._time_limit = advisor._rollouts = None
+
+
+def test_hand_covered_by_no_kong_notice_is_still_read():
+    # 實戰 10/2 20:02：「上家出牌，不可明槓。」蓋住手牌上緣，曾整手讀不到、錯過吃碰決定
+    path = TRAIN_DIR / "經典_不可明槓.png"
+    if not path.exists():
+        pytest.skip("缺少訓練截圖")
+    observation = observe(read_image(path), Readers())
+    assert observation is not None and observation.hand == T("35579p22789s111z")
+    assert observation.buttons == frozenset({"pung"})

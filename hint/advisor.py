@@ -17,7 +17,14 @@ from game.rules import Action, ActionType, GameState, Phase, legal_actions, seat
 from game.tiles import NUM_TILE_TYPES, tile_name
 from perception.config import CLAIM_TEMPLATE_BOX, GOLD_MIN_SCORE, GOLD_TEMPLATE_BOX, TEMPLATE_DIR
 from perception.config import MAX_HAND_TILES
-from perception.hand_reader import TileClassifier, _cell_box, drawn_tile_box, read_hand
+from perception.hand_reader import (
+    TileClassifier,
+    _cell_box,
+    drawn_tile_box,
+    fill_covered_tops,
+    lower_part_classifier,
+    read_hand,
+)
 from perception.state_parser import ObservedPlayer, ObservedTable, parse_observed_table
 from perception.capture import read_image
 from perception.config import DECLARE_TEMPLATE, HAND_TILE_TOP
@@ -87,6 +94,7 @@ class Readers:
 
     def __init__(self, template_dir=TEMPLATE_DIR) -> None:
         self.tiles = TileClassifier.from_directory(template_dir)
+        self.lower = lower_part_classifier(template_dir)
         self.claim = TileClassifier.from_directory(template_dir, template_box=CLAIM_TEMPLATE_BOX)
         self.gold = TileClassifier.from_directory(template_dir, template_box=GOLD_TEMPLATE_BOX,
                                                   min_score=GOLD_MIN_SCORE)
@@ -99,12 +107,16 @@ class Readers:
 def observe(image: np.ndarray, readers: Readers) -> Observation | None:
     """辨識一幀；手牌不完整或張數不合理（動畫中）時回傳 None。"""
     reading = read_hand(image, readers.tiles)
+    buttons = read_buttons(image)
+    if reading.tiles and not reading.complete and buttons is not None:
+        # 「上家出牌，不可明槓。」蓋住手牌上緣：認不出的牌改用下半部再認
+        reading = fill_covered_tops(image, reading, readers.lower)
     if not reading.tiles or not reading.complete or len(reading.tiles) % 3 == 0:
         return None
     if not _consistent_layout(reading.boxes):
         return None
     gold = tuple(t for t in read_gold_tiles(image, readers.gold) if t is not None)
-    return Observation(reading.known_tiles(), read_buttons(image),
+    return Observation(reading.known_tiles(), buttons,
                        read_claim_tile(image, readers.claim), gold, reading.boxes,
                        read_swap_prompt(image),
                        tuple(box[1] != HAND_TILE_TOP for box in reading.boxes),

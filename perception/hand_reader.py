@@ -273,6 +273,29 @@ def read_hand(image: np.ndarray, classifier: TileClassifier) -> HandReading:
     return HandReading(tuple(boxes[start:]), tuple(tiles[start:]), tuple(scores[start:]))
 
 
+COVERED_TOP = 45
+"""手上有三張、上家打出第四張時，遊戲在手牌上緣跳出「上家出牌，不可明槓。」（約 y 820~865），
+蓋住被壓到的牌上方 40 像素左右（實戰 10/2 有 6 次因此讀不到手牌、錯過碰）。"""
+
+
+def lower_part_classifier(directory: str | Path = TEMPLATE_DIR) -> TileClassifier:
+    """只比對牌面下半部（去掉上方 COVERED_TOP 像素）的辨識器。
+    10/2 驗證：849 張讀得到的牌沒有一張認錯，11 張（多半是變暗的二萬）認不出。"""
+    return TileClassifier.from_directory(directory, template_box=(0, COVERED_TOP, 10_000, 10_000))
+
+
+def fill_covered_tops(image: np.ndarray, reading: HandReading,
+                      lower: TileClassifier) -> HandReading:
+    """認不出的牌改用下半部再認一次。"""
+    tiles, scores = list(reading.tiles), list(reading.scores)
+    for index, (box, tile) in enumerate(zip(reading.boxes, reading.tiles)):
+        if tile is None:
+            left, top, right, bottom = box
+            tiles[index], scores[index] = lower.classify(
+                crop_tile(image, (left, top + COVERED_TOP, right, bottom)))
+    return HandReading(reading.boxes, tuple(tiles), tuple(scores))
+
+
 def format_reading(reading: HandReading) -> str:
     parts = [
         f"{tile_name(tile)}({score:.2f})" if tile is not None else f"??({score:.2f})"
