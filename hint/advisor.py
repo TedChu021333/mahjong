@@ -290,8 +290,14 @@ def decide(observation: Observation, rng: Random | None = None) -> Action | None
         counts = [0] * NUM_TILE_TYPES
         for tile in observation.hand:
             counts[tile] += 1
+        # 會加台的字牌：中發白、圈風（東風圈的東）、認得出莊家時自己的門風
+        valued = [27, 31, 32, 33]
+        if observation.dealer is not None:
+            dealer = ME if observation.dealer == "me" else SOURCE_SEAT[observation.dealer]
+            valued.append(seat_winds_for_dealer(dealer)[ME])
         return Action(ActionType.SWAP, tiles=choose_swap_tiles(counts,
-                                                               gold_tiles=observation.gold_tiles))
+                                                               gold_tiles=observation.gold_tiles,
+                                                               valued_honors=valued))
     state = build_state(observation)
     if state is None:
         return None

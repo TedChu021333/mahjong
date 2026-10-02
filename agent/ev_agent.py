@@ -20,6 +20,7 @@ from agent.rule_agent import (
     keep_value,
     choose_self_kong,
     declare_is_worth,
+    honor_tai,
     visible_tile_counts,
 )
 from agent.shanten import effective_tiles, shanten
@@ -41,16 +42,6 @@ OUTS_TIE_BREAK = 1e-3
 KEEP_TIE_BREAK = 1e-6
 """進張也相同時先打最孤立的牌（孤張字牌優先），見 rule_agent.keep_value。"""
 """表是分組的，同一組內再以精確的有效進張數區分（不改變不同組之間的排序）。"""
-
-
-def honor_tai(state: GameState, player: int, tile: int) -> int:
-    """這種字牌碰成刻子能加幾台（game.scoring 的三元牌、圈風牌、門風牌）；莊家不明時門風不算。"""
-    if tile >= 31:
-        return 1
-    tai = int(tile == state.round_wind)
-    if state.known_dealer is not None and tile == state.seat_winds[player]:
-        tai += 1
-    return tai
 
 
 def honor_pung_value(state: GameState, player: int, hand, visible) -> float:

@@ -389,3 +389,14 @@ def test_claim_modes():
     assert choose_rule_action_for_player(far("33z", "3z"), 1, claim_mode="improve").kind         == ActionType.PUNG
     assert choose_rule_action_for_player(far("33z", "3z"), 1, claim_mode="near").kind         == ActionType.PASS
     assert choose_rule_action_for_player(far("55z", "5z"), 1, claim_mode="near").kind         == ActionType.PUNG
+
+
+def test_swap_keeps_a_valued_honor_pair():
+    # 實戰 10/2 12:57：東風圈的一對東被換掉一張
+    from agent.rule_agent import choose_swap_tiles
+
+    hand = C("22m33m78m23456p45s11z2z")
+    gold = parse("3s1p3m")
+    assert P("1z") in choose_swap_tiles(hand, gold_tiles=gold)
+    kept = choose_swap_tiles(hand, gold_tiles=gold, valued_honors=parse("1z5z6z7z"))
+    assert P("1z") not in kept and P("2z") in kept  # 孤張南（不加台）照換

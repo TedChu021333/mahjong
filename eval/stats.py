@@ -15,7 +15,7 @@ import argparse
 import csv
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import cv2
@@ -35,6 +35,12 @@ MY_NAME = Path(__file__).with_name("my_name.png")
 """自己的名字（黃字「不沾」）；換帳號時用 --name 指定一張裁好的名字圖。"""
 NAME_MIN_SCORE = 0.8
 """實測：自己那列 ≥0.98，其他列 ≤0.55；名字被提示條或卡片蓋住時讀不出來（約 15%）。"""
+SEAT_BADGE = (108, 1018, 152, 1062)
+"""畫面左下角自己的門風字（結算時變暗）。"""
+ROW_WIND_BOX = (675, 0, 775, 95)
+"""各列的風位標籤（相對於列頂）；四列由上到下固定是東南西北。"""
+WIND_MIN_SCORE = 0.8
+"""10/1 的 78 張：正確的列 ≥0.96，其他列 ≤0.5。"""
 DIGIT_SIZE = (24, 36)
 DIGIT_MIN_IOU = 0.7
 RAKE_PERCENT = 15
@@ -136,6 +142,19 @@ class Hand:
         return self.my_amount
 
 
+def wind_row(image: np.ndarray) -> int | None:
+    """以左下角自己的門風找自己那列（名字被「完成遊戲」等提示條蓋住時用）。"""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    left, top, right, bottom = SEAT_BADGE
+    badge = gray[top:bottom, left:right]
+    box_left, box_top, box_right, box_bottom = ROW_WIND_BOX
+    scores = [float(cv2.matchTemplate(gray[row + box_top:row + box_bottom, box_left:box_right],
+                                      badge, cv2.TM_CCOEFF_NORMED).max())
+              for row in ROW_TOPS]
+    best = int(np.argmax(scores))
+    return best if scores[best] >= WIND_MIN_SCORE else None
+
+
 def classify(rows: list[Row]) -> tuple[int, str]:
     me = [row for row in rows if row.is_me]
     if len(me) != 1:
@@ -181,6 +200,10 @@ def collect(directory: Path, date: str, since: str | None, until: str | None,
                 current = Round([])
             continue
         rows = [read_row(image, top, digits, my_name) for top in ROW_TOPS]
+        if sum(row.is_me for row in rows) != 1:
+            mine = wind_row(image)
+            if mine is not None:
+                rows = [replace(row, is_me=index == mine) for index, row in enumerate(rows)]
         amount, outcome = classify(rows)
         current.hands.append(Hand(path.stem, amount, outcome))
     if current.hands:

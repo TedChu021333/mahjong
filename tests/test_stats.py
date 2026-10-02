@@ -1,7 +1,18 @@
 import cv2
 import pytest
 
-from eval.stats import MY_NAME, ROW_TOPS, Row, classify, load_digits, read_row, report, Round, Hand
+from eval.stats import (
+    MY_NAME,
+    ROW_TOPS,
+    Hand,
+    Round,
+    Row,
+    classify,
+    load_digits,
+    read_row,
+    report,
+    wind_row,
+)
 from perception.capture import read_image
 from perception.config import TRAIN_DIR
 
@@ -45,3 +56,16 @@ def test_real_settlement_screens(name, amounts, me):
     rows = [read_row(image, top, load_digits(), my_name) for top in ROW_TOPS]
     assert [row.amount for row in rows] == amounts
     assert [row.is_me for row in rows].index(True) == me and sum(r.is_me for r in rows) == 1
+    assert wind_row(image) == me  # 左下角門風對到同一列
+
+
+def test_my_row_by_seat_wind_when_the_name_is_covered():
+    # 10/2 13:08：「完成遊戲(小結算)」提示條蓋住名字；自己坐東（第一列）被自摸 -500
+    path = TRAIN_DIR / "經典_結算提示條.png"
+    if not path.exists():
+        pytest.skip("缺少訓練截圖")
+    image = read_image(path)
+    my_name = cv2.cvtColor(read_image(MY_NAME), cv2.COLOR_BGR2GRAY)
+    rows = [read_row(image, top, load_digits(), my_name) for top in ROW_TOPS]
+    assert not any(row.is_me for row in rows)
+    assert wind_row(image) == 0 and rows[0].amount == -500
