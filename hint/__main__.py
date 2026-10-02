@@ -80,6 +80,8 @@ BANNER_DELAYS = (0.6, 1.0)
 """吃碰時吃碰者那邊會出現「吃」（紫）／「碰」（綠灰）大字約 1.5 秒，牌河要確認幾幀才報「被拿走」，
 所以存這麼多秒之前的畫面（收集起來做吃／碰與吃碰者的辨識）。"""
 RECENT_SECONDS = 2.0
+SAVE_CLAIM_FRAMES = False
+"""收集吃碰動畫截圖（10/2 一天存了 1116 張、2.7GB，夠用了，預設關閉）。"""
 
 
 def print_log(line: str, detail: str | None = None, echo: bool = True) -> None:
@@ -189,7 +191,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 for event in rivers.update(frame, observation):
                     name = tile_name(event.tile) if event.tile is not None else "?"
                     log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
-                    if event.kind == "claimed" and clock() - banner_saved_at >= BANNER_COOLDOWN:
+                    if SAVE_CLAIM_FRAMES and event.kind == "claimed"                             and clock() - banner_saved_at >= BANNER_COOLDOWN:
                         banner_saved_at = clock()
                         for delay in BANNER_DELAYS:
                             _, earlier = min(recent, key=lambda item: abs(clock() - delay - item[0]))

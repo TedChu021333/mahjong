@@ -508,6 +508,7 @@ def test_loop_saves_frames_from_before_a_claim(monkeypatch):
             return ((), (), (), ())
 
     monkeypatch.setattr(hint_main, "decide", lambda observation: None)
+    monkeypatch.setattr(hint_main, "SAVE_CLAIM_FRAMES", True)
     saved = []
     hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: frame,
                   clock=lambda: now[0], rivers=FakeRivers(), show=lambda advice: None,
