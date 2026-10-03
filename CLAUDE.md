@@ -18,6 +18,9 @@
 - `perception/` 螢幕擷取 (mss)、牌面辨識 (OpenCV 模板比對 → YOLO)、state_parser.py
 - `hint/`       提示模式：`python -m hint`（即時＋浮動小視窗）、`--no-overlay`、`--image`、`--video` 回放測試、`--auto` 訓練場自動點擊
 - `control/`    actuator.py（pyautogui）：把動作轉成點擊；滑鼠甩到左上角中止
+  window.py：自動模式 60 秒看不到遊戲、使用者也 60 秒沒操作電腦時，把遊戲視窗（標題含「明星3缺1」）切回前面
+  （10/3 03:03 VS Code 跑到前面停了 8 小時）；出牌點了沒反應時，遊戲不在前景且使用者 5 秒沒操作也切回再試
+  （10/3 02:23～03:03 出牌點了沒反應 9 次）。使用者自己在用別的程式時不會搶回來。
 - `eval/`      arena.py：配對比較兩種策略（同一副牌各打一次、只換一個座位的策略），
   `python -m eval.arena --variant gold:8 --baseline gold:0 --games 2000 --workers 5 --out result/x.csv`
 - `eval/stats.py`：從 `result/` 結算截圖統計實戰戰績（每圈與總輸贏、胡牌率、放槍率附 95% 誤差），

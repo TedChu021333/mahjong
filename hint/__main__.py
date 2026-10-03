@@ -80,6 +80,12 @@ BANNER_DELAYS = (0.6, 1.0)
 """吃碰時吃碰者那邊會出現「吃」（紫）／「碰」（綠灰）大字約 1.5 秒，牌河要確認幾幀才報「被拿走」，
 所以存這麼多秒之前的畫面（收集起來做吃／碰與吃碰者的辨識）。"""
 RECENT_SECONDS = 2.0
+GAME_LOST_SECONDS = 60.0
+"""自動模式看不到遊戲這麼久、使用者也這麼久沒操作電腦，就把遊戲切回前面
+（10/3 03:03 VS Code 跑到遊戲前面，停了 8 小時）。"""
+STUCK_IDLE_SECONDS = 5.0
+"""點了幾次都沒反應時，遊戲不在前景、使用者也這麼久沒操作，就把遊戲切到前面再試
+（10/3 02:23～03:03 出牌點了沒反應 9 次）。"""
 SAVE_CLAIM_FRAMES = False
 """收集吃碰動畫截圖（10/2 一天存了 1116 張、2.7GB，夠用了，預設關閉）。"""
 
@@ -139,9 +145,11 @@ def video_frames(path: Path, step: float, start: float) -> Iterator[tuple[str, n
 def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         actuator=None, observe_fn=observe, clock=time.monotonic, show=None,
         find_continue=None, save_result=save_result, log=print_log, rivers=None,
-        find_win=None, find_buttons=None, find_popup=None, find_autoplay=None) -> None:
+        find_win=None, find_buttons=None, find_popup=None, find_autoplay=None,
+        window=None) -> None:
     """find_win(frame) 為「胡」按鈕是否亮著、find_buttons(frame) 讀按鈕列（都不依賴手牌辨識）；
-    find_popup(frame) 找會蓋住牌桌的彈出面板（自動模式按關閉）。"""
+    find_popup(frame) 找會蓋住牌桌的彈出面板（自動模式按關閉）。window（control.window.GameWindow）
+    讓自動模式在看不到遊戲、使用者又沒在用電腦時把遊戲切回前面。"""
     previous = None
     last_advice = None
     acted_for = None
@@ -166,13 +174,24 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     last_readable = None
     """最近一次讀到手牌的時間；存過「讀不到」截圖後設為 None，直到再讀到手牌。"""
     streak_reported = False
+    game_seen_at = clock()
+    """最近一次認出遊戲畫面（手牌、按鈕、結算、代打）的時間。"""
+    focus_tried_at = float("-inf")
     for stamp, frame in frames:
         try:
+            if (actuator is not None and window is not None
+                    and clock() - game_seen_at >= GAME_LOST_SECONDS
+                    and clock() - focus_tried_at >= GAME_LOST_SECONDS
+                    and window.idle_seconds() >= GAME_LOST_SECONDS
+                    and window.is_foreground() is False):
+                focus_tried_at = clock()
+                log(f"[{stamp}] {GAME_LOST_SECONDS:.0f} 秒看不到遊戲、也沒人操作電腦，"
+                    f"把遊戲切回前面（{'成功' if window.focus() else '失敗'}）")
             if (actuator is not None and find_popup is not None
                     and clock() - popup_closed_at >= RETRY_AFTER):
                 popup = find_popup(frame)
                 if popup is not None:
-                    popup_closed_at = clock()
+                    game_seen_at = popup_closed_at = clock()
                     log(f"[{stamp}] 關閉「{popup.name}」面板", echo=False)
                     actuator.click(popup.center)
             observation = observe_fn(frame, readers)
@@ -203,13 +222,13 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                                       melds=rivers.meld_counts(),
                                       exposed=rivers.exposed_tiles())
             if observation is not None:
-                last_readable = clock()
+                game_seen_at = last_readable = clock()
                 if observation.dealer_streak is None and not streak_reported:
                     streak_reported = True  # 每次執行只存一張，補模板用
                     log(f"[{stamp}] 認不出連莊數（先當 {STREAK_UNKNOWN_GUESS}），截圖存到 "
                         f"{save_result(frame, '連莊_')}")
             elif find_autoplay is not None and find_autoplay(frame):
-                last_readable = clock()  # 聽牌後遊戲代打：「取消代打」蓋住手牌是正常的
+                game_seen_at = last_readable = clock()  # 聽牌後遊戲代打：「取消代打」蓋住手牌是正常的
             elif (last_readable is not None and clock() - last_readable >= UNREADABLE_AFTER
                   and not (decided_action is not None
                            and decided_action.kind == ActionType.DECLARE)):
@@ -234,6 +253,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             else:
                 claim_prompt_since = None
             if observation is None and find_win is not None and find_win(frame):
+                game_seen_at = clock()
                 # 摸牌的手、出牌動畫常蓋住手牌，而且倒數只剩一兩秒：讀不到手牌也照樣胡
                 # （曾因此錯過自摸，遊戲還會顯示「您剛剛錯過了胡牌時機」）
                 if clock() - win_pressed_at >= RETRY_AFTER:
@@ -247,6 +267,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             if observation is None and find_continue is not None:
                 observation = find_continue(frame)
                 if observation is not None:
+                    game_seen_at = clock()
                     last_readable = None  # 這局結束了：結算、配桌期間讀不到手牌是正常的
             if observation is None or observation != previous:
                 previous = observation
@@ -313,6 +334,11 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     stuck_for = observation  # 點了幾次畫面都沒變：存下來查原因（例如槓完沒反應）
                     log(f"[{stamp}] 「{advice}」點了 {MAX_RETRIES + 1} 次畫面都沒變，截圖存到 "
                         f"{save_result(frame, '卡住_')}", hand_text(observation))
+                    if window is not None and window.is_foreground() is False                             and window.idle_seconds() >= STUCK_IDLE_SECONDS:
+                        # 遊戲不在前景時點擊可能沒送進去：切到前面、再點一輪
+                        log(f"[{stamp}] 遊戲不在最前面，切回前面再試"
+                            f"（{'成功' if window.focus() else '失敗'}）")
+                        retries = 0
                 if clock() - acted_at < RETRY_AFTER or retries >= MAX_RETRIES:
                     continue
                 retries += 1
@@ -411,11 +437,16 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
     log = GameLog()
     print(f"記錄檔：{log.path}", flush=True)
     rivers = RiverWatch(RiverReader.from_directory())
+    game_window = None
+    if auto:
+        from control.window import GameWindow
+
+        game_window = GameWindow()  # 看不到遊戲、又沒人用電腦時把遊戲切回前面
     if not overlay:
         print(f"{mode}啟動，Ctrl+C 結束", flush=True)
         run(screen_frames(interval), readers, actuator=actuator, find_continue=find_continue,
             log=log, rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
-            find_popup=popups.find, find_autoplay=autoplay_active)
+            find_popup=popups.find, find_autoplay=autoplay_active, window=game_window)
         return
     from hint.overlay import Overlay
 
@@ -424,7 +455,8 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
     window.run(lambda: run(screen_frames(interval), readers, actuator=actuator,
                            show=window.show, find_continue=find_continue, log=log,
                            rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
-                           find_popup=popups.find, find_autoplay=autoplay_active))
+                           find_popup=popups.find, find_autoplay=autoplay_active,
+                           window=game_window))
 
 
 def win_is_lit(frame: np.ndarray) -> bool:

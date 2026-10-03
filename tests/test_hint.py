@@ -540,3 +540,51 @@ def test_hand_covered_by_no_kong_notice_is_still_read():
     observation = observe(read_image(path), Readers())
     assert observation is not None and observation.hand == T("35579p22789s111z")
     assert observation.buttons == frozenset({"pung"})
+
+
+class FakeGameWindow:
+    def __init__(self, foreground=False, idle=600.0):
+        self.foreground, self.idle, self.focused = foreground, idle, 0
+
+    def is_foreground(self):
+        return self.foreground
+
+    def focus(self):
+        self.focused += 1
+        self.foreground = True
+        return True
+
+    def idle_seconds(self):
+        return self.idle
+
+
+def run_unrecognised(window, seconds=200, step=10):
+    """一直看不到遊戲（例如 VS Code 蓋在前面）的畫面。"""
+    import hint.__main__ as hint_main
+
+    now = [0.0]
+
+    def frames():
+        for i in range(seconds // step):
+            now[0] = i * step
+            yield str(i), "vscode"
+
+    lines = []
+    hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: None,
+                  actuator=object(), clock=lambda: now[0], show=lambda advice: None,
+                  save_result=lambda frame, prefix="": prefix,
+                  log=lambda line, *args, **kwargs: lines.append(line), window=window)
+    return lines
+
+
+def test_game_is_brought_back_when_nobody_uses_the_computer():
+    # 10/3 03:03：VS Code 跑到遊戲前面，程式看不到遊戲就停了 8 小時
+    window = FakeGameWindow()
+    lines = run_unrecognised(window)
+    assert window.focused == 1 and any("把遊戲切回前面" in line for line in lines)
+
+
+def test_game_is_not_brought_back_while_the_user_works_elsewhere():
+    window = FakeGameWindow(idle=3.0)  # 使用者剛剛還在操作別的程式
+    run_unrecognised(window)
+    assert window.focused == 0
