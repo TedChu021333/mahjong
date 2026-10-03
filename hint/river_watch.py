@@ -94,7 +94,8 @@ class RiverWatch:
                 self._apply_label(frame, event)
                 self._someone_discarded(event.seat)
             elif event.kind == "claimed":
-                if self._banner and self._frame - self._banner[2] <= BANNER_FRAMES                         and self._banner[0] != event.seat:
+                if self._banner and self._frame - self._banner[2] <= BANNER_FRAMES \
+                        and self._banner[0] != event.seat:
                     claimer, kind, _ = self._banner
                     self._banner = self._taken_from = None
                     tile = event.tile

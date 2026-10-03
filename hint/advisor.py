@@ -267,12 +267,13 @@ _pool = None
 _workers = 1
 _time_limit = None
 _rollouts = None
-MOVE_OVERHEAD = 1.5
-"""每手限時中要留給辨識、點擊與程序間傳遞的秒數（3 秒場模擬 1.5 秒）。"""
+MOVE_OVERHEAD = 2.0
+"""每手限時中要留給辨識、期望值計算、點擊與程序間傳遞的秒數（3 秒場模擬 1 秒、6 秒場 4 秒）。
+原本 1.5（3 秒場模擬 1.5 秒），10/3 電腦較忙時出牌平均 2.4 秒、最多 4 秒，點擊來不及，卡住 34 次。"""
 
 
 def use_move_seconds(seconds: float) -> None:
-    """依遊戲每手限時設定蒙地卡羅的模擬時間與次數上限（6 秒場：模擬 4.5 秒、次數上限 ×3）。"""
+    """依遊戲每手限時設定蒙地卡羅的模擬時間與次數上限（次數上限隨模擬時間等比例調整）。"""
     from agent.mc_agent import LIVE_ROLLOUTS, TIME_LIMIT
 
     global _time_limit, _rollouts

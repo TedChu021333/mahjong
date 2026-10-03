@@ -139,7 +139,8 @@ def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP,
     unseen = [4 - count for count in hand]
     candidates = []
     for tile, count in enumerate(hand):
-        if not count or (tile in gold and gold_in_use(hand, tile))                 or (tile in valued and count >= 2):
+        if not count or (tile in gold and gold_in_use(hand, tile)) \
+                or (tile in valued and count >= 2):
             continue
         hand[tile] -= 1
         total = weighted = weighted_standard = 0
@@ -153,7 +154,8 @@ def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP,
             hand[new_tile] -= 1
         hand[tile] += 1
         # 換出去的牌別人可能拿到：中張最好用，要自己明顯變好才值得送出去
-        expected = weighted / total + swap_gift_cost(tile)             + (GOLD_SWAP_COST if tile in gold else 0.0)
+        expected = weighted / total + swap_gift_cost(tile) \
+                + (GOLD_SWAP_COST if tile in gold else 0.0)
         if expected < current - SWAP_MIN_GAIN:
             candidates.append((round(expected, 6), weighted_standard / total, tile))
     return tuple(tile for *_, tile in sorted(candidates)[:limit])

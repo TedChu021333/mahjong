@@ -260,7 +260,7 @@ def test_loop_survives_errors_and_reports_stuck_screens(monkeypatch):
     hint_main.run(frames(), readers=None, actuator=StuckActuator(), observe_fn=observe_fn,
                   clock=lambda: now[0], save_result=lambda frame, prefix="": saved.append(prefix) or "x",
                   log=lambda line, detail=None, echo=True: lines.append(line))
-    assert saved == ["錯誤_", "卡住_"]
+    assert saved == ["錯誤_", "卡住_", "卡住_後續_", "卡住_後續_"]
     assert any("程式錯誤" in line for line in lines)
 
 
@@ -524,10 +524,13 @@ def test_move_seconds_scale_the_monte_carlo_budget():
     from agent.mc_agent import LIVE_ROLLOUTS, TIME_LIMIT
 
     try:
+        # 每手限時扣 2 秒給辨識與點擊：3 秒場模擬 1 秒、6 秒場 4 秒，次數上限等比例
         advisor.use_move_seconds(6)
-        assert advisor._time_limit == 4.5 and advisor._rollouts == LIVE_ROLLOUTS * 3
+        assert advisor._time_limit == 4.0
+        assert advisor._rollouts == round(LIVE_ROLLOUTS * 4.0 / TIME_LIMIT)
         advisor.use_move_seconds(3)
-        assert advisor._time_limit == TIME_LIMIT and advisor._rollouts == LIVE_ROLLOUTS
+        assert advisor._time_limit == 1.0
+        assert advisor._rollouts == round(LIVE_ROLLOUTS * 1.0 / TIME_LIMIT)
     finally:
         advisor._time_limit = advisor._rollouts = None
 
@@ -588,3 +591,50 @@ def test_game_is_not_brought_back_while_the_user_works_elsewhere():
     window = FakeGameWindow(idle=3.0)  # 使用者剛剛還在操作別的程式
     run_unrecognised(window)
     assert window.focused == 0
+
+
+def test_stuck_click_saves_follow_up_screenshots(monkeypatch):
+    import hint.__main__ as hint_main
+    from game.rules import Action, ActionType
+
+    now = [0.0]
+    hand = Observation(T("11223789m99m4p56779s1z"), None, None, ())
+
+    def frames():
+        for i in range(40):
+            now[0] = i * 0.3
+            yield str(i), hand  # 點了畫面都沒變
+
+    class ClickingActuator:
+        def follow_up(self, observation):
+            return False
+
+        def perform(self, action, observation):
+            return True
+
+        def click(self, point):
+            pass
+
+    monkeypatch.setattr(hint_main, "decide", lambda observation: Action(ActionType.DISCARD,
+                                                                         tile=parse("1z")[0]))
+    saved = []
+    hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: frame,
+                  actuator=ClickingActuator(), clock=lambda: now[0], show=lambda advice: None,
+                  save_result=lambda frame, prefix="": saved.append(prefix) or prefix,
+                  log=lambda *args, **kwargs: None)
+    assert saved.count("卡住_") == 1 and saved.count("卡住_後續_") == 2
+
+
+def test_chow_panel_is_not_a_missed_win(monkeypatch):
+    # 10/3 20:58：吃法選項框蓋在「胡」按鈕上被認成亮著
+    import hint.__main__ as hint_main
+
+    panel = Observation(T("11223789m99m4p56779s"), frozenset({"chow", "win"}), None, (),
+                        chow_panels=((960, 720),))
+    monkeypatch.setattr(hint_main, "decide", lambda observation: None)
+    saved = []
+    hint_main.run(((str(i), panel) for i in range(3)), readers=None,
+                  observe_fn=lambda frame, readers: frame, show=lambda advice: None,
+                  save_result=lambda frame, prefix="": saved.append(prefix) or prefix,
+                  log=lambda *args, **kwargs: None)
+    assert "未胡_" not in saved

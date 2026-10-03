@@ -56,7 +56,7 @@ SIGNIFICANCE = 2.0
 MC_CLAIMS = False
 """吃碰槓是否也用模擬判斷。arena 1724 對（只有吃碰用模擬 vs 規則式）：−0.183±0.321，
 胡牌率 25.7%→24.8%、放槍率 19.3%→19.8%，沒有進步，預設關閉、照規則式。"""
-PARALLEL_GRACE = 1.0
+PARALLEL_GRACE = 0.5
 """子程序超過 time_limit 這麼多秒還沒回來就放棄模擬，改照期望值第一名打（不能卡住牌局）。"""
 
 
@@ -312,7 +312,8 @@ def choose_mc_action_for_player(state: GameState, player: int, rng: Random | Non
                                 mc_claims: bool = MC_CLAIMS) -> Action | None:
     """pool 有給時把模擬分給 workers 個子程序（實戰用；每個子程序各自受 time_limit 限制）。"""
     rng = rng or Random()
-    if mc_claims and state.phase == Phase.RESPONSE and not state.robbing_kong             and not state.declared[player] and state.last_discard is not None:
+    if mc_claims and state.phase == Phase.RESPONSE and not state.robbing_kong \
+            and not state.declared[player] and state.last_discard is not None:
         return choose_mc_claim(state, player, rng, calibration or default_calibration(),
                                rollouts, undeclared_share, time_limit, pool, workers)
     if state.phase != Phase.DISCARD or state.declared[player] or player != state.current_player:

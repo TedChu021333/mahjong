@@ -86,6 +86,9 @@ GAME_LOST_SECONDS = 60.0
 STUCK_IDLE_SECONDS = 5.0
 """點了幾次都沒反應時，遊戲不在前景、使用者也這麼久沒操作，就把遊戲切到前面再試
 （10/3 02:23～03:03 出牌點了沒反應 9 次）。"""
+STUCK_SHOTS = 2
+STUCK_SHOT_INTERVAL = 0.5
+"""卡住時除了當下那張，再每 0.5 秒多存 2 張（查 10/3 出牌點了沒反應 34 次的原因）。"""
 SAVE_CLAIM_FRAMES = False
 """收集吃碰動畫截圖（10/2 一天存了 1116 張、2.7GB，夠用了，預設關閉）。"""
 
@@ -177,8 +180,14 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     game_seen_at = clock()
     """最近一次認出遊戲畫面（手牌、按鈕、結算、代打）的時間。"""
     focus_tried_at = float("-inf")
+    stuck_shots_left, stuck_shot_at = 0, float("-inf")
+    """卡住後還要存幾張後續截圖（每 STUCK_SHOT_INTERVAL 秒一張），看點擊後畫面怎麼變。"""
     for stamp, frame in frames:
         try:
+            if stuck_shots_left and clock() - stuck_shot_at >= STUCK_SHOT_INTERVAL:
+                stuck_shots_left -= 1
+                stuck_shot_at = clock()
+                log(f"[{stamp}] 卡住後續截圖存到 {save_result(frame, '卡住_後續_')}", echo=False)
             if (actuator is not None and window is not None
                     and clock() - game_seen_at >= GAME_LOST_SECONDS
                     and clock() - focus_tried_at >= GAME_LOST_SECONDS
@@ -210,7 +219,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 for event in rivers.update(frame, observation):
                     name = tile_name(event.tile) if event.tile is not None else "?"
                     log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
-                    if SAVE_CLAIM_FRAMES and event.kind == "claimed"                             and clock() - banner_saved_at >= BANNER_COOLDOWN:
+                    if SAVE_CLAIM_FRAMES and event.kind == "claimed" \
+                            and clock() - banner_saved_at >= BANNER_COOLDOWN:
                         banner_saved_at = clock()
                         for delay in BANNER_DELAYS:
                             _, earlier = min(recent, key=lambda item: abs(clock() - delay - item[0]))
@@ -317,7 +327,9 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                                  forbidden_after_claim(action, action.tile), tuple(used))
             advice = describe(action) if action is not None else None
             buttons = observation.buttons or frozenset()
-            if "win" in buttons and (action is None or action.kind != ActionType.WIN)                 and observation != missed_for:
+            # 吃法選項框會蓋在「胡」按鈕上被誤認成亮著（10/3 20:58 誤報），選吃法時不算
+            if "win" in buttons and (action is None or action.kind != ActionType.WIN) \
+                    and not observation.chow_panels and observation != missed_for:
                 missed_for = observation
                 log(f"[{stamp}] 「胡」按鈕亮著但 AI 沒選胡，截圖存到 {save_result(frame, '未胡_')}",
                     hand_text(observation))
@@ -330,11 +342,14 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             if actuator is None or action is None:
                 continue
             if observation == acted_for:
-                if retries >= MAX_RETRIES and clock() - acted_at >= RETRY_AFTER                         and stuck_for != observation:
+                if retries >= MAX_RETRIES and clock() - acted_at >= RETRY_AFTER \
+                        and stuck_for != observation:
                     stuck_for = observation  # 點了幾次畫面都沒變：存下來查原因（例如槓完沒反應）
                     log(f"[{stamp}] 「{advice}」點了 {MAX_RETRIES + 1} 次畫面都沒變，截圖存到 "
                         f"{save_result(frame, '卡住_')}", hand_text(observation))
-                    if window is not None and window.is_foreground() is False                             and window.idle_seconds() >= STUCK_IDLE_SECONDS:
+                    stuck_shots_left, stuck_shot_at = STUCK_SHOTS, clock()
+                    if window is not None and window.is_foreground() is False \
+                            and window.idle_seconds() >= STUCK_IDLE_SECONDS:
                         # 遊戲不在前景時點擊可能沒送進去：切到前面、再點一輪
                         log(f"[{stamp}] 遊戲不在最前面，切回前面再試"
                             f"（{'成功' if window.focus() else '失敗'}）")
@@ -376,7 +391,7 @@ def main() -> None:
                         help="蒙地卡羅平行模擬的程序數（預設 4；之前用 CPU 核心數 − 2＝14 個，"
                              "每手出牌時整台電腦滿載，10/3 出牌點了沒反應 34 次）")
     parser.add_argument("--move-seconds", type=float, default=3.0,
-                        help="遊戲每手限時（秒）；6 秒場給 6，蒙地卡羅會模擬約 4.5 秒")
+                        help="遊戲每手限時（秒）；3 秒場模擬約 1 秒，6 秒場給 6，模擬約 4 秒")
     parser.add_argument("--demo-overlay", action="store_true",
                         help="只展示小視窗外觀（可拖曳調整位置），不辨識畫面")
     args = parser.parse_args()

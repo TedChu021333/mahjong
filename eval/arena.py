@@ -88,7 +88,8 @@ def _mc_claim_policy(state, player, rng, rollouts):
     from agent.opponent_model import default_calibration
     from game.rules import Phase
 
-    if state.phase == Phase.RESPONSE and not state.robbing_kong and not state.declared[player]             and state.last_discard is not None:
+    if state.phase == Phase.RESPONSE and not state.robbing_kong and not state.declared[player] \
+            and state.last_discard is not None:
         return choose_mc_claim(state, player, rng, default_calibration(), rollouts, 0.0, None)
     return choose_rule_action_for_player(state, player, rng)
 
