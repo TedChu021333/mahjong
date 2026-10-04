@@ -423,3 +423,18 @@ def test_swap_can_give_away_an_isolated_gold_tile():
     assert P("5z") in swapped
     # 用得上的金牌（六筒在四五五六筒裡）不換
     assert P("6p") not in swapped
+
+
+def test_declare_only_on_the_first_discard_by_default():
+    # 使用者回饋（10/5）：每次聽牌就按聽，手牌鎖住、遇到危險也改不了；預設只有地聽才宣告
+    from agent.rule_agent import declare_is_worth
+
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = C("123456789m123456p12z")
+    state = GameState([0], players, phase=Phase.DISCARD)
+    assert declare_is_worth(state, 0, P("2z"))                 # 第一次打牌：地聽 4 台
+    players[0].discards = parse("9s")
+    assert not declare_is_worth(state, 0, P("2z"))
+    assert declare_is_worth(state, 0, P("2z"), min_live=0)     # 0 = 一律宣告（舊做法）
+    action = choose_rule_action_for_player(state, 0, Random(1))
+    assert action.kind == ActionType.DISCARD and action.tile in parse("12z")

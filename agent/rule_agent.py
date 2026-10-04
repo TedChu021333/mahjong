@@ -387,9 +387,12 @@ def should_fold(state: GameState, player: int, use_declared: bool = True,
     return own_shanten >= 2 and highest_threat >= 3
 
 
-DECLARE_MIN_LIVE = 0
-"""聽的牌還剩（看不到的）幾張以上才宣告聽牌；0 = 一律宣告。宣告後手牌鎖住、不能再換成更好的聽，
-沒宣告也能胡（沒有振聽），只是少 1 台。第一次打牌就聽（地聽 4 台）一律宣告。"""
+DECLARE_MIN_LIVE = None
+"""聽的牌還剩（看不到的）幾張以上才宣告聽牌；0 = 一律宣告，None = 只有地聽才宣告（預設）。
+宣告後手牌鎖住，摸到什麼都只能打出去，發現危險也不能改打安全牌、不能換更好的聽；沒宣告也能胡
+（沒有振聽），只是少 1 台。使用者實戰回饋「太容易按聽，不可控性變很高」（10/5）；實戰別人胡牌時
+約一半沒宣告（opponent_model.UNDECLARED_TENPAI_SHARE），不宣告不會讓對手更好防。
+第一次打牌就聽（地聽 4 台）一律宣告。"""
 
 
 def declare_is_worth(state: GameState, player: int, tile: int,
@@ -398,7 +401,11 @@ def declare_is_worth(state: GameState, player: int, tile: int,
     if min_live is None:
         min_live = DECLARE_MIN_LIVE
     me = state.players[player]
-    if min_live <= 0 or not me.discards:
+    if not me.discards:
+        return True  # 地聽 4 台
+    if min_live is None:
+        return False
+    if min_live <= 0:
         return True
     after = list(me.hand)
     after[tile] -= 1

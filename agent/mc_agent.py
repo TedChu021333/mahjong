@@ -341,7 +341,8 @@ def choose_mc_action_for_player(state: GameState, player: int, rng: Random | Non
     ranked = [tile for tile in ordered if level(tile) <= level(ordered[0])][:candidates]
     options = [Option(tile, False) for tile in ranked]
     options += [Option(tile, True) for tile in ranked
-                if Action(ActionType.DECLARE, tile=tile) in actions]
+                if Action(ActionType.DECLARE, tile=tile) in actions
+                and declare_is_worth(state, player, tile)]
     top = ranked[0]
     default = Option(top, Option(top, True) in options and declare_is_worth(state, player, top))
     best = default
