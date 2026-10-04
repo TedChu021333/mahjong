@@ -638,3 +638,9 @@ def test_chow_panel_is_not_a_missed_win(monkeypatch):
                   save_result=lambda frame, prefix="": saved.append(prefix) or prefix,
                   log=lambda *args, **kwargs: None)
     assert "未胡_" not in saved
+
+
+def test_unknown_screen_is_saved_once():
+    # 10/4 06:09 跳出升級畫面後停了 4 小時，沒有截圖可以做辨識
+    lines = run_unrecognised(FakeGameWindow(idle=3.0))
+    assert sum("認不出畫面" in line for line in lines) == 1

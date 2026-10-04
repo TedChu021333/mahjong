@@ -52,7 +52,8 @@ def test_end_of_round_buttons():
     # 打一圈結束：大結算「繼續戰鬥」，倒數結束後的「再玩一局」對話框
     expected = {"經典_大結算": "繼續戰鬥", "經典_再玩一局": "再玩一局",
                 "經典_再贏一局": "再贏一局", "經典_小結算": "小結算繼續", "經典_碰": None,
-                "經典_破產": "大結算", "經典_財產不足": "大結算", "經典_上訴": "大結算"}
+                "經典_破產": "大結算", "經典_財產不足": "大結算", "經典_上訴": "大結算",
+                "經典_小結算_通知": "小結算"}
     buttons = ContinueButtons.from_directory()
     for name, button in expected.items():
         path = TRAIN_DIR / f"{name}.png"
