@@ -58,3 +58,23 @@ def test_improvement_count_prefers_keeping_a_flexible_tile():
         return improvement_count(rest, 2, visible)
 
     assert after("4z") > after("6m")
+
+
+def test_grouped_shanten_matches_the_reference_search():
+    import random
+
+    from agent.shanten import _reference_standard_shanten, standard_shanten
+
+    rng = random.Random(7)
+    wall = [tile for tile in range(34) for _ in range(4)]
+    for trial in range(1500):
+        opens = rng.choice([0, 0, 1, 2, 3, 4, 5])
+        size = 16 - 3 * opens + rng.choice([0, 1])
+        # 一半的手牌集中在一種花色，才會出現多組順子、刻子交錯的難拆情況
+        pool = wall if trial % 2 else [t for t in wall if t // 9 == trial % 4 or rng.random() < 0.2]
+        counts = [0] * 34
+        for tile in rng.sample(pool, min(size, len(pool))):
+            counts[tile] += 1
+        if sum(counts) != size:
+            continue
+        assert standard_shanten(counts, opens) == _reference_standard_shanten(counts, opens), counts
