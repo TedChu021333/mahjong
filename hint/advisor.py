@@ -79,6 +79,9 @@ class Observation:
     exposed: tuple[tuple[int, ...], ...] = field(default=(), compare=False)
     """各家副露裡已知、又不在牌河的牌（座位同 discards）：自己吃碰用掉的手牌、推算出別家碰的
     那種牌另外兩張。用來扣掉看得到的牌（例如聽的牌其實已經被碰走）。"""
+    my_discards: int = field(default=0, compare=False)
+    """這局自己已打出幾張（提示迴圈由手牌變化數出）。牌河追蹤只記到約八成的出牌（10/5 分析 1436 局），
+    每位對手打過的張數至少算這麼多，聽牌率與牌牆剩餘才不會低估。"""
 
     @property
     def my_turn(self) -> bool:
@@ -192,8 +195,10 @@ START_DRAWABLE = 60
 
 
 def estimate_wall(observation: Observation) -> int:
-    """剩餘可摸張數 ≈ 60 − 總出牌數 + 吃碰次數（吃碰的人不摸牌）；補花讀不到，未扣。"""
-    discards = sum(len(tiles) for tiles in observation.discards)
+    """剩餘可摸張數 ≈ 60 − 總出牌數 + 吃碰次數（吃碰的人不摸牌）；補花讀不到，未扣。
+    牌河漏記的出牌以「自己打了幾張」補：每家至少算這麼多。"""
+    rivers = list(observation.discards) + [()] * (4 - len(observation.discards))
+    discards = sum(max(len(tiles), observation.my_discards) for tiles in rivers)
     claims = sum(observation.melds) + observation.meld_count
     return max(0, START_DRAWABLE - discards + claims)
 
@@ -219,7 +224,8 @@ def build_state(observation: Observation) -> GameState | None:
         else observation.dealer_streak
     common = dict(gold_tiles=observation.gold_tiles, declared=tuple(declared), dealer=dealer,
                   dealer_streak=streak,
-                  wall_remaining=estimate_wall(observation))
+                  wall_remaining=estimate_wall(observation),
+                  min_discards=observation.my_discards)
     if dealer is not None:
         common["seat_winds"] = seat_winds_for_dealer(dealer)  # 門風跟著莊家轉，莊家是東
     if observation.my_turn:
@@ -261,7 +267,7 @@ def describe(action: Action) -> str:
     return action.kind.value
 
 
-POLICIES = ("rule", "ev", "mc")
+POLICIES = ("rule", "ev", "mc", "nn")
 _policy = "rule"
 _pool = None
 _workers = 1
@@ -285,6 +291,17 @@ def use_worker_pool(pool, workers: int) -> None:
     """蒙地卡羅 AI 用多個子程序平行模擬（由提示模式的主程式建立，必須在 __main__ 之下）。"""
     global _pool, _workers
     _pool, _workers = pool, workers
+
+
+_network = None
+
+
+def use_network(path: str) -> None:
+    """學習型 AI 的權重（--ai nn；需要 PyTorch）。"""
+    from agent.nn_agent import NetworkPolicy
+
+    global _network
+    _network = NetworkPolicy.from_file(path)
 
 
 def use_policy(name: str) -> None:
@@ -337,6 +354,10 @@ def decide(observation: Observation, rng: Random | None = None) -> Action | None
                                            rollouts=_rollouts or LIVE_ROLLOUTS,
                                            time_limit=_time_limit or TIME_LIMIT,
                                            pool=_pool, workers=_workers)
+    if _policy == "nn":
+        if _network is None:
+            raise RuntimeError("--ai nn 需要先 use_network(權重檔)")
+        return _network(state, ME, rng or Random(0))
     if _policy == "ev":
         from agent.ev_agent import choose_ev_action_for_player
 

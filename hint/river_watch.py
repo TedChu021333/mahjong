@@ -68,6 +68,8 @@ class RiverWatch:
         self._credited: tuple[str, str, tuple[int, ...]] | None = None
         """最近一次推算：(被拿走牌的那家, 算給誰, 加進 exposed 的牌)；那張牌之後又回來就撤銷。"""
         self._last_circle: tuple[str, int] | None = None
+        self.my_discards = 0
+        """這局自己打出幾張（由手牌張數變化得知，不靠牌河；漏看輪到自己的畫面時會少算）。"""
 
     def new_hand(self) -> None:
         self.tracker.reset()
@@ -79,6 +81,7 @@ class RiverWatch:
         self._last_circle = None
         self._credited = None
         self._banner = None
+        self.my_discards = 0
 
     def update(self, frame: np.ndarray, observation: Observation) -> list[RiverEvent]:
         self._frame += 1
@@ -169,6 +172,7 @@ class RiverWatch:
         if observation.my_turn:
             self._turn_hand = observation.hand
         elif self._turn_hand is not None and len(observation.hand) == len(self._turn_hand) - 1:
+            self.my_discards += 1
             gone = Counter(self._turn_hand) - Counter(observation.hand)
             if sum(gone.values()) == 1:
                 self._labels["me"] = (next(iter(gone)), self._frame)

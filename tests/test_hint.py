@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from game.tiles import parse
@@ -216,6 +218,9 @@ def test_wall_is_estimated_from_discards_and_claims():
                         discards=(tuple(range(8)), tuple(range(9)), tuple(range(9)), tuple(range(9))),
                         melds=(0, 1, 0, 1))
     assert estimate_wall(later) == 60 - 35 + 2
+    # 牌河漏記：自己已打 10 手，每家至少算 10 張；對手聽牌率也照 10 張查
+    missed = replace(later, my_discards=10)
+    assert estimate_wall(missed) == 60 - 40 + 2 and build_state(missed).min_discards == 10
 
 
 def test_added_kong_when_the_kong_button_is_lit():
@@ -494,6 +499,8 @@ def test_loop_saves_frames_from_before_a_claim(monkeypatch):
             yield str(i), observation
 
     class FakeRivers:
+        my_discards = 0
+
         def update(self, frame, observation):
             return [RiverEvent("claimed", "left", parse("7s")[0], (0, 0, 1, 1))] \
                 if frame is hands[6] else []

@@ -220,3 +220,15 @@ def test_frame_is_passed_to_the_banner_reader(monkeypatch):
     watch.update("frame", waiting())
     watch.update(None, waiting())  # 沒有畫面（測試）就不讀
     assert seen == ["frame"]
+
+
+def test_own_discards_are_counted_from_the_hand_even_when_the_river_misses_them():
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    turn = Observation(tuple(parse("11223789m99m4p56779s9p")), None, None, ())
+    for _ in range(2):
+        watch.update(None, turn)
+        watch.update(None, waiting())  # 少一張：打出去了（牌河沒讀到）
+    assert watch.my_discards == 2 and watch.discards()[0] == ()
+    watch.new_hand()
+    assert watch.my_discards == 0

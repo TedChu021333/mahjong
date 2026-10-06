@@ -359,7 +359,7 @@ def opponent_threat_score(state: GameState, observer: int, opponent: int,
         score = 2
     else:
         score = 0
-    if meld_count and len(opponent_state.discards) >= 6:
+    if meld_count and max(len(opponent_state.discards), state.min_discards) >= 6:
         score += 1
     return min(score, 5)
 

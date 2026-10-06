@@ -138,6 +138,9 @@ class GameState:
     """是否在第一次打牌時就宣告聽牌（地聽）。"""
     swap_players: list[int] = field(default_factory=list)
     """換三張階段還沒決定的玩家（依序）。"""
+    min_discards: int = 0
+    """實戰中每位對手至少打過幾張（由自己打了幾手推算）：牌河追蹤只記到約八成的出牌，
+    對手模型查聽牌率時取它與牌河張數較大者。模擬器裡牌河完整，維持 0。"""
 
     def __post_init__(self) -> None:
         if len(self.players) != 4:

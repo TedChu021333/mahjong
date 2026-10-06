@@ -86,3 +86,17 @@ def test_sparse_late_buckets_borrow_from_earlier_ones():
     assert cal.tenpai_probability(20, 0) > 0.4
     assert 0 < cal.undeclared_tenpai_probability(20, 0, 0.4) < cal.tenpai_probability(20, 0)
     assert cal.undeclared_tenpai_probability(20, 0, 0.0) == 0
+
+
+def test_missed_river_tiles_are_made_up_by_min_discards():
+    # 實戰牌河只記到約八成：對手牌河記到 0 張，但自己已打 10 手，聽牌率要照 10 張查
+    late = Calibration(
+        tenpai={(d, m): (500 if d >= 8 else 0, 1000) for d in range(16) for m in range(6)},
+        offense={}, tai={(False, False): (4.0, 100), (True, False): (5.0, 100)},
+        discard_buckets=16, wall_bucket=8, outs_buckets=(0, 4, 8, 12, 16, 24, 32))
+    state = table()
+    assert estimate_danger(state, 0, [P("5p")], Random(0), late, 100,
+                           undeclared_share=1.0).probability[P("5p")] == 0
+    state.min_discards = 10
+    assert estimate_danger(state, 0, [P("5p")], Random(0), late, 100,
+                           undeclared_share=1.0).probability[P("5p")] > 0.02

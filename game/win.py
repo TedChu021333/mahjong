@@ -16,7 +16,7 @@ NUM_MELDS = 5
 Meld = tuple[str, int]  # ("pung", 起始牌) 或 ("chow", 起始牌)
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=200_000)  # 不設上限時放槍分析抽樣幾小時用到 20GB
 def _meld_decompositions(counts: tuple[int, ...]) -> tuple[tuple[Meld, ...], ...]:
     """把計數陣列完全拆成面子的所有方法；拆不完則回傳空 tuple"""
     i = next((k for k, c in enumerate(counts) if c), None)

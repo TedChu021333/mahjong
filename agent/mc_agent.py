@@ -23,6 +23,7 @@ from agent.opponent_model import (
     UNDECLARED_TENPAI_SHARE,
     Calibration,
     default_calibration,
+    discard_count,
     sample_tenpai_hand,
     unseen_counts,
 )
@@ -73,7 +74,7 @@ def determinize(state: GameState, player: int, rng: Random, calibration: Calibra
         size = max(1, 16 - 3 * len(other.melds))
         declared = state.declared[opponent]
         tenpai = declared or rng.random() < calibration.undeclared_tenpai_probability(
-            len(other.discards), len(other.melds), undeclared_share)
+            discard_count(state, opponent), len(other.melds), undeclared_share)
         hand = None
         if tenpai:
             sampled = sample_tenpai_hand(pool, len(other.melds), rng,

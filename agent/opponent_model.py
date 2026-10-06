@@ -36,8 +36,9 @@ UNDECLARED_TENPAI_SHARE = 0.5
 54% 是放給沒宣告的人。原本粗估 0.4。"""
 SEQUENCE_SHARE = 0.7
 """組面子時順子的比例（其餘為刻子）。"""
-TANKI_SHARE = 0.2
-"""聽牌型態中單騎的比例（其餘為對子 + 搭子）。"""
+TANKI_SHARE = 0.05
+"""聽牌型態中單騎的比例（其餘為對子 + 搭子）。原本 0.2；10/5 從結算畫面讀 109 次放槍時胡牌者的聽法：
+兩面 63、雙碰 30、嵌張 8、邊張 6、單吊 2（eval.deal_in）。"""
 
 
 @dataclass(frozen=True, eq=False)
@@ -132,6 +133,11 @@ def default_calibration() -> Calibration:
     return Calibration.load()
 
 
+def discard_count(state: GameState, player: int) -> int:
+    """查聽牌率用的「打過幾張」：實戰牌河追蹤漏記約兩成，至少算 state.min_discards 張。"""
+    return max(len(state.players[player].discards), state.min_discards)
+
+
 def unseen_counts(state: GameState, player: int) -> list[int]:
     """player 看不到的每種牌還有幾張（4 減去自己手牌、各家牌河、已知副露）。"""
     seen = list(state.players[player].hand)
@@ -214,6 +220,8 @@ class Danger:
     """打出這張牌放槍的機率。"""
     expected_loss: dict[int, float]
     """打出這張牌因放槍預期要付的台數。"""
+    by_opponent: dict[int, dict[int, float]] | None = None
+    """對手座位 → 每張牌放槍給他的機率（事後分析放槍用）。"""
 
 
 GOLD_WIN_TAI = 3
@@ -230,12 +238,13 @@ def estimate_danger(state: GameState, player: int, candidates: Sequence[int],
     gold = set(state.gold_tiles)
     safe_probability = {tile: 1.0 for tile in candidates}
     loss = {tile: 0.0 for tile in candidates}
+    by_opponent = {}
     for opponent, other in enumerate(state.players):
         if opponent == player:
             continue
         declared = state.declared[opponent]
         p_tenpai = 1.0 if declared else calibration.undeclared_tenpai_probability(
-            len(other.discards), len(other.melds), undeclared_share)
+            discard_count(state, opponent), len(other.melds), undeclared_share)
         if p_tenpai < 0.02:
             continue
         forbidden = set(other.discards) if declared else set()
@@ -253,8 +262,10 @@ def estimate_danger(state: GameState, player: int, candidates: Sequence[int],
         if state.known_dealer in (opponent, player):
             # 放槍給莊家、或自己是莊家放槍：多付莊家台與連莊台（論文 TaKe：只防莊家反而總分最高）
             per_loss += TAI["莊家"] + 2 * state.dealer_streak
+        by_opponent[opponent] = {}
         for tile in candidates:
             risk = p_tenpai * hits[tile] / valid
+            by_opponent[opponent][tile] = risk
             safe_probability[tile] *= 1 - risk
             loss[tile] += risk * (per_loss + (GOLD_WIN_TAI if tile in gold else 0))
-    return Danger({tile: 1 - p for tile, p in safe_probability.items()}, loss)
+    return Danger({tile: 1 - p for tile, p in safe_probability.items()}, loss, by_opponent)

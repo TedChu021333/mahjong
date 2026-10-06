@@ -37,6 +37,7 @@ from hint.advisor import (
     describe,
     hand_after_claim,
     observe,
+    use_network,
     use_policy,
 )
 from hint.river_watch import RiverWatch
@@ -123,7 +124,13 @@ def hand_text(observation) -> str:
         text += "，金牌 " + "".join(tile_name(tile) for tile in observation.gold_tiles)
     if observation.buttons:
         text += "，按鈕 " + "、".join(sorted(observation.buttons))
+    if observation.declared:
+        # 事後分析放槍用：放給已宣告者的牌，要知道 AI 當下有沒有認到宣告（eval.deal_in）
+        text += "，宣告 " + "、".join(DECLARED_NAMES[seat] for seat in sorted(observation.declared))
     return text
+
+
+DECLARED_NAMES = {"left": "上家", "top": "對家", "right": "下家"}
 
 
 def screen_frames(interval: float) -> Iterator[tuple[str, np.ndarray]]:
@@ -240,7 +247,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             if rivers is not None and observation is not None:
                 observation = replace(observation, discards=rivers.discards(),
                                       melds=rivers.meld_counts(),
-                                      exposed=rivers.exposed_tiles())
+                                      exposed=rivers.exposed_tiles(),
+                                      my_discards=rivers.my_discards)
             if observation is not None:
                 game_seen_at = last_readable = clock()
                 if observation.dealer_streak is None and not streak_reported:
@@ -397,7 +405,9 @@ def main() -> None:
     parser.add_argument("--no-overlay", action="store_true", help="不顯示浮動小視窗")
     parser.add_argument("--ai", choices=POLICIES, default="rule",
                         help="打牌 AI：rule 規則式（預設）、ev 期望值打牌（估計放槍風險）、"
-                             "mc 蒙地卡羅（模擬比較，每步約 2 秒）")
+                             "mc 蒙地卡羅（模擬比較，每步約 2 秒）、nn 學習型（需要 PyTorch，"
+                             "用 .venv-train/Scripts/python 執行）")
+    parser.add_argument("--model", default="models/rl.pt", help="--ai nn 用的網路權重")
     parser.add_argument("--workers", type=int, default=4,
                         help="蒙地卡羅平行模擬的程序數（預設 4；之前用 CPU 核心數 − 2＝14 個，"
                              "每手出牌時整台電腦滿載，10/3 出牌點了沒反應 34 次）")
@@ -407,6 +417,8 @@ def main() -> None:
                         help="只展示小視窗外觀（可拖曳調整位置），不辨識畫面")
     args = parser.parse_args()
     use_policy(args.ai)
+    if args.ai == "nn":
+        use_network(args.model)
     if args.ai == "mc":
         import os
         from multiprocessing import Pool
@@ -465,6 +477,9 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
     popups = PopupClosers.from_directory()
     log = GameLog()
     print(f"記錄檔：{log.path}", flush=True)
+    from hint import advisor
+
+    log(f"[{time.strftime('%H:%M:%S')}] {mode}啟動，AI {advisor._policy}", echo=False)
     rivers = RiverWatch(RiverReader.from_directory())
     game_window = None
     if auto:
