@@ -93,6 +93,9 @@ UNKNOWN_SCREEN_SECONDS = 15.0
 STUCK_SHOTS = 2
 STUCK_SHOT_INTERVAL = 0.5
 """卡住時除了當下那張，再每 0.5 秒多存 2 張（查 10/3 出牌點了沒反應 34 次的原因）。"""
+DECLARE_SHOTS = 300
+"""每次執行最多存幾張「宣告_」截圖：對家、下家的「聽」標記位置是猜的大範圍，10/6 曾兩次把下家
+認成對家（或反過來），收集實際畫面後再把 DECLARE_REGIONS 縮小分開。"""
 SAVE_CLAIM_FRAMES = False
 """收集吃碰動畫截圖（10/2 一天存了 1116 張、2.7GB，夠用了，預設關閉）。"""
 
@@ -192,6 +195,9 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     focus_tried_at = float("-inf")
     unknown_saved_for = None
     """已經存過「不明畫面」截圖的那段期間（以 game_seen_at 區分）。"""
+    declared_seen: frozenset[str] = frozenset()
+    """目前這局認到的宣告者；有新增時存截圖（DECLARE_SHOTS），用來量對家、下家「聽」標記的位置。"""
+    declare_shots = 0
     stuck_shots_left, stuck_shot_at = 0, float("-inf")
     """卡住後還要存幾張後續截圖（每 STUCK_SHOT_INTERVAL 秒一張），看點擊後畫面怎麼變。"""
     for stamp, frame in frames:
@@ -251,6 +257,13 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                                       my_discards=rivers.my_discards)
             if observation is not None:
                 game_seen_at = last_readable = clock()
+                new_declared = observation.declared - declared_seen
+                if new_declared and declare_shots < DECLARE_SHOTS:
+                    declare_shots += 1
+                    names = "".join(DECLARED_NAMES[seat] for seat in sorted(new_declared))
+                    log(f"[{stamp}] 認到{names}宣告，截圖存到 {save_result(frame, f'宣告_{names}_')}",
+                        echo=False)
+                declared_seen = observation.declared
                 if observation.dealer_streak is None and not streak_reported:
                     streak_reported = True  # 每次執行只存一張，補模板用
                     log(f"[{stamp}] 認不出連莊數（先當 {STREAK_UNKNOWN_GUESS}），截圖存到 "

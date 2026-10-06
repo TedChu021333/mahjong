@@ -139,6 +139,22 @@ def test_loop_saves_a_screenshot_when_win_is_lit_but_not_chosen(monkeypatch):
     assert "手牌 一萬一萬二萬" in lines[0][1] and "win" in lines[0][1]
 
 
+def test_loop_saves_a_screenshot_when_someone_new_declares(monkeypatch):
+    import hint.__main__ as hint_main
+
+    hand = T("11223789m99m4p56779s")
+    sequence = [frozenset(), frozenset({"top"}), frozenset({"top"}), frozenset({"top", "right"}),
+                frozenset(), frozenset({"top"})]  # 第 5 幀起是新的一局
+    frames = iter(Observation(hand, None, None, (), declared=seats) for seats in sequence)
+    monkeypatch.setattr(hint_main, "decide", lambda observation: None)
+    saved = []
+    hint_main.run(((str(i), "frame") for i in range(len(sequence))), readers=None,
+                  observe_fn=lambda frame, readers: next(frames),
+                  save_result=lambda frame, prefix="": saved.append(prefix) or "x.png",
+                  log=lambda line, detail=None, echo=True: None)
+    assert saved == ["宣告_對家_", "宣告_下家_", "宣告_對家_"]
+
+
 def test_game_log_writes_detail_to_file(tmp_path):
     from hint.__main__ import GameLog
 
