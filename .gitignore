@@ -5,3 +5,6 @@ __pycache__/
 .pytest_cache/
 hint/overlay_position.txt
 result/
+.venv-train/
+models/
+training/data/

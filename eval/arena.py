@@ -29,7 +29,7 @@ import argparse
 import csv
 import time
 from dataclasses import dataclass
-from functools import partial
+from functools import lru_cache, partial
 from multiprocessing import Pool
 from pathlib import Path
 from random import Random
@@ -80,7 +80,17 @@ def make_policy(spec: str) -> PlayerPolicy:
         return _no_declare_policy
     if name == "fold" and arg:
         return partial(_fold_policy, shanten=int(arg))
+    if name == "nn" and arg:
+        return _network_policy(arg)
     raise ValueError(f"未知的策略代號：{spec}")
+
+
+@lru_cache(maxsize=4)
+def _network_policy(path: str) -> PlayerPolicy:
+    """學習型 AI（需要 PyTorch）；每個程序只載入一次。"""
+    from agent.nn_agent import NetworkPolicy
+
+    return NetworkPolicy.from_file(path)
 
 
 def _mc_claim_policy(state, player, rng, rollouts):
