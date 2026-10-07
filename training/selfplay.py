@@ -157,7 +157,7 @@ def collect(batcher: Batcher, games: int, first_seed: int, rule_share: float,
 
 def ppo_update(model: MahjongNet, optimizer, records: list[GameRecord], device: str,
                epochs: int = 3, batch_size: int = 1024, clip: float = 0.2,
-               value_weight: float = 0.5, entropy_weight: float = 0.01) -> dict[str, float]:
+               value_weight: float = 0.5, entropy_weight: float = 0.0) -> dict[str, float]:
     obs, masks, actions, old_logprobs, returns, advantages = [], [], [], [], [], []
     for record in records:
         for seat, steps in record.steps.items():
@@ -207,6 +207,47 @@ def ppo_update(model: MahjongNet, optimizer, records: list[GameRecord], device: 
     model.eval()
     batches = max(1, stats.pop("batches"))
     return {key: value / batches for key, value in stats.items()}
+
+
+def win_gap(records: list[GameRecord]) -> float:
+    """網路座位胡牌率 − 規則式座位胡牌率（沒有規則式座位時為網路胡牌率）。"""
+    seats = sum(len(record.learners) for record in records)
+    rule_seats = sum(4 - len(record.learners) for record in records)
+    wins = sum(record.winner in record.learners for record in records) / max(1, seats)
+    rule_wins = sum(record.winner is not None and record.winner not in record.learners
+                    for record in records) / max(1, rule_seats)
+    return wins - rule_wins if rule_seats else wins
+
+
+class Guard:
+    """訓練變差就停：10/7 熵權重 0.01 讓網路越練越隨機（熵 0.3 → 1.0、胡牌率 23% → 17%）。
+    每 WINDOW 輪比較一次：熵比第一個區間高 ENTROPY_DRIFT 以上，或網路對規則式的胡牌率差距
+    比第一個區間掉 GAP_DROP 以上，就停止。"""
+    WINDOW = 50
+    ENTROPY_DRIFT = 0.15
+    GAP_DROP = 0.02
+
+    def __init__(self) -> None:
+        self.entropy: list[float] = []
+        self.gap: list[float] = []
+        self.baseline: tuple[float, float] | None = None
+
+    def update(self, entropy: float, gap: float) -> str | None:
+        self.entropy.append(entropy)
+        self.gap.append(gap)
+        if len(self.entropy) < self.WINDOW:
+            return None
+        window = (float(np.mean(self.entropy)), float(np.mean(self.gap)))
+        self.entropy.clear()
+        self.gap.clear()
+        if self.baseline is None:
+            self.baseline = window
+            return None
+        if window[0] - self.baseline[0] > self.ENTROPY_DRIFT:
+            return f"熵 {self.baseline[0]:.2f} → {window[0]:.2f}，網路越來越隨機"
+        if self.baseline[1] - window[1] > self.GAP_DROP:
+            return f"胡牌率差距 {self.baseline[1]:+.1%} → {window[1]:+.1%}，網路變弱"
+        return None
 
 
 def summarize(records: list[GameRecord]) -> str:
@@ -279,7 +320,9 @@ def main() -> None:
     parser.add_argument("--iterations", type=int, default=100)
     parser.add_argument("--games", type=int, default=512, help="每輪打幾局")
     parser.add_argument("--rule-share", type=float, default=0.5, help="每個座位換成規則式 AI 的機率")
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=3e-5)
+    parser.add_argument("--entropy", type=float, default=0.0,
+                        help="熵獎勵權重（10/7 用 0.01 讓網路越練越隨機，預設不加）")
     parser.add_argument("--hours", type=float, default=0, help="最多跑幾小時（0 = 不限）")
     parser.add_argument("--seed", type=int, default=1_000_000)
     parser.add_argument("--actors", type=int, default=1,
@@ -298,6 +341,7 @@ def main() -> None:
 
         pool = multiprocessing.get_context("spawn").Pool(
             args.actors, initializer=_actor_init, initargs=(model.config, device))
+    guard = Guard()
     for iteration in range(1, args.iterations + 1):
         tick = time.time()
         if pool is not None:
@@ -308,13 +352,18 @@ def main() -> None:
             batcher.close()
         seed += args.games
         played = time.time() - tick
-        stats = ppo_update(model, optimizer, records, device)
+        stats = ppo_update(model, optimizer, records, device, entropy_weight=args.entropy)
         save(model, args.out, iteration=iteration, seed=seed)
         if iteration % 10 == 0:
             save(model, args.out.with_name(f"{args.out.stem}_{iteration:04d}.pt"), iteration=iteration)
         print(f"第 {iteration} 輪：{summarize(records)}；對打 {played:.0f} 秒"
               f"（{args.games / played:.1f} 局/秒）、更新 {time.time() - tick - played:.0f} 秒；"
               + "、".join(f"{k} {v:.3f}" for k, v in stats.items()), flush=True)
+        reason = guard.update(stats.get("entropy", 0.0), win_gap(records))
+        if reason:
+            print(f"自動停止：{reason}（最後幾個存檔可能已變差，用較早的 {args.out.stem}_XXXX.pt）",
+                  flush=True)
+            break
         if args.hours and time.time() - started > args.hours * 3600:
             break
 

@@ -138,3 +138,17 @@ def test_parallel_actors_collect_the_requested_games():
     with multiprocessing.get_context("spawn").Pool(2, _actor_init, (model.config, "cpu")) as pool:
         records = collect_parallel(pool, model, 2, 3, 0, 0.5)
     assert len(records) == 3
+
+
+def test_guard_stops_when_the_policy_drifts_random_or_weaker():
+    pytest.importorskip("torch")
+    from training.selfplay import Guard
+
+    guard = Guard()
+    assert all(guard.update(0.3, -0.02) is None for _ in range(2 * Guard.WINDOW))
+    assert all(guard.update(0.6, -0.02) is None for _ in range(Guard.WINDOW - 1))
+    assert "熵" in guard.update(0.6, -0.02)
+    weaker = Guard()
+    for _ in range(Guard.WINDOW):
+        weaker.update(0.3, -0.02)
+    assert [weaker.update(0.3, -0.08) for _ in range(Guard.WINDOW)][-1].startswith("胡牌率")
