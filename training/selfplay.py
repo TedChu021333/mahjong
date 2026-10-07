@@ -226,6 +226,18 @@ def summarize(records: list[GameRecord]) -> str:
     return text
 
 
+def keep_awake() -> None:
+    """訓練期間不讓 Windows 進入睡眠（10/7 凌晨 03:16 睡著、07:57 才醒，4 小時只跑了 72 輪）。
+    只對這個程序有效，程式結束就恢復，不改電源設定。"""
+    try:
+        import ctypes
+
+        es_continuous, es_system_required = 0x80000000, 0x00000001
+        ctypes.windll.kernel32.SetThreadExecutionState(es_continuous | es_system_required)
+    except (AttributeError, OSError):
+        pass  # 非 Windows
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="強化學習自我對打（PPO）")
     parser.add_argument("--init", type=Path, help="起始權重（監督學習的結果）")
@@ -237,6 +249,7 @@ def main() -> None:
     parser.add_argument("--hours", type=float, default=0, help="最多跑幾小時（0 = 不限）")
     parser.add_argument("--seed", type=int, default=1_000_000)
     args = parser.parse_args()
+    keep_awake()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = load(args.init, device) if args.init else MahjongNet().to(device).eval()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)

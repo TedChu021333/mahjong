@@ -82,6 +82,12 @@ def play_chunk(args: tuple[str, int, int, str, Noise]) -> tuple[str, int, int]:
 
 
 def main() -> None:
+    try:  # 不讓電腦睡眠（見 training.selfplay.keep_awake；這裡不載入 PyTorch）
+        import ctypes
+
+        ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)
+    except (AttributeError, OSError):
+        pass
     parser = argparse.ArgumentParser(description="產生監督學習資料")
     parser.add_argument("--games", type=int, default=2000)
     parser.add_argument("--workers", type=int, default=2)

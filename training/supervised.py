@@ -87,6 +87,9 @@ def train(files: list[Path], out: Path, epochs: int, batch_size: int, lr: float,
 
 
 def main() -> None:
+    from training.selfplay import keep_awake
+
+    keep_awake()
     parser = argparse.ArgumentParser(description="監督學習：模仿老師 AI")
     parser.add_argument("--data", default="training/data/rule", help="資料檔前綴")
     parser.add_argument("--out", type=Path, default=Path("models/sl_rule.pt"))
