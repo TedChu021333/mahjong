@@ -226,6 +226,40 @@ def summarize(records: list[GameRecord]) -> str:
     return text
 
 
+_actor_model: MahjongNet | None = None
+_actor_device = "cpu"
+
+
+def _actor_init(config: dict, device: str) -> None:
+    """對打程序啟動時建立自己的網路（每個程序各自用 GPU 推論）。"""
+    global _actor_model, _actor_device
+    torch.set_num_threads(1)
+    _actor_device = device
+    _actor_model = MahjongNet(**config).to(device).eval()
+
+
+def _actor_collect(task: tuple[dict, int, int, float]) -> list[GameRecord]:
+    state, first_seed, games, rule_share = task
+    _actor_model.load_state_dict(state)
+    batcher = Batcher(_actor_model, _actor_device)
+    try:
+        return collect(batcher, games, first_seed, rule_share, LIVE_NOISE)
+    finally:
+        batcher.close()
+
+
+def collect_parallel(pool, model: MahjongNet, actors: int, games: int, first_seed: int,
+                     rule_share: float) -> list[GameRecord]:
+    """把這輪的局數平均分給各對打程序，權重以 CPU 張量傳過去。"""
+    state = {key: value.detach().cpu() for key, value in model.state_dict().items()}
+    share = [games // actors + (1 if index < games % actors else 0) for index in range(actors)]
+    tasks, seed = [], first_seed
+    for count in share:
+        tasks.append((state, seed, count, rule_share))
+        seed += count
+    return [record for part in pool.map(_actor_collect, tasks) for record in part]
+
+
 def keep_awake() -> None:
     """訓練期間不讓 Windows 進入睡眠（10/7 凌晨 03:16 睡著、07:57 才醒，4 小時只跑了 72 輪）。
     只對這個程序有效，程式結束就恢復，不改電源設定。"""
@@ -248,6 +282,8 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--hours", type=float, default=0, help="最多跑幾小時（0 = 不限）")
     parser.add_argument("--seed", type=int, default=1_000_000)
+    parser.add_argument("--actors", type=int, default=1,
+                        help="對打程序數（每個約佔一顆 CPU 核心；1 = 在主程序裡打）")
     args = parser.parse_args()
     keep_awake()
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -256,11 +292,20 @@ def main() -> None:
     started = time.time()
     seed = args.seed
     args.out.parent.mkdir(parents=True, exist_ok=True)
+    pool = None
+    if args.actors > 1:
+        import multiprocessing
+
+        pool = multiprocessing.get_context("spawn").Pool(
+            args.actors, initializer=_actor_init, initargs=(model.config, device))
     for iteration in range(1, args.iterations + 1):
         tick = time.time()
-        batcher = Batcher(model, device)
-        records = collect(batcher, args.games, seed, args.rule_share, LIVE_NOISE)
-        batcher.close()
+        if pool is not None:
+            records = collect_parallel(pool, model, args.actors, args.games, seed, args.rule_share)
+        else:
+            batcher = Batcher(model, device)
+            records = collect(batcher, args.games, seed, args.rule_share, LIVE_NOISE)
+            batcher.close()
         seed += args.games
         played = time.time() - tick
         stats = ppo_update(model, optimizer, records, device)

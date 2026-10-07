@@ -125,3 +125,16 @@ def test_hint_mode_can_use_the_network(tmp_path):
         assert action.kind in (ActionType.DISCARD, ActionType.DECLARE) and action.tile in hand
     finally:
         advisor.use_policy("rule")
+
+
+def test_parallel_actors_collect_the_requested_games():
+    pytest.importorskip("torch")
+    import multiprocessing
+
+    from training.model import MahjongNet
+    from training.selfplay import _actor_init, collect_parallel
+
+    model = MahjongNet(width=16, blocks=1)
+    with multiprocessing.get_context("spawn").Pool(2, _actor_init, (model.config, "cpu")) as pool:
+        records = collect_parallel(pool, model, 2, 3, 0, 0.5)
+    assert len(records) == 3
