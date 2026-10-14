@@ -229,3 +229,15 @@ def test_concealed_kong_backs_are_not_hand_tiles():
     reading = read_hand(read_image(TRAIN_DIR / "經典_暗槓.png"),
                         TileClassifier.from_directory(TEMPLATE_DIR))
     assert reading.known_tiles() == tuple(parse("22367m267p278s33z"))
+
+
+@pytest.mark.skipif(
+    not (TRAIN_DIR / "經典_多組槓.png").exists() or not TEMPLATE_DIR.exists(),
+    reason="缺少訓練截圖或模板",
+)
+def test_single_tile_hand_beside_concealed_kong_backs():
+    # 10/15：五組副露（含四筒明槓、一筒暗槓）只剩一張五筒單吊；暗槓的三格牌背比暗手長，
+    # 曾被當成暗手牌（再當牌背去掉），結果整手讀不到
+    reading = read_hand(read_image(TRAIN_DIR / "經典_多組槓.png"),
+                        TileClassifier.from_directory(TEMPLATE_DIR))
+    assert reading.known_tiles() == tuple(parse("5p"))

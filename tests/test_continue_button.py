@@ -61,3 +61,18 @@ def test_end_of_round_buttons():
             pytest.skip("缺少訓練截圖或按鈕參考圖")
         found = buttons.find(read_image(path))
         assert (found.name if found else None) == button, name
+
+
+@pytest.mark.skipif(
+    not (TRAIN_DIR / "經典_社團彈窗.png").exists()
+    or not (TRAIN_DIR / "buttons" / "閃耀卡社團.png").exists(),
+    reason="缺少訓練截圖或參考圖",
+)
+def test_shining_card_club_popup_is_closed_with_the_red_x():
+    # 10/15「閃耀卡社團換卡片、領i幣」廣告：按右上角紅色 X，不按「加入社團」；一般牌桌不誤認
+    from perception.continue_button import PopupClosers
+
+    closers = PopupClosers.from_directory()
+    found = closers.find(read_image(TRAIN_DIR / "經典_社團彈窗.png"))
+    assert found is not None and found.name == "閃耀卡社團" and found.center == (1560, 165)
+    assert closers.find(read_image(TRAIN_DIR / "經典_多組槓.png")) is None

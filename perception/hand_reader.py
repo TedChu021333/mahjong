@@ -102,16 +102,23 @@ def locate_hand_tiles(image: np.ndarray) -> list[Box]:
     cells = [_cell_box(index) for index in reversed(range(MAX_HAND_TILES))]
     cells = [_shift_up(box, _raise_offset(image, box)) for box in cells]
     found = [_is_tile_face(image, box) for box in cells]
-    # 暗手牌一定佔連續的格子；槓子第 4 張疊在副露中間會單獨被偵測到，
-    # 所以只保留最長的連續段（同長取右邊）。
+    # 暗手牌一定佔連續的格子，從第 3n 格（n 為副露組數）一路排到最右格；槓子第 4 張疊在副露中間、
+    # 暗槓的淺灰牌背也會被偵測到。接到最右格、起點是 3 的倍數的那一段就是暗手（5 組副露時暗手只剩
+    # 1 張，比暗槓牌背的 3 格還短，實戰 10/15 `train/經典_多組槓.png`）；不符合時（中間有牌被遮住）
+    # 退回取最長的連續段（同長取右邊）。
     best_start, best_length, start = 0, 0, None
+    tail = None
     for index, hit in enumerate(found + [False]):
         if hit and start is None:
             start = index
         elif not hit and start is not None:
             if index - start >= best_length:
                 best_start, best_length = start, index - start
+            if index == len(found) and start % 3 == 0:
+                tail = (start, index - start)
             start = None
+    if tail is not None:
+        best_start, best_length = tail
     boxes = cells[best_start:best_start + best_length]
     drawn = _shift_up(drawn_tile_box(), _raise_offset(image, drawn_tile_box()))
     if _is_tile_face(image, drawn):
