@@ -76,3 +76,16 @@ def test_shining_card_club_popup_is_closed_with_the_red_x():
     found = closers.find(read_image(TRAIN_DIR / "經典_社團彈窗.png"))
     assert found is not None and found.name == "閃耀卡社團" and found.center == (1560, 165)
     assert closers.find(read_image(TRAIN_DIR / "經典_多組槓.png")) is None
+
+
+@pytest.mark.skipif(
+    not (TRAIN_DIR / "經典_升級.png").exists()
+    or not (TRAIN_DIR / "buttons" / "恭喜升級.png").exists(),
+    reason="缺少訓練截圖或參考圖",
+)
+def test_level_up_popup_is_confirmed():
+    # 升級畫面蓋在大結算上；沒按「確認」時每圈結束都會再跳一次（10/15 一天 40 次「提升至 21 級」）
+    from perception.continue_button import PopupClosers
+
+    found = PopupClosers.from_directory().find(read_image(TRAIN_DIR / "經典_升級.png"))
+    assert found is not None and found.name == "恭喜升級" and found.center == (915, 955)
