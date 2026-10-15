@@ -1,0 +1,44 @@
+{
+  // Ctrl+Shift+P →「Tasks: Run Task」（或選單「終端機」→「執行工作」）選一個來跑；程式在下方終端機面板執行，
+  // 自動模式啟動時在面板裡輸入 y 確認。要停止：在面板按 Ctrl+C，或滑鼠甩到螢幕左上角。
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "麻將：自動模式（訓練場）",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv-train/Scripts/python.exe",
+      "args": ["-m", "hint", "--auto", "--ai", "nn", "--model", "models/rl3_0960.pt"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8" } },
+      "presentation": { "panel": "dedicated", "focus": true, "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "麻將：自動模式＋前期先丟字牌（訓練場）",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv-train/Scripts/python.exe",
+      "args": ["-m", "hint", "--auto", "--ai", "nn", "--model", "models/rl3_0960.pt",
+               "--efficiency-turns", "6"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8" } },
+      "presentation": { "panel": "dedicated", "focus": true, "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "麻將：提示模式（真人場，不自動點擊）",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv-train/Scripts/python.exe",
+      "args": ["-m", "hint", "--ai", "nn", "--model", "models/rl3_0960.pt"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8" } },
+      "presentation": { "panel": "dedicated", "focus": true, "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "麻將：今天戰績",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv-train/Scripts/python.exe",
+      "args": ["-m", "eval.stats"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8" } },
+      "presentation": { "panel": "dedicated", "focus": true, "clear": true },
+      "problemMatcher": []
+    }
+  ]
+}
