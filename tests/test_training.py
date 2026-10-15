@@ -152,3 +152,19 @@ def test_guard_stops_when_the_policy_drifts_random_or_weaker():
     for _ in range(Guard.WINDOW):
         weaker.update(0.3, -0.02)
     assert [weaker.update(0.3, -0.08) for _ in range(Guard.WINDOW)][-1].startswith("胡牌率")
+
+
+def test_league_opponents_take_seats_but_are_not_trained():
+    pytest.importorskip("torch")
+    from training.model import MahjongNet
+    from training.selfplay import Batcher, collect
+
+    learner = Batcher(MahjongNet(width=16, blocks=1).eval(), "cpu", max_batch=4)
+    past = Batcher(MahjongNet(width=16, blocks=1).eval(), "cpu", max_batch=4)
+    records = collect(learner, 4, 0, 0.0, Noise(), past, pool_share=0.6)
+    learner.close()
+    past.close()
+    pool_seats = [seat for record in records for seat in range(4)
+                  if seat not in record.learners and seat not in record.rule_seats]
+    assert pool_seats and all(not record.rule_seats for record in records)
+    assert all(set(record.steps) == set(record.learners) for record in records)

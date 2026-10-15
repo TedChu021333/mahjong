@@ -28,6 +28,7 @@ from training.actions import legal_mask
 from training.encoding import LIVE_NOISE, Noise, encode
 from training.model import VALUE_SCALE, MahjongNet, load, masked_logits, save
 
+LEAGUE_SIZE = 6
 GAMES_IN_FLIGHT = 32
 """同時開幾局（每局一條執行緒）：實測 8 → 7 局/秒、16 → 18、32 → 22（GIL 限制，再多沒幫助）。"""
 BATCH_WAIT = 0.002
@@ -100,16 +101,33 @@ class GameRecord:
     reward: dict[int, float] = field(default_factory=dict)
     winner: int | None = None
     discarder: int | None = None
+    rule_seats: list[int] = field(default_factory=list)
+    """規則式 AI 的座位（其餘非網路座位是對手池裡過去的自己）。"""
 
 
-def play_one(seed: int, batcher: Batcher, rule_share: float, noise: Noise) -> GameRecord:
+def play_one(seed: int, batcher: Batcher, rule_share: float, noise: Noise,
+             opponent: Batcher | None = None, pool_share: float = 0.0) -> GameRecord:
+    """每個座位依機率當規則式（rule_share）、對手池裡過去的自己（pool_share，需要 opponent）或
+    正在訓練的網路；至少一個座位是網路，只有它的決定拿來訓練。"""
     rng = Random(seed)
-    learners = [seat for seat in range(4) if rng.random() >= rule_share] or [rng.randrange(4)]
-    record = GameRecord(learners, {seat: [] for seat in learners})
+    roles = []
+    for _ in range(4):
+        roll = rng.random()
+        if roll < rule_share:
+            roles.append("rule")
+        elif opponent is not None and roll < rule_share + pool_share:
+            roles.append("pool")
+        else:
+            roles.append("learner")
+    if "learner" not in roles:
+        roles[rng.randrange(4)] = "learner"
+    learners = [seat for seat, role in enumerate(roles) if role == "learner"]
+    record = GameRecord(learners, {seat: [] for seat in learners},
+                        rule_seats=[seat for seat, role in enumerate(roles) if role == "rule"])
     noise_rng = Random(seed + 1)
 
     def policy(state, player, game_rng):
-        if player not in learners:
+        if roles[player] == "rule":
             return choose_rule_action_for_player(state, player, game_rng)
         actions = legal_actions(state, player)
         if not actions:
@@ -120,6 +138,8 @@ def play_one(seed: int, batcher: Batcher, rule_share: float, noise: Noise) -> Ga
         if len(lookup) == 1:
             return next(iter(lookup.values()))
         obs = encode(state, player, noise, noise_rng)
+        if roles[player] == "pool":
+            return lookup[opponent.ask(obs, mask, game_rng)[0]]
         action, logprob, value = batcher.ask(obs, mask, game_rng)
         record.steps[player].append(Step(obs.astype(np.float16), mask, action, logprob, value))
         return lookup[action]
@@ -132,7 +152,8 @@ def play_one(seed: int, batcher: Batcher, rule_share: float, noise: Noise) -> Ga
 
 
 def collect(batcher: Batcher, games: int, first_seed: int, rule_share: float,
-            noise: Noise) -> list[GameRecord]:
+            noise: Noise, opponent: Batcher | None = None,
+            pool_share: float = 0.0) -> list[GameRecord]:
     records: list[GameRecord] = []
     lock = threading.Lock()
     seeds = iter(range(first_seed, first_seed + games))
@@ -143,7 +164,7 @@ def collect(batcher: Batcher, games: int, first_seed: int, rule_share: float,
                 seed = next(seeds, None)
             if seed is None:
                 return
-            record = play_one(seed, batcher, rule_share, noise)
+            record = play_one(seed, batcher, rule_share, noise, opponent, pool_share)
             with lock:
                 records.append(record)
 
@@ -212,10 +233,9 @@ def ppo_update(model: MahjongNet, optimizer, records: list[GameRecord], device: 
 def win_gap(records: list[GameRecord]) -> float:
     """網路座位胡牌率 − 規則式座位胡牌率（沒有規則式座位時為網路胡牌率）。"""
     seats = sum(len(record.learners) for record in records)
-    rule_seats = sum(4 - len(record.learners) for record in records)
+    rule_seats = sum(len(record.rule_seats) for record in records)
     wins = sum(record.winner in record.learners for record in records) / max(1, seats)
-    rule_wins = sum(record.winner is not None and record.winner not in record.learners
-                    for record in records) / max(1, rule_seats)
+    rule_wins = sum(record.winner in record.rule_seats for record in records) / max(1, rule_seats)
     return wins - rule_wins if rule_seats else wins
 
 
@@ -255,11 +275,9 @@ def summarize(records: list[GameRecord]) -> str:
     seats = sum(len(record.learners) for record in records)
     wins = sum(record.winner in record.learners for record in records)
     deal_ins = sum(record.discarder in record.learners for record in records)
-    rule_seats = sum(4 - len(record.learners) for record in records)
-    rule_wins = sum(record.winner is not None and record.winner not in record.learners
-                    for record in records)
-    rule_deal_ins = sum(record.discarder is not None and record.discarder not in record.learners
-                        for record in records)
+    rule_seats = sum(len(record.rule_seats) for record in records)
+    rule_wins = sum(record.winner in record.rule_seats for record in records)
+    rule_deal_ins = sum(record.discarder in record.rule_seats for record in records)
     text = (f"網路每局平均 {np.mean(rewards):+.2f} 台（扣抽成），胡牌率 {wins / seats:.1%}、"
             f"放槍率 {deal_ins / seats:.1%}")
     if rule_seats:
@@ -268,35 +286,48 @@ def summarize(records: list[GameRecord]) -> str:
 
 
 _actor_model: MahjongNet | None = None
+_actor_opponent: MahjongNet | None = None
 _actor_device = "cpu"
 
 
 def _actor_init(config: dict, device: str) -> None:
     """對打程序啟動時建立自己的網路（每個程序各自用 GPU 推論）。"""
-    global _actor_model, _actor_device
+    global _actor_model, _actor_opponent, _actor_device
     torch.set_num_threads(1)
     _actor_device = device
     _actor_model = MahjongNet(**config).to(device).eval()
+    _actor_opponent = MahjongNet(**config).to(device).eval()
 
 
-def _actor_collect(task: tuple[dict, int, int, float]) -> list[GameRecord]:
-    state, first_seed, games, rule_share = task
+def _actor_collect(task: tuple) -> list[GameRecord]:
+    state, opponent_state, first_seed, games, rule_share, pool_share = task
     _actor_model.load_state_dict(state)
     batcher = Batcher(_actor_model, _actor_device)
+    opponent = None
+    if opponent_state is not None:
+        _actor_opponent.load_state_dict(opponent_state)
+        opponent = Batcher(_actor_opponent, _actor_device)
     try:
-        return collect(batcher, games, first_seed, rule_share, LIVE_NOISE)
+        return collect(batcher, games, first_seed, rule_share, LIVE_NOISE, opponent, pool_share)
     finally:
         batcher.close()
+        if opponent is not None:
+            opponent.close()
+
+
+def cpu_state(model: MahjongNet) -> dict:
+    return {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
 
 
 def collect_parallel(pool, model: MahjongNet, actors: int, games: int, first_seed: int,
-                     rule_share: float) -> list[GameRecord]:
+                     rule_share: float, opponent_state: dict | None = None,
+                     pool_share: float = 0.0) -> list[GameRecord]:
     """把這輪的局數平均分給各對打程序，權重以 CPU 張量傳過去。"""
-    state = {key: value.detach().cpu() for key, value in model.state_dict().items()}
+    state = cpu_state(model)
     share = [games // actors + (1 if index < games % actors else 0) for index in range(actors)]
     tasks, seed = [], first_seed
     for count in share:
-        tasks.append((state, seed, count, rule_share))
+        tasks.append((state, opponent_state, seed, count, rule_share, pool_share))
         seed += count
     return [record for part in pool.map(_actor_collect, tasks) for record in part]
 
@@ -327,8 +358,15 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=1_000_000)
     parser.add_argument("--actors", type=int, default=1,
                         help="對打程序數（每個約佔一顆 CPU 核心；1 = 在主程序裡打）")
+    parser.add_argument("--pool-share", type=float, default=0.0,
+                        help="每個座位換成對手池裡過去的自己的機率（對手池從 --init 開始）")
+    parser.add_argument("--pool-every", type=int, default=50, help="每幾輪把目前的網路加進對手池")
+    parser.add_argument("--threads", type=int, default=0,
+                        help="主程序 PyTorch CPU 執行緒數（0 = 預設）")
     args = parser.parse_args()
     keep_awake()
+    if args.threads:
+        torch.set_num_threads(args.threads)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = load(args.init, device) if args.init else MahjongNet().to(device).eval()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -342,20 +380,39 @@ def main() -> None:
         pool = multiprocessing.get_context("spawn").Pool(
             args.actors, initializer=_actor_init, initargs=(model.config, device))
     guard = Guard()
+    league = [cpu_state(model)] if args.pool_share > 0 else []
+    """對手池：過去的自己（最多 LEAGUE_SIZE 個，起始權重一直保留）。"""
+    league_rng = Random(args.seed)
+    opponent_model = None
+    if league and pool is None:
+        opponent_model = MahjongNet(**model.config).to(device).eval()
     for iteration in range(1, args.iterations + 1):
         tick = time.time()
+        opponent_state = league_rng.choice(league) if league else None
         if pool is not None:
-            records = collect_parallel(pool, model, args.actors, args.games, seed, args.rule_share)
+            records = collect_parallel(pool, model, args.actors, args.games, seed, args.rule_share,
+                                       opponent_state, args.pool_share)
         else:
             batcher = Batcher(model, device)
-            records = collect(batcher, args.games, seed, args.rule_share, LIVE_NOISE)
+            opponent = None
+            if opponent_state is not None:
+                opponent_model.load_state_dict(opponent_state)
+                opponent = Batcher(opponent_model, device)
+            records = collect(batcher, args.games, seed, args.rule_share, LIVE_NOISE,
+                              opponent, args.pool_share)
             batcher.close()
+            if opponent is not None:
+                opponent.close()
         seed += args.games
         played = time.time() - tick
         stats = ppo_update(model, optimizer, records, device, entropy_weight=args.entropy)
         save(model, args.out, iteration=iteration, seed=seed)
         if iteration % 10 == 0:
             save(model, args.out.with_name(f"{args.out.stem}_{iteration:04d}.pt"), iteration=iteration)
+        if league and iteration % args.pool_every == 0:
+            league.append(cpu_state(model))
+            if len(league) > LEAGUE_SIZE:
+                league.pop(1)  # 留著起始權重，丟掉最舊的中途版本
         print(f"第 {iteration} 輪：{summarize(records)}；對打 {played:.0f} 秒"
               f"（{args.games / played:.1f} 局/秒）、更新 {time.time() - tick - played:.0f} 秒；"
               + "、".join(f"{k} {v:.3f}" for k, v in stats.items()), flush=True)
