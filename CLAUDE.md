@@ -16,6 +16,8 @@
 - `game/`       規則核心：tiles.py（牌編碼）、win.py（胡牌判定）、rules.py、scoring.py、simulator.py
 - `agent/`      shanten.py、rule_agent.py、mcts_agent.py、rl_agent.py
 - `perception/` 螢幕擷取 (mss)、牌面辨識 (OpenCV 模板比對 → YOLO)、state_parser.py
+- 啟動腳本（Git Bash）：`./run.sh` 學習型 AI 自動模式（訓練場）、`./run_hint.sh` 學習型 AI 提示模式（真人場），
+  都用 `.venv-train` 與 `models/rl3_0960.pt`，後面可接其他參數（如 `--efficiency-turns 6`）。
 - `hint/`       提示模式：`python -m hint`（即時＋浮動小視窗）、`--no-overlay`、`--image`、`--video` 回放測試、`--auto` 訓練場自動點擊
 - `control/`    actuator.py（pyautogui）：把動作轉成點擊；滑鼠甩到左上角中止
   window.py：自動模式 60 秒看不到遊戲、使用者也 60 秒沒操作電腦時，把遊戲視窗（標題含「明星3缺1」）切回前面
