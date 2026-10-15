@@ -168,3 +168,27 @@ def test_league_opponents_take_seats_but_are_not_trained():
                   if seat not in record.learners and seat not in record.rule_seats]
     assert pool_seats and all(not record.rule_seats for record in records)
     assert all(set(record.steps) == set(record.learners) for record in records)
+
+
+def test_efficiency_override_prefers_outs_early_and_keeps_network_choice_later():
+    pytest.importorskip("torch")
+    from agent.nn_agent import efficient_discard
+    from game.rules import GameState, Phase, PlayerState, legal_actions
+    from game.tiles import to_counts
+    from training.actions import legal_mask
+
+    # 10/15 02:52：一萬二二二萬 六萬 八九萬 一三筒 七八八八八九條 東中，網路打六萬（進張 20）、打東 24
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("1222689m13p788889s15z"))
+    state = GameState([0] * 60, players, phase=Phase.DISCARD, last_drawn=parse("5z")[0])
+    actions = legal_actions(state, 0)
+    _, lookup = legal_mask(actions)
+    choice = Action(ActionType.DISCARD, tile=parse("6m")[0])
+    logits = np.zeros(108, dtype=np.float32)
+    picked = efficient_discard(state, 0, choice, lookup, logits, turns=6)
+    assert picked.tile in (parse("1z")[0], parse("5z")[0])   # 孤張字牌（進張最多）
+    players[0].discards = parse("1s2s3s4s5s6s")              # 已打 6 手：照網路
+    assert efficient_discard(state, 0, choice, lookup, logits, turns=6) == choice
+    players[0].discards = []
+    state.declared[2] = True                                   # 有人宣告：照網路
+    assert efficient_discard(state, 0, choice, lookup, logits, turns=6) == choice

@@ -439,6 +439,8 @@ def main() -> None:
                              "mc 蒙地卡羅（模擬比較，每步約 2 秒）、nn 學習型（需要 PyTorch，"
                              "用 .venv-train/Scripts/python 執行）")
     parser.add_argument("--model", default="models/rl3_0960.pt", help="--ai nn 用的網路權重")
+    parser.add_argument("--efficiency-turns", type=int, default=0,
+                        help="--ai nn 前幾手湊牌優先（同向聽時改打進張最多的牌）；0 = 照網路")
     parser.add_argument("--workers", type=int, default=4,
                         help="蒙地卡羅平行模擬的程序數（預設 4；之前用 CPU 核心數 − 2＝14 個，"
                              "每手出牌時整台電腦滿載，10/3 出牌點了沒反應 34 次）")
@@ -449,7 +451,7 @@ def main() -> None:
     args = parser.parse_args()
     use_policy(args.ai)
     if args.ai == "nn":
-        use_network(args.model)
+        use_network(args.model, args.efficiency_turns)
     if args.ai == "mc":
         import os
         from multiprocessing import Pool

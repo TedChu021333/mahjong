@@ -296,12 +296,12 @@ def use_worker_pool(pool, workers: int) -> None:
 _network = None
 
 
-def use_network(path: str) -> None:
-    """學習型 AI 的權重（--ai nn；需要 PyTorch）。"""
+def use_network(path: str, efficiency_turns: int = 0) -> None:
+    """學習型 AI 的權重（--ai nn；需要 PyTorch）；efficiency_turns 見 agent.nn_agent.efficient_discard。"""
     from agent.nn_agent import NetworkPolicy
 
     global _network
-    _network = NetworkPolicy.from_file(path)
+    _network = NetworkPolicy.from_file(path, efficiency_turns=efficiency_turns)
 
 
 def use_policy(name: str) -> None:
