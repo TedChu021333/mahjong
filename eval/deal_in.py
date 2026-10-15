@@ -103,6 +103,8 @@ def parse_log(path: Path) -> list[Game]:
     games: list[Game] = []
     game: Game | None = None
     rivers: list[list[int]] = [[] for _ in range(4)]
+    ended = False
+    """上一局已結束（本局牌河摘要或按了結算按鈕），下一個出牌事件開始新的一局。"""
     logs_declared = False
     """10/5 晚上起啟動時會寫「AI …」，之後每一步都記認到的宣告者；以前的記錄分不出「沒人宣告」與「沒記錄」。"""
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -118,15 +120,23 @@ def parse_log(path: Path) -> list[Game]:
             games.append(game)
             rivers = [[] for _ in range(4)]
             continue
-        if game is None:
+        if text.startswith("按「"):
+            ended = True  # 按結算、流局的「再贏一局」：之後是下一局
             continue
         river = RIVER.match(text)
+        discard = DISCARD.match(text)
+        if (river or discard) and (game is None or ended):
+            # 沒有換三張的場（10/15 起）：上一局結束後第一個出牌事件就是新的一局
+            game, ended = Game(date), False
+            games.append(game)
+            rivers = [[] for _ in range(4)]
+        if game is None:
+            continue
         if river:
             seat, kind, name = river.groups()
             if kind == "discard" and name in _NAMES:
                 rivers[RIVER_SEAT[seat]].append(_NAMES[name])
             continue
-        discard = DISCARD.match(text)
         if discard and discard.group(1) in _NAMES:
             hand, gold, declared = parse_detail(detail)
             if declared is None and logs_declared:
@@ -145,6 +155,7 @@ def parse_log(path: Path) -> list[Game]:
             for seat, count in MELD_SUMMARY.findall(text):
                 melds[RIVER_SEAT[seat]] = int(count)
             game.melds = tuple(melds)
+            ended = True
     return games
 
 

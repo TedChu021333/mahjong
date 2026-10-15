@@ -104,3 +104,20 @@ def test_parse_log_reads_live_declared_seats(tmp_path):
     path.write_text("".join(line + chr(10) for line in lines), encoding="utf-8")
     game, = parse_log(path)
     assert [d.declared for d in game.decisions] == [frozenset(), frozenset({1, 3})]
+
+
+def test_parse_log_splits_games_without_tile_swap(tmp_path):
+    # 10/15 的場沒有換三張：以本局牌河摘要、按結算按鈕之後的第一個出牌事件開始新的一局
+    path = tmp_path / "log_20261015.txt"
+    hand = "一萬二萬三萬四萬五萬六萬七萬八萬九萬一筒二筒三筒四筒五筒六筒"
+    lines = [f"01:00:01 [01:00:01] 打 東　（手牌 {hand}東東）",
+             "01:00:02 [01:00:02] 牌河 me discard 東",
+             "01:00:09 [01:00:09] 結算截圖存到 result\20261015_010009.png",
+             "01:00:09 [01:00:09] 本局牌河：me 東；right ；top ；left ",
+             "01:00:10 [01:00:10] 按「小結算」",
+             "01:00:20 [01:00:20] 牌河 left discard 西",
+             f"01:00:21 [01:00:21] 打 北　（手牌 {hand}東北）"]
+    path.write_text("".join(line + chr(10) for line in lines), encoding="utf-8")
+    first, second = parse_log(path)
+    assert first.stamp == "20261015_010009" and len(first.decisions) == 1
+    assert second.stamp is None and second.decisions[0].rivers[3] == (parse("3z")[0],)
