@@ -9,7 +9,7 @@
 都能用同一組模板。低於門檻的格子回傳 None，交給人工確認。
 
 用法：
-    python -m perception.hand_reader train/完整正常畫面.png
+    python -m perception.hand_reader train/經典_a20.png
     python -m perception.hand_reader --screen
 """
 from __future__ import annotations

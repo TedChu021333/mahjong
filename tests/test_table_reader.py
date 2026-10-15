@@ -80,12 +80,13 @@ def test_chow_panels_are_found_only_on_the_choice_screen():
 
 
 @pytest.mark.skipif(
-    not (TRAIN_DIR / "吃牌2.png").exists() or not (TRAIN_DIR / "經典_碰.png").exists(),
-    reason="缺少訓練截圖",
+    not (TRAIN_DIR / "經典_選吃法.png").exists() or not (TRAIN_DIR / "經典_碰.png").exists(),
+    reason="缺少訓練截圖（原本的 吃牌2.png 10/15 誤刪；提示模式遇到選吃法會存 result/選吃法_*.png，"
+           "複製成 train/經典_選吃法.png）",
 )
 def test_real_chow_choice_screen():
     from perception.table_reader import read_chow_panels
-    image = read_image(TRAIN_DIR / "吃牌2.png")
+    image = read_image(TRAIN_DIR / "經典_選吃法.png")
     assert len(read_chow_panels(image)) == 2
     assert read_chow_panels(read_image(TRAIN_DIR / "經典_碰.png")) == ()
 

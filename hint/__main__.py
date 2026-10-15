@@ -203,6 +203,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     """目前這局認到的宣告者；有新增時存截圖（DECLARE_SHOTS），用來量對家、下家「聽」標記的位置。"""
     declare_shots = 0
     early_shots = 0
+    chow_shot_saved = False
+    """每次執行存一張「選吃法_」：多種吃法選項框的實戰截圖（測試用的 train/吃牌2.png 10/15 誤刪）。"""
     stuck_shots_left, stuck_shot_at = 0, float("-inf")
     """卡住後還要存幾張後續截圖（每 STUCK_SHOT_INTERVAL 秒一張），看點擊後畫面怎麼變。"""
     for stamp, frame in frames:
@@ -277,6 +279,9 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     log(f"[{stamp}] 認到{names}宣告，截圖存到 {save_result(frame, f'宣告_{names}_')}",
                         echo=False)
                 declared_seen = observation.declared
+                if observation.chow_panels and not chow_shot_saved:
+                    chow_shot_saved = True
+                    log(f"[{stamp}] 選吃法畫面截圖存到 {save_result(frame, '選吃法_')}", echo=False)
                 if observation.dealer_streak is None and not streak_reported:
                     streak_reported = True  # 每次執行只存一張，補模板用
                     log(f"[{stamp}] 認不出連莊數（先當 {STREAK_UNKNOWN_GUESS}），截圖存到 "

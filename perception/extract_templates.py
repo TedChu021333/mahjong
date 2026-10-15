@@ -1,7 +1,7 @@
 """從已標註的截圖切出暗手牌，存成模板。
 
 用法（標註依畫面由左到右，格式同 game.tiles.parse）：
-    python -m perception.extract_templates train/完整正常畫面.png 257778m114p2335588s
+    python -m perception.extract_templates train/經典_a20.png <由左到右的手牌，含第 17 張>
 
 輸出：train/templates/<牌代碼>/<截圖檔名>_<位置>.png
 """

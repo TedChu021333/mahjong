@@ -1,7 +1,7 @@
 """簡易圖片座標標註工具。
 
 用法：
-    python -m perception.annotate_regions train/完整正常畫面.png
+    python -m perception.annotate_regions train/經典_a20.png
 
 操作：
     移動滑鼠：查看座標
