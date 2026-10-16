@@ -276,3 +276,25 @@ def test_settlement_detected_and_saved_once(tmp_path, monkeypatch):
     for value in (0, 1, 1, 1, 0, 0):
         advisor.step("t", np.full((4, 4, 3), value, dtype=np.uint8))
     assert len(saved) == 1 and "結算" in saved[0].name
+
+
+def test_match_end_screens():
+    from bigtwo.match_end import find_continue
+    assert find_continue(_image("再玩一局"))[0] == "再玩一局"
+    assert find_continue(_image("社團廣告"))[0] == "廣告X"           # 廣告蓋著時先按 X
+    for name in ("結算_48", "出牌亮", "換三張", "手牌_24"):
+        assert find_continue(_image(name)) is None
+
+
+def test_match_end_clicked_after_two_frames_in_auto_only(tmp_path, monkeypatch):
+    import bigtwo.live as live
+    monkeypatch.setattr(live, "find_continue", lambda frame: ("再玩一局", (1600, 937)))
+    clicks = []
+    auto = live.Advisor(live.Log(tmp_path, echo=False), live.Clicker(click=clicks.append, sleep=lambda s: None))
+    auto.clock = FakeClock()
+    auto.step("t", None)
+    assert clicks == []                       # 第一幀先不按
+    auto.step("t", None)
+    assert clicks == [(1600, 937)]
+    hint = live.Advisor(live.Log(tmp_path, echo=False))
+    hint.step("t", None); hint.step("t", None)  # 提示模式不按，也不出錯

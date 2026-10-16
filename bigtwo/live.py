@@ -30,6 +30,7 @@ from .hand_reader import TOP_NORMAL, TOP_RAISED, HandCard, read_hand
 from .mc_agent import make_mc_policy
 from .rules import DEFAULT_RULES
 from .screen import grab_screen, write_image
+from .match_end import find_continue
 from .settlement import is_settlement
 from .table_reader import read_plays
 from .tracker import ME, Tracker
@@ -148,6 +149,7 @@ class Advisor:
         self.shot_dir = RESULT_DIR / "bigtwo"
         self.clock: Callable[[], float] = time.monotonic
         self.settle_frame: np.ndarray | None = None
+        self.continue_seen: str | None = None
 
     def save_shot(self, frame, label: str) -> None:
         if self.shots >= MAX_SHOTS or self.clicker is None and not self.live:
@@ -205,7 +207,27 @@ class Advisor:
         else:
             self.log(f"[{stamp}] 結算")
 
+    def handle_match_end(self, stamp: str, frame) -> bool:
+        """一場打完：社團廣告按 X、「再玩一局」按下去（只有自動模式按；提示模式只顯示）。
+        連續兩幀都認到才按，按完等冷卻，不盲點。回傳 True 表示這幀是這類畫面。"""
+        found = find_continue(frame)
+        if found is None:
+            self.continue_seen = None
+            return False
+        name, point = found
+        self.display(None)
+        if self.continue_seen != name:
+            self.continue_seen = name
+            return True
+        if self.clicker and self.ready():
+            self.clicker.click(point)
+            self.log(f"[{stamp}] 按「{name}」")
+            self.acted()
+        return True
+
     def step(self, stamp: str, frame: np.ndarray) -> None:
+        if self.handle_match_end(stamp, frame):
+            return
         if is_settlement(frame):
             self.settle_frame = frame
             self.display(None)
