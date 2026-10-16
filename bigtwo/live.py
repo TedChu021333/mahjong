@@ -232,7 +232,7 @@ class Advisor:
         if not self.clicker:
             self.swap_finished = True
             return
-        if not self.ready():
+        if not self.ready() or not self.check_effect(hand, stamp):
             return
         raised = {c.card for c in hand if c.raised}
         if raised == self.swap_target:
@@ -242,8 +242,6 @@ class Advisor:
                 self.log(f"[{stamp}] 按「{name}」")
                 self.swap_finished = True
                 self.acted()
-            return
-        if not self.check_effect(hand, stamp):
             return
         toggle = [hc for hc in hand if (hc.card in self.swap_target) != hc.raised]
         for hc in toggle:                     # 該選的沒選、不該選的選了：各點一次
@@ -269,6 +267,7 @@ class Advisor:
                         last is not None, DEFAULT_RULES)
             self.choice = self.policy(view, self.rng) if moves else None
             self.decided = key
+            self.clicked_raised = None          # 新的決定：上一手的點牌紀錄不再比較
             target = "帶頭" if last is None else f"壓{SEAT_NAMES[last_seat]}的 {describe(last)}"
             self.log(f"[{stamp}] 輪到自己（{target}；張數 下{count_tuple[1]} 對{count_tuple[2]} 上{count_tuple[3]}）"
                      f"手牌 {cards_text(cards)} → 建議 {describe(self.choice)}")
@@ -278,6 +277,10 @@ class Advisor:
             self.execute(hand, frame, stamp)
 
     def execute(self, hand: list[HandCard], frame, stamp: str = "") -> None:
+        # 先看上次點牌有沒有效果（不論接下來是按出牌、重選或再點牌）：只在點牌前才看時，點成功後
+        # 直接按出牌、紀錄沒清掉，下一回合拿上一回合的狀態比較，每回合累加一次，第 3 回合就誤判停止（10/16 22:35）
+        if not self.check_effect(hand, stamp):
+            return
         choice = self.choice
         if choice is None:
             if button_state(frame, "PASS") == "on":
@@ -296,8 +299,6 @@ class Advisor:
             self.clicker.button("重選")       # 選了不該選的：清掉，下一輪再選
             self.log(f"[{stamp}] 按「重選」")
             self.acted()
-            return
-        if not self.check_effect(hand, stamp):
             return
         pick = [hc for hc in hand if hc.card in choice.cards and not hc.raised]
         for hc in pick:

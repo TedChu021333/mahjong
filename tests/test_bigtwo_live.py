@@ -223,3 +223,17 @@ def test_auto_stops_when_clicks_have_no_effect(tmp_path, monkeypatch):
     assert advisor.clicker is None
     assert len(clicks) == 2 * 3                    # 點了 3 輪（每輪 2 張）就停
     assert "不接受程式送出的點擊" in advisor.log.path.read_text(encoding="utf-8")
+
+
+def test_successful_turns_do_not_trigger_no_effect_stop(tmp_path, monkeypatch):
+    # 10/16 22:35：點牌成功、按出牌後沒清紀錄，三回合後被誤判成「點擊沒反應」而停止
+    advisor, clicks = make_auto(tmp_path, monkeypatch, {"出牌": "on", "PASS": "on", "重選": "on"})
+    for turn in range(5):
+        advisor.choice = c("3c")
+        advisor.clicked_raised = None if turn == 0 else advisor.clicked_raised
+        advisor.clock.now = turn * 10
+        advisor.execute(hand_cards("3c 4d 5h"), None)           # 點 3♣
+        advisor.clock.now = turn * 10 + 1
+        advisor.execute(hand_cards("3c 4d 5h", "3c"), None)     # 選起來了 → 出牌
+        advisor.decided = None
+    assert advisor.clicker is not None
