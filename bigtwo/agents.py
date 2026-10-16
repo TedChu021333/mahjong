@@ -135,7 +135,70 @@ ESCAPE_LIMIT = 9
 """逃牌時手上超過幾張就拆牌也要出（輸家超過 9 張再乘倍率）。7 張 −0.06±0.05、11 張 −0.18±0.04。"""
 
 
-def make_rule_policy(escape: bool = True):
+FINISH_CARDS = 6
+"""手上剩這麼多張以下時，先找「每一手別人都壓不過、最後一手出完」的路線（攻略：剩 3～5 張時算好能不能一路出完）。
+arena 8000 副對沒有殘局路線：+0.37±0.06 張/局（勝率 25.0%→25.6%）。"""
+
+
+def _bombs_exist(unseen: list[int]) -> bool:
+    groups = [[] for _ in range(NUM_RANKS)]
+    for c in unseen:
+        groups[rank_of(c)].append(c)
+    if any(len(g) == 4 for g in groups):
+        return True
+    for suit in range(4):
+        ranks = {rank_of(c) for c in unseen if suit_of(c) == suit}
+        if any(all(r in ranks for r in seq) for seq in STRAIGHTS):
+            return True
+    return False
+
+
+def unbeatable(combo: Combo, unseen: list[int], others_cards: int = 13) -> bool:
+    """看不到的牌全部加起來也組不出能壓 combo 的牌（保守：當成同一家拿到全部）。"""
+    if combo.size < 5:
+        # 不算鐵支／同花順：看不到的牌那麼多，幾乎總湊得出一副，算進去就沒有任何一手「壓不過」
+        return not _beatable_by(combo, unseen)
+    from .combos import all_combos, beats
+    if others_cards < 5:
+        return True
+    return not any(m.size == 5 and beats(m, combo) for m in all_combos(unseen))
+
+
+def finish_route(hand, unseen: list[int], others_cards: int) -> list[Combo] | None:
+    """把手牌拆成「前面每手都壓不過、最後一手隨意」的出法；找不到回傳 None。"""
+    whole = classify(list(hand))
+    if whole is not None:
+        return [whole]
+    from .combos import all_combos
+    for combo in sorted(all_combos(list(hand)), key=lambda c: (-c.size, _strength(c))):
+        if unbeatable(combo, unseen, others_cards):
+            rest = [c for c in hand if c not in combo.cards]
+            route = finish_route(rest, unseen, others_cards)
+            if route is not None:
+                return [combo] + route
+    return None
+
+
+def _finish(view: View) -> Combo | None:
+    if len(view.hand) > FINISH_CARDS:
+        return None
+    seen = view.played | set(view.hand)
+    unseen = [c for c in range(52) if c not in seen]
+    others = max(n for s, n in enumerate(view.counts) if s != view.seat)
+    moves = set(view.moves)
+    if view.last is None:
+        route = finish_route(view.hand, unseen, others)
+        return route[0] if route and route[0] in moves else None
+    for m in sorted(view.moves, key=lambda c: -c.size):
+        rest = [c for c in view.hand if c not in m.cards]
+        if not rest:
+            return m
+        if unbeatable(m, unseen, others) and finish_route(rest, unseen, others) is not None:
+            return m
+    return None
+
+
+def make_rule_policy(escape: bool = True, finish: bool = True):
     """escape：爛牌時改成逃牌——張數超過 9 張時帶頭出一次最多張的那手、跟牌時拆牌也要出，
     先降到 9 張以下（輸家「超過9張」「13張未出」各再乘本局倍率；攻略「少輸比贏牌重要」）。
     arena 8000 副（margin 2、會提早打 2 的版本）對不逃牌：+0.50±0.07 張/局。
@@ -144,6 +207,10 @@ def make_rule_policy(escape: bool = True):
     def policy(view: View, rng: Random) -> Combo | None:
         if not view.moves:
             return None
+        if finish:
+            route_move = _finish(view)
+            if route_move is not None:
+                return route_move
         plan = plan_hand(view.hand)
         if escape:
             control, small = outlook(view, plan)
@@ -214,7 +281,8 @@ def _normal(view: View, plan: list[Combo]) -> Combo | None:
 
 
 rule_policy = make_rule_policy(escape=True)
-old_rule_policy = make_rule_policy(escape=False)     # 10/17 之前（沒有逃牌）
+old_rule_policy = make_rule_policy(escape=False, finish=False)     # 10/17 之前（沒有逃牌、殘局路線）
+nofinish_policy = make_rule_policy(escape=True, finish=False)
 
 
 SWAP_MAX_RANK = 8

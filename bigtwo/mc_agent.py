@@ -10,7 +10,7 @@ from math import sqrt
 from random import Random
 
 from .agents import _small_groups, _strength, plan_hand, rule_policy
-from .cards import NUM_CARDS
+from .cards import NUM_CARDS, rank_of
 from .combos import Combo, Kind
 from .game import PLAYERS, Play, View, continue_game
 
@@ -48,6 +48,38 @@ def _candidates(view: View, limit: int) -> list[Combo | None]:
     return picked
 
 
+def pass_constraints(view: View) -> list[tuple[int, Combo, int]]:
+    """(座位, 他當時沒壓的牌, 之後的紀錄起點)。只用單張、對子、三條（五張牌型太難判斷）。"""
+    out = []
+    last = None
+    for i, play in enumerate(view.history):
+        if play.combo is not None:
+            last = play.combo
+        elif last is not None and last.size <= 3 and play.seat != view.seat:
+            out.append((play.seat, last, i))
+    return out
+
+
+def _can_beat(cards, combo: Combo) -> bool:
+    if combo.size == 1:
+        return any(c > combo.cards[0] for c in cards)
+    groups: dict[int, list[int]] = {}
+    for c in cards:
+        groups.setdefault(rank_of(c), []).append(c)
+    if combo.size == 2:
+        return any(len(g) >= 2 and max(g) > combo.key[0] for g in groups.values())
+    return any(len(g) >= 3 and r > combo.key[0] for r, g in groups.items())
+
+
+def _violations(hands, constraints, history) -> int:
+    count = 0
+    for seat, combo, index in constraints:
+        later = [c for p in history[index:] if p.seat == seat and p.combo for c in p.combo.cards]
+        if _can_beat(list(hands[seat]) + later, combo):
+            count += 1
+    return count
+
+
 def _paired(a: list[float], b: list[float]) -> tuple[float, float]:
     """a − b 的平均與標準誤差（同一批發牌）。"""
     d = [x - y for x, y in zip(a, b)]
@@ -69,7 +101,13 @@ def choose(candidates: list[Combo | None], scores: list[list[float]], z: float =
     return candidates[min(close, key=lambda i: (candidates[i] is not None, _strength(candidates[i]) if candidates[i] else ()))]
 
 
-def make_mc_policy(samples: int = 64, limit: int = 10, rollout=rule_policy, z: float = 2.0):
+PASS_REJECT = 0.7
+"""抽到「某家明明壓得過、當時卻 PASS」的分法時，有這個機率丟掉重抽（有人會故意不壓，不全丟）。"""
+MAX_TRIES = 30
+
+
+def make_mc_policy(samples: int = 64, limit: int = 10, rollout=rule_policy, z: float = 2.0,
+                   pass_reject: float = PASS_REJECT):
     def mc_policy(view: View, rng: Random) -> Combo | None:
         candidates = _candidates(view, limit)
         if len(candidates) == 1:
@@ -78,14 +116,19 @@ def make_mc_policy(samples: int = 64, limit: int = 10, rollout=rule_policy, z: f
         unseen = [c for c in range(NUM_CARDS) if c not in played and c not in view.hand]
         others = [(view.seat + k) % PLAYERS for k in range(1, PLAYERS)]
         scores: list[list[float]] = [[] for _ in candidates]
+        constraints = pass_constraints(view) if pass_reject > 0 else []
         for _ in range(samples):
-            rng.shuffle(unseen)
-            hands: list[list[int]] = [[] for _ in range(PLAYERS)]
-            hands[view.seat] = list(view.hand)
-            start = 0
-            for s in others:
-                hands[s] = sorted(unseen[start:start + view.counts[s]])
-                start += view.counts[s]
+            for _ in range(MAX_TRIES):
+                rng.shuffle(unseen)
+                hands: list[list[int]] = [[] for _ in range(PLAYERS)]
+                hands[view.seat] = list(view.hand)
+                start = 0
+                for s in others:
+                    hands[s] = sorted(unseen[start:start + view.counts[s]])
+                    start += view.counts[s]
+                bad = _violations(hands, constraints, view.history) if constraints else 0
+                if not bad or rng.random() >= 1 - (1 - pass_reject) ** bad:
+                    break
             seed = rng.random()
             for i, move in enumerate(candidates):
                 result = continue_game(view, hands, move, [rollout] * PLAYERS, Random(seed))

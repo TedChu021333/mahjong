@@ -237,3 +237,22 @@ def test_successful_turns_do_not_trigger_no_effect_stop(tmp_path, monkeypatch):
         advisor.execute(hand_cards("3c 4d 5h", "3c"), None)     # 選起來了 → 出牌
         advisor.decided = None
     assert advisor.clicker is not None
+
+
+def test_tracker_infers_passes_from_turn_order():
+    t = Tracker()
+    feed_hand(t, "3c 4c 5c 6c 7c 8c 9c Tc Jc Qc Kc Ac 2c")
+    feed(t, {0: None, 1: c("5d"), 2: None, 3: None})          # 下家出
+    feed(t, {0: None, 1: c("5d"), 2: None, 3: c("9d")})       # 上家壓：對家 PASS
+    assert [(p.seat, p.combo) for p in t.history] == [(1, c("5d")), (2, None), (3, c("9d"))]
+    t.update({s: None for s in range(4)})                      # 一墩結束
+    feed(t, {0: None, 1: None, 2: None, 3: c("4d4h")})         # 上家贏了再帶頭：其他三家 PASS
+    assert [p.seat for p in t.history[3:6]] == [0, 1, 2] and all(p.combo is None for p in t.history[3:6])
+
+
+def test_mc_pass_constraints_from_history():
+    from bigtwo.game import Play, View
+    from bigtwo.mc_agent import pass_constraints
+    history = [Play(1, c("5d")), Play(2, None), Play(3, c("9d")), Play(0, None)]
+    view = View(0, tuple(parse_cards("3c")), (1, 12, 12, 12), c("9d"), 3, history, [], True)
+    assert pass_constraints(view) == [(2, c("5d"), 1)]

@@ -16,7 +16,8 @@
 - `game/`       規則核心：tiles.py（牌編碼）、win.py（胡牌判定）、rules.py、scoring.py、simulator.py
 - `agent/`      shanten.py、rule_agent.py、mcts_agent.py、rl_agent.py
 - `perception/` 螢幕擷取 (mss)、牌面辨識 (OpenCV 模板比對 → YOLO)、state_parser.py
-- 啟動腳本（Git Bash）：`./run.sh` 學習型 AI 自動模式（訓練場）、`./run_hint.sh` 學習型 AI 提示模式（真人場），
+- 啟動腳本：`run.bat`／`./run.sh` 學習型 AI 自動模式（訓練場）、`run_hint.bat`／`./run_hint.sh` 學習型 AI 提示模式（真人場），
+  `.bat` 可直接在檔案總管雙擊或在 PowerShell／cmd 執行（不用 Git Bash），
   都用 `.venv-train` 與 `models/rl3_0960.pt`，後面可接其他參數（如 `--efficiency-turns 6`）。
 - `hint/`       提示模式：`python -m hint`（即時＋浮動小視窗）、`--no-overlay`、`--image`、`--video` 回放測試、`--auto` 訓練場自動點擊
 - `control/`    actuator.py（pyautogui）：把動作轉成點擊；滑鼠甩到左上角中止
@@ -92,6 +93,10 @@
   控制 + 1 ≤ 小牌算爛牌，超過 9 張時帶頭出最多張的一手、跟牌拆牌也要出。arena 對舊規則式 8000 副 +0.87±0.10 張/局
   （勝率 25.0%→24.4%，輸的時候少輸）。門檻與張數上限、「提早打 2」都實測過（見 `ESCAPE_MARGIN`、`ESCAPE_LIMIT` 說明），
   提早打 2 反而差。蒙地卡羅換用新規則式模擬：同一批 200 副對舊規則式 +6.02±1.39（之前 +5.87±1.72），沒有明顯再變強。
+  殘局路線（`_finish`、`FINISH_CARDS` 6 張以下）：找「前面每手看不到的牌都壓不過（不算鐵支）、最後一手出完」的出法，
+  arena 8000 副 +0.37±0.06。蒙地卡羅從 PASS 推測（`pass_constraints`、`PASS_REJECT` 0.7）：抽到「某家壓得過單張／對子／
+  三條卻 PASS」的分法有七成丟掉重抽，同一批 400 副逐副相減 +0.50±0.37。實戰的 PASS 由出牌紀錄從出牌順序補上
+  （`Tracker._record`）。三項都加上後同一批 200 副對舊規則式 +6.12±1.53（誤差太大，看不出整體差多少）。
   `mc_agent.py`：蒙地卡羅（看不到的牌隨機分給三家、候選出法用規則式模擬到結束，約 1 秒/局）。
 - `arena.py`：同一副牌讓變體輪流坐四個座位、與四家基準相減，`python -m bigtwo.arena --variant rule --baseline smallest --deals 500`。
   錄影（`bigtwo_train/`，不進版控）確認：開局換三張（每人 0～3 張放進同一堆、洗過發回同樣張數）、加倍項目以

@@ -33,6 +33,16 @@ class Tracker:
         self.my_cards: set[int] = set()                # 這局曾確認在自己手上的牌
 
     def _record(self, seat: int, combo: Combo) -> Play:
+        """記一手出牌；從出牌順序補上中間 PASS 的人（畫面上 PASS 字不一定看得到）：
+        同一墩裡上一手是 a、這手是 b，a 和 b 之間輪到的人都 PASS；一墩已結束（桌面清空）時，
+        上一手之後的三家都 PASS 了。蒙地卡羅用這些 PASS 推測別人沒有更大的牌。"""
+        last = self.last_play
+        if last is not None:
+            if self.trick_open:
+                skipped = [(last.seat + k) % PLAYERS for k in range(1, (seat - last.seat) % PLAYERS)]
+            else:
+                skipped = [(last.seat + k) % PLAYERS for k in range(1, PLAYERS)]
+            self.history.extend(Play(s, None) for s in skipped)
         play = Play(seat, combo)
         self.history.append(play)
         self.shown[seat] = combo
