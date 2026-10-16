@@ -41,6 +41,9 @@ CARD_CLICK = (65, 130)          # 點牌：牌左上角往右下的位置（每�
 ACTION_COOLDOWN = 0.8
 """點完一輪後至少等這麼久才看下一幀決定下一步：選起的牌要一下子才浮上來，太早再看會以為沒選到、
 又點一次反而取消選取（10/16 20:11 實戰換三張被打亂，可能原因之一）。"""
+NO_EFFECT_LIMIT = 3
+"""連續幾次點了牌、畫面上選起的牌都沒變，就停止自動點擊改成只提示。10/16 電腦版（StarMJ371）
+自動模式點擊完全沒反應：遊戲程式有保護（連權杖都不讓查），很可能忽略程式送出的點擊；不做任何繞過。"""
 MAX_SHOTS = 300
 """每次執行最多存幾張決定當下的截圖（result/bigtwo/），檢查問題用。"""
 
@@ -138,6 +141,8 @@ class Advisor:
         self.choice: Combo | None = None
         self.turn_frames = 0
         self.busy_until = 0.0
+        self.clicked_raised: frozenset[int] | None = None   # 上次點牌前選起的牌
+        self.no_effect = 0
         self.shots = 0
         self.shot_dir = RESULT_DIR / "bigtwo"
         self.clock: Callable[[], float] = time.monotonic
@@ -153,6 +158,28 @@ class Advisor:
 
     def acted(self) -> None:
         self.busy_until = self.clock() + ACTION_COOLDOWN
+
+    def clicked_cards(self, hand: list[HandCard], stamp: str, cards) -> None:
+        self.clicked_raised = frozenset(c.card for c in hand if c.raised)
+        self.log(f"[{stamp}] 點牌 {cards_text(cards)}")
+        self.acted()
+
+    def check_effect(self, hand: list[HandCard], stamp: str) -> bool:
+        """上次點了牌之後選起的牌有沒有變；連續沒變就停止自動點擊。回傳 False 表示已停止。"""
+        if self.clicked_raised is None:
+            return True
+        raised = frozenset(c.card for c in hand if c.raised)
+        if raised != self.clicked_raised:
+            self.no_effect = 0
+        else:
+            self.no_effect += 1
+            if self.no_effect >= NO_EFFECT_LIMIT:
+                self.log(f"[{stamp}] 點了 {NO_EFFECT_LIMIT} 次牌都沒有選起來：遊戲可能不接受程式送出的點擊，"
+                         "自動點擊停止，改為只提示（請自己點）")
+                self.clicker = None
+                return False
+        self.clicked_raised = None
+        return True
 
     def stable_hand(self, frame) -> list[HandCard] | None:
         hand = read_hand(frame)
@@ -216,10 +243,12 @@ class Advisor:
                 self.swap_finished = True
                 self.acted()
             return
-        for hc in hand:                       # 該選的沒選、不該選的選了：各點一次
-            if (hc.card in self.swap_target) != hc.raised:
-                self.clicker.card(hc)
-        self.acted()
+        if not self.check_effect(hand, stamp):
+            return
+        toggle = [hc for hc in hand if (hc.card in self.swap_target) != hc.raised]
+        for hc in toggle:                     # 該選的沒選、不該選的選了：各點一次
+            self.clicker.card(hc)
+        self.clicked_cards(hand, stamp, [hc.card for hc in toggle])
 
     def handle_turn(self, stamp: str, frame) -> None:
         hand = self.hand
@@ -246,29 +275,34 @@ class Advisor:
             self.display(overlay_text(self.choice))
             self.save_shot(frame, "輪到自己")
         if self.clicker and self.ready():
-            self.execute(hand, frame)
+            self.execute(hand, frame, stamp)
 
-    def execute(self, hand: list[HandCard], frame) -> None:
+    def execute(self, hand: list[HandCard], frame, stamp: str = "") -> None:
         choice = self.choice
         if choice is None:
             if button_state(frame, "PASS") == "on":
                 self.clicker.button("PASS")
+                self.log(f"[{stamp}] 按「PASS」")
                 self.acted()
             return
         raised = {c.card for c in hand if c.raised}
         if raised == set(choice.cards):
             if button_state(frame, "出牌") == "on":
                 self.clicker.button("出牌")
+                self.log(f"[{stamp}] 按「出牌」")
                 self.acted()
             return
         if raised - set(choice.cards) and button_state(frame, "重選") == "on":
             self.clicker.button("重選")       # 選了不該選的：清掉，下一輪再選
+            self.log(f"[{stamp}] 按「重選」")
             self.acted()
             return
-        for hc in hand:
-            if hc.card in choice.cards and not hc.raised:
-                self.clicker.card(hc)
-        self.acted()
+        if not self.check_effect(hand, stamp):
+            return
+        pick = [hc for hc in hand if hc.card in choice.cards and not hc.raised]
+        for hc in pick:
+            self.clicker.card(hc)
+        self.clicked_cards(hand, stamp, [hc.card for hc in pick])
 
 
 def confirm_training_room(ask=input) -> bool:

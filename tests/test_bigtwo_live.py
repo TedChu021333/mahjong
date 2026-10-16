@@ -207,3 +207,17 @@ def test_execute_pass(tmp_path, monkeypatch):
     advisor.choice = None
     advisor.execute(hand_cards("3c"), None)
     assert clicks == [(1045, 630)]
+
+
+def test_auto_stops_when_clicks_have_no_effect(tmp_path, monkeypatch):
+    advisor, clicks = make_auto(tmp_path, monkeypatch, {"出牌": "on", "PASS": "on", "重選": "on"})
+    advisor.choice = c("Ac Ah")
+    hand = hand_cards("3c 4d Ac Ah")               # 怎麼點都沒有選起來
+    for i in range(10):
+        advisor.clock.now = i
+        if advisor.clicker is None:
+            break
+        advisor.execute(hand, None)
+    assert advisor.clicker is None
+    assert len(clicks) == 2 * 3                    # 點了 3 輪（每輪 2 張）就停
+    assert "不接受程式送出的點擊" in advisor.log.path.read_text(encoding="utf-8")
