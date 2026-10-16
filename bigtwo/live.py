@@ -29,7 +29,7 @@ from .game import View
 from .hand_reader import HandCard, read_hand
 from .mc_agent import make_mc_policy
 from .rules import DEFAULT_RULES
-from .screen import grab_screen
+from .screen import grab_screen, write_image
 from .table_reader import read_plays
 from .tracker import ME, Tracker
 
@@ -38,6 +38,11 @@ SEAT_NAMES = {0: "自己", 1: "下家", 2: "對家", 3: "上家"}
 MOUSE_REST = (960, 60)          # 視窗標題列下方的黑邊：游標不要停在牌上
 CLICK_PAUSE = 0.25
 CARD_CLICK = (65, 130)          # 點牌：牌左上角往右下的位置（每張至少露出 65px 寬）
+ACTION_COOLDOWN = 0.8
+"""點完一輪後至少等這麼久才看下一幀決定下一步：選起的牌要一下子才浮上來，太早再看會以為沒選到、
+又點一次反而取消選取（10/16 20:11 實戰換三張被打亂，可能原因之一）。"""
+MAX_SHOTS = 300
+"""每次執行最多存幾張決定當下的截圖（result/bigtwo/），檢查問題用。"""
 
 
 def describe(combo: Combo | None) -> str:
@@ -116,8 +121,9 @@ def video_frames(path: Path, step: float, start: float = 0.0) -> Iterator[tuple[
 
 class Advisor:
     def __init__(self, log: Log, clicker: Clicker | None = None, samples: int = 24, seed: int = 0,
-                 show: Callable[[str | None], None] = lambda text: None):
+                 show: Callable[[str | None], None] = lambda text: None, live: bool = False):
         self.log = log
+        self.live = live
         self.show = show
         self.shown: str | None = None
         self.clicker = clicker
@@ -126,10 +132,27 @@ class Advisor:
         self.tracker = Tracker()
         self.hand: list[HandCard] | None = None
         self.previous_hand: tuple[int, ...] | None = None
-        self.swap_done = False
+        self.swap_target: frozenset[int] | None = None   # 這局要換的牌（已決定）
+        self.swap_finished = False
         self.decided: tuple | None = None
         self.choice: Combo | None = None
         self.turn_frames = 0
+        self.busy_until = 0.0
+        self.shots = 0
+        self.shot_dir = RESULT_DIR / "bigtwo"
+        self.clock: Callable[[], float] = time.monotonic
+
+    def save_shot(self, frame, label: str) -> None:
+        if self.shots >= MAX_SHOTS or self.clicker is None and not self.live:
+            return
+        self.shots += 1
+        write_image(self.shot_dir / f"{datetime.now():%Y%m%d_%H%M%S}_{label}.png", frame)
+
+    def ready(self) -> bool:
+        return self.clock() >= self.busy_until
+
+    def acted(self) -> None:
+        self.busy_until = self.clock() + ACTION_COOLDOWN
 
     def stable_hand(self, frame) -> list[HandCard] | None:
         hand = read_hand(frame)
@@ -145,12 +168,13 @@ class Advisor:
 
     def step(self, stamp: str, frame: np.ndarray) -> None:
         if swap_phase(frame):
+            if self.swap_finished and self.tracker.history:
+                self.swap_target, self.swap_finished = None, False   # 新的一局
+            if self.swap_target is None:
+                self.tracker.reset()
+                self.decided = None
             self.handle_swap(stamp, frame)
             return
-        if self.swap_done:          # 換三張結束：新的一局開始
-            self.swap_done = False
-            self.tracker.reset()
-            self.decided = None
         hand = read_hand(frame)
         self.hand = hand
         new = self.tracker.my_hand(None if hand is None else [c.card for c in hand])
@@ -165,22 +189,37 @@ class Advisor:
             self.display(None)
 
     def handle_swap(self, stamp: str, frame) -> None:
-        if self.swap_done:
+        if self.swap_finished:
             return
         hand = self.stable_hand(frame)
         if hand is None or len(hand) != HAND_SIZE:
             return
-        cards = tuple(c.card for c in hand)
-        give = rule_swap(cards, self.rng)
-        self.log(f"[{stamp}] 換三張：手牌 {cards_text(cards)} → 建議"
-                 + (f"換 {cards_text(give)}" if give else "不換"))
-        self.swap_done = True
-        self.display("換三張：" + (short(give) if give else "不換"))
-        if self.clicker:
-            for hc in hand:
-                if hc.card in give:
-                    self.clicker.card(hc)
-            self.clicker.button("換牌" if give else "不換")
+        if self.swap_target is None:
+            cards = tuple(c.card for c in hand)
+            give = rule_swap(cards, self.rng)
+            self.swap_target = frozenset(give)
+            self.log(f"[{stamp}] 換三張：手牌 {cards_text(cards)} → 建議"
+                     + (f"換 {cards_text(give)}" if give else "不換"))
+            self.display("換三張：" + (short(give) if give else "不換"))
+            self.save_shot(frame, "換三張")
+        if not self.clicker:
+            self.swap_finished = True
+            return
+        if not self.ready():
+            return
+        raised = {c.card for c in hand if c.raised}
+        if raised == self.swap_target:
+            name = "換牌" if self.swap_target else "不換"
+            if button_state(frame, name) == "on":
+                self.clicker.button(name)
+                self.log(f"[{stamp}] 按「{name}」")
+                self.swap_finished = True
+                self.acted()
+            return
+        for hc in hand:                       # 該選的沒選、不該選的選了：各點一次
+            if (hc.card in self.swap_target) != hc.raised:
+                self.clicker.card(hc)
+        self.acted()
 
     def handle_turn(self, stamp: str, frame) -> None:
         hand = self.hand
@@ -205,7 +244,8 @@ class Advisor:
             self.log(f"[{stamp}] 輪到自己（{target}；張數 下{count_tuple[1]} 對{count_tuple[2]} 上{count_tuple[3]}）"
                      f"手牌 {cards_text(cards)} → 建議 {describe(self.choice)}")
             self.display(overlay_text(self.choice))
-        if self.clicker:
+            self.save_shot(frame, "輪到自己")
+        if self.clicker and self.ready():
             self.execute(hand, frame)
 
     def execute(self, hand: list[HandCard], frame) -> None:
@@ -213,18 +253,22 @@ class Advisor:
         if choice is None:
             if button_state(frame, "PASS") == "on":
                 self.clicker.button("PASS")
+                self.acted()
             return
         raised = {c.card for c in hand if c.raised}
         if raised == set(choice.cards):
             if button_state(frame, "出牌") == "on":
                 self.clicker.button("出牌")
+                self.acted()
             return
-        if raised and button_state(frame, "重選") == "on":
-            self.clicker.button("重選")
-            return                      # 下一幀再選牌
+        if raised - set(choice.cards) and button_state(frame, "重選") == "on":
+            self.clicker.button("重選")       # 選了不該選的：清掉，下一輪再選
+            self.acted()
+            return
         for hc in hand:
             if hc.card in choice.cards and not hc.raised:
                 self.clicker.card(hc)
+        self.acted()
 
 
 def confirm_training_room(ask=input) -> bool:
@@ -261,7 +305,7 @@ def main() -> None:
             return
         clicker = Clicker()
     def worker(show=lambda text: None) -> None:
-        advisor = Advisor(Log(), clicker, args.samples, show=show)
+        advisor = Advisor(Log(), clicker, args.samples, show=show, live=True)
         advisor.log(f"[{datetime.now():%H:%M:%S}] 大老二{'自動' if clicker else '提示'}模式啟動（蒙地卡羅）")
         for stamp, frame in screen_frames(args.interval):
             advisor.step(stamp, frame)

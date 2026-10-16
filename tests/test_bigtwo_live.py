@@ -147,3 +147,63 @@ def test_advisor_display_only_sends_changes(tmp_path):
     for text in ("出 ♣2", "出 ♣2", None, None, "PASS"):
         advisor.display(text)
     assert shown == ["出 ♣2", None, "PASS"]
+
+
+# ---------- 自動點擊流程（假的畫面狀態） ----------
+
+class FakeClock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+def make_auto(tmp_path, monkeypatch, states):
+    import bigtwo.live as live
+    monkeypatch.setattr(live, "button_state", lambda frame, name: states.get(name))
+    clicks = []
+    advisor = live.Advisor(live.Log(tmp_path, echo=False), live.Clicker(click=clicks.append, sleep=lambda s: None))
+    advisor.clock = FakeClock()
+    return advisor, clicks
+
+
+def hand_cards(text, raised=""):
+    up = set(parse_cards(raised))
+    return [HandCard(card=card, x=100 + 131 * i, raised=card in up, score=1.0)
+            for i, card in enumerate(parse_cards(text))]
+
+
+def test_swap_clicks_cards_once_then_confirms(tmp_path, monkeypatch):
+    advisor, clicks = make_auto(tmp_path, monkeypatch, {"換牌": "on", "不換": "on"})
+    text = "3c 4d 5h 7d 9s Tc Jd Qc Kd Ac Ah 2s 2c"
+    advisor.swap_target = frozenset(parse_cards("4d 5h 7d"))
+    advisor.stable_hand = lambda frame: hand_cards(text)
+    advisor.handle_swap("t", None)
+    assert len(clicks) == 3
+    advisor.handle_swap("t", None)                 # 冷卻中：牌還沒浮上來也不能再點（會取消選取）
+    assert len(clicks) == 3
+    advisor.clock.now = 1.0
+    advisor.stable_hand = lambda frame: hand_cards(text, "4d 5h 7d")
+    advisor.handle_swap("t", None)
+    assert clicks[-1] == (1200, 587) and advisor.swap_finished   # 「換牌」中心
+
+
+def test_execute_clears_wrong_selection_before_choosing(tmp_path, monkeypatch):
+    advisor, clicks = make_auto(tmp_path, monkeypatch, {"重選": "on", "出牌": "on", "PASS": "on"})
+    advisor.choice = c("Ac Ah")
+    advisor.execute(hand_cards("3c 4d Ac Ah", "3c"), None)
+    assert clicks == [(752, 630)]                  # 重選
+    advisor.clock.now = 1.0
+    advisor.execute(hand_cards("3c 4d Ac Ah"), None)
+    assert len(clicks) == 3                        # 點 A♣、A♥
+    advisor.clock.now = 2.0
+    advisor.execute(hand_cards("3c 4d Ac Ah", "Ac Ah"), None)
+    assert clicks[-1] == (1350, 630)               # 出牌
+
+
+def test_execute_pass(tmp_path, monkeypatch):
+    advisor, clicks = make_auto(tmp_path, monkeypatch, {"PASS": "on"})
+    advisor.choice = None
+    advisor.execute(hand_cards("3c"), None)
+    assert clicks == [(1045, 630)]
