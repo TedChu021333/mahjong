@@ -31,6 +31,7 @@ class Tracker:
         self.hand_candidate: frozenset[int] | None = None
         self.hand_streak = 0
         self.my_cards: set[int] = set()                # 這局曾確認在自己手上的牌
+        self.expect: frozenset[int] | None = None       # 剛決定要出的牌（多張時一張張飛走）
 
     def _record(self, seat: int, combo: Combo) -> Play:
         """記一手出牌；從出牌順序補上中間 PASS 的人（畫面上 PASS 字不一定看得到）：
@@ -45,6 +46,8 @@ class Tracker:
             self.history.extend(Play(s, None) for s in skipped)
         play = Play(seat, combo)
         self.history.append(play)
+        if seat == ME:
+            self.expect = None
         self.shown[seat] = combo
         self.trick_open = True
         return play
@@ -66,6 +69,9 @@ class Tracker:
         self.my_cards |= cards
         gone = expected - cards
         if not gone or not cards < expected:
+            return []
+        if self.expect is not None and gone < self.expect:
+            # 決定出的一對 K 一張張從手牌飛走，曾被記成兩個單張（10/17 01:27）：等整手都走了再記
             return []
         combo = classify(gone)
         if combo is not None:

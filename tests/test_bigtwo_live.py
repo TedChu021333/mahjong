@@ -298,3 +298,23 @@ def test_match_end_clicked_after_two_frames_in_auto_only(tmp_path, monkeypatch):
     assert clicks == [(1600, 937)]
     hint = live.Advisor(live.Log(tmp_path, echo=False))
     hint.step("t", None); hint.step("t", None)  # 提示模式不按，也不出錯
+
+
+def test_pair_leaving_one_card_at_a_time_is_one_play():
+    # 10/17 01:27：決定出的一對 K 一張張從手牌飛走，被記成兩個單張
+    t = Tracker()
+    feed_hand(t, "3d 4d Kd Ks Ac")
+    t.expect = frozenset(parse_cards("Kd Ks"))
+    assert feed_hand(t, "3d 4d Kd Ac") == []
+    played = feed_hand(t, "3d 4d Ac")
+    assert [(p.seat, p.combo) for p in played] == [(0, c("Kd Ks"))]
+    assert t.expect is None
+
+
+def test_counter_text_counts_cards_outside():
+    from bigtwo.live import counter_text
+    hand = parse_cards("2s Ah 3c")
+    played = parse_cards("2c 2d Ac")
+    text = counter_text(hand, played)
+    assert "2:1" in text and "A:2" in text and "3:3" in text and "4:4" in text
+    assert "2 ♥" in text and "A ♦♠" in text and "共 46 張" in text

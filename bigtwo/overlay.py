@@ -40,12 +40,12 @@ def color_for(text: str) -> str:
     return "#ffffff"
 
 
-def load_position(path: Path = POSITION_FILE) -> tuple[int, int]:
+def load_position(path: Path = POSITION_FILE, default: tuple[int, int] = DEFAULT_POSITION) -> tuple[int, int]:
     try:
         x, y = (int(value) for value in path.read_text(encoding="utf-8").split(","))
         return x, y
     except (OSError, ValueError):
-        return DEFAULT_POSITION
+        return default
 
 
 def save_position(x: int, y: int, path: Path = POSITION_FILE) -> None:
@@ -55,9 +55,57 @@ def save_position(x: int, y: int, path: Path = POSITION_FILE) -> None:
         pass
 
 
+COUNTER_POSITION_FILE = Path(__file__).with_name("counter_position.txt")
+COUNTER_DEFAULT = (1220, 118)
+"""記牌視窗預設在右上 A／2 記牌器下方（拖曳可移動，位置記在 bigtwo/counter_position.txt）。"""
+COUNTER_WIDTH, COUNTER_HEIGHT = 680, 64
+
+
+class Counter:
+    """記牌小視窗：每個點數別人手上還有幾張（沒出過、不在自己手上），2 與 A 另列還在外面的花色。"""
+
+    def __init__(self, root: tk.Tk) -> None:
+        self.window = tk.Toplevel(root)
+        self.window.overrideredirect(True)
+        self.window.attributes("-topmost", True)
+        self.window.attributes("-alpha", ACTIVE_ALPHA)
+        x, y = load_position(COUNTER_POSITION_FILE, COUNTER_DEFAULT)
+        self.window.geometry(f"{COUNTER_WIDTH}x{COUNTER_HEIGHT}+{x}+{y}")
+        self.window.configure(bg=BACKGROUND)
+        self.label = tk.Label(self.window, font=("Consolas", 14, "bold"), fg="#e0e0e0", bg=BACKGROUND,
+                              justify=tk.LEFT, anchor="w")
+        self.label.pack(fill=tk.BOTH, expand=True, padx=8)
+        self.label.config(text="記牌：等待開局")
+        self._drag_from = None
+        for widget in (self.window, self.label):
+            widget.bind("<ButtonPress-1>", self._start)
+            widget.bind("<B1-Motion>", self._drag)
+            widget.bind("<ButtonRelease-1>", self._end)
+            widget.bind("<Button-3>", lambda _: self.window.withdraw())
+        self.window.update()
+        hwnd = ctypes.windll.user32.GetParent(self.window.winfo_id())
+        ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
+
+    def set(self, text: str) -> None:
+        self.label.config(text=text)
+
+    def _start(self, event) -> None:
+        self._drag_from = (event.x_root - self.window.winfo_x(), event.y_root - self.window.winfo_y())
+
+    def _drag(self, event) -> None:
+        if self._drag_from is not None:
+            dx, dy = self._drag_from
+            self.window.geometry(f"+{event.x_root - dx}+{event.y_root - dy}")
+
+    def _end(self, _) -> None:
+        self._drag_from = None
+        save_position(self.window.winfo_x(), self.window.winfo_y(), COUNTER_POSITION_FILE)
+
+
 class Overlay:
-    def __init__(self) -> None:
+    def __init__(self, counter: bool = True) -> None:
         self.messages: queue.Queue[str | None] = queue.Queue()
+        self.count_messages: queue.Queue[str] = queue.Queue()
         self.root = tk.Tk()
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
@@ -78,6 +126,11 @@ class Overlay:
         hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
         if not ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE):
             print("警告：無法把視窗排除在螢幕擷取之外，小視窗可能擋到辨識", flush=True)
+        self.counter = Counter(self.root) if counter else None
+
+    def show_counts(self, text: str) -> None:
+        """更新記牌視窗；可從其他執行緒呼叫。"""
+        self.count_messages.put(text)
 
     def show(self, text: str | None) -> None:
         """顯示建議；None 代表目前不需要決定。可從其他執行緒呼叫。"""
@@ -112,6 +165,14 @@ class Overlay:
             pass
         if latest is not ...:
             self._set(latest)
+        counts = None
+        try:
+            while True:
+                counts = self.count_messages.get_nowait()
+        except queue.Empty:
+            pass
+        if counts is not None and self.counter is not None:
+            self.counter.set(counts)
         self.root.after(50, self._poll)
 
     def run(self, worker: Callable[[], None]) -> None:

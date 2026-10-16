@@ -59,6 +59,15 @@ def short(cards) -> str:
     return " ".join(SUIT_SYMBOLS[suit_of(c)] + RANK_NAMES[rank_of(c)] for c in sorted(cards))
 
 
+def counter_text(hand, played) -> str:
+    """別人手上每個點數還有幾張（52 − 自己手上 − 已出過），2 與 A 列出還在外面的花色。"""
+    out = set(range(52)) - set(hand) - set(played)
+    ranks = "  ".join(f"{RANK_NAMES[r]}:{sum(1 for c in out if rank_of(c) == r)}" for r in range(13))
+    high = "  ".join(f"{RANK_NAMES[r]} " + ("".join(SUIT_SYMBOLS[suit_of(c)] for c in sorted(out)
+                                                     if rank_of(c) == r) or "－") for r in (12, 11))
+    return f"{ranks}\n外面：{high}（共 {len(out)} 張）"
+
+
 def overlay_text(combo: Combo | None) -> str:
     return "PASS" if combo is None else "出 " + short(combo.cards)
 
@@ -126,8 +135,11 @@ def video_frames(path: Path, step: float, start: float = 0.0) -> Iterator[tuple[
 
 class Advisor:
     def __init__(self, log: Log, clicker: Clicker | None = None, samples: int = 24, seed: int = 0,
-                 show: Callable[[str | None], None] = lambda text: None, live: bool = False):
+                 show: Callable[[str | None], None] = lambda text: None, live: bool = False,
+                 show_counts: Callable[[str], None] = lambda text: None):
         self.log = log
+        self.show_counts = show_counts
+        self.counts_shown: str | None = None
         self.live = live
         self.show = show
         self.shown: str | None = None
@@ -248,6 +260,11 @@ class Advisor:
         new += self.tracker.update(read_plays(frame))
         for play in new:
             self.log(f"[{stamp}] {SEAT_NAMES[play.seat]}出 {describe(play.combo)}")
+        if self.tracker.hand is not None:
+            text = counter_text(self.tracker.hand, self.tracker.played_cards())
+            if text != self.counts_shown:
+                self.counts_shown = text
+                self.show_counts(text)
         # 連續兩幀都是自己的回合、牌桌也沒有還沒確認的牌才下決定（一墩剛結束、別家剛出牌時畫面還在變）
         self.turn_frames = self.turn_frames + 1 if my_turn(frame) else 0
         if self.turn_frames >= 2 and self.tracker.settled:
@@ -306,6 +323,7 @@ class Advisor:
             view = View(ME, cards, count_tuple, last, last_seat, list(self.tracker.history), moves,
                         last is not None, DEFAULT_RULES)
             self.choice = self.policy(view, self.rng) if moves else None
+            self.tracker.expect = frozenset(self.choice.cards) if self.choice else None
             self.decided = key
             self.clicked_raised = None          # 新的決定：上一手的點牌紀錄不再比較
             target = "帶頭" if last is None else f"壓{SEAT_NAMES[last_seat]}的 {describe(last)}"
@@ -379,8 +397,8 @@ def main() -> None:
             print("已取消。真人場請用提示模式（不加 --auto）。")
             return
         clicker = Clicker()
-    def worker(show=lambda text: None) -> None:
-        advisor = Advisor(Log(), clicker, args.samples, show=show, live=True)
+    def worker(show=lambda text: None, show_counts=lambda text: None) -> None:
+        advisor = Advisor(Log(), clicker, args.samples, show=show, live=True, show_counts=show_counts)
         advisor.log(f"[{datetime.now():%H:%M:%S}] 大老二{'自動' if clicker else '提示'}模式啟動（蒙地卡羅）")
         for stamp, frame in screen_frames(args.interval):
             advisor.step(stamp, frame)
@@ -390,7 +408,7 @@ def main() -> None:
         return
     from .overlay import Overlay
     window = Overlay()
-    window.run(lambda: worker(window.show))
+    window.run(lambda: worker(window.show, window.show_counts))
 
 
 if __name__ == "__main__":

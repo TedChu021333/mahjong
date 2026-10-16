@@ -10,3 +10,4 @@ models/
 training/data/
 bigtwo_train/
 bigtwo/overlay_position.txt
+bigtwo/counter_position.txt
