@@ -1,7 +1,8 @@
 """大老二：讀自己的手牌（畫面下方）。
 
 每張牌只看左上角的點數與花色（「墨水」遮罩：深色或紅色的像素），不管牌怎麼排：
-一般排法間距 131.4px、置中；選起的牌上移 53px（上緣 y 695，平常 748）；
+Google Play Games 全螢幕版（10/16 起；之前的電腦版座標與模板在 train/bigtwo_pc/）一般排法間距 140px、
+牌寬 172、置中；選起的牌上移 65px（上緣 y 745，平常 810）；
 「刁牌」（自己拖曳整理）時間距不固定，所以用點數模板在整條手牌區滑動找，不寫死格線。
 
 模板放 `train/bigtwo/templates/rank/<點數>/*.png`、`suit/<花色>/*.png`，用
@@ -22,17 +23,18 @@ from .screen import read_image, write_image
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "train" / "bigtwo" / "templates"
 
-SPACING = 131.4
-CARD_WIDTH = 150
-TOP_NORMAL = 748
-TOP_RAISED = 695
-RANK_BOX = (2, 8, 60, 66)      # 相對牌左上角 (x0, y0, x1, y1)
-SUIT_BOX = (4, 70, 52, 112)
+SPACING = 140.0
+CARD_WIDTH = 172
+TOP_NORMAL = 810
+TOP_RAISED = 745
+RANK_BOX = (2, 6, 74, 84)      # 相對牌左上角 (x0, y0, x1, y1)
+SUIT_BOX = (6, 86, 62, 140)
 SEARCH_Y = (TOP_RAISED + RANK_BOX[1] - 8, TOP_NORMAL + RANK_BOX[1] + 8)
 RANK_THRESHOLD = 0.8             # 正常 ≥0.87（變暗的 2）；被動畫蓋一半的梅花 J 誤認成 5 是 0.71
 UNSURE_THRESHOLD = 0.6           # 介於兩者之間、旁邊又沒有認得的牌：可能是被蓋住的牌，整手不採用
 SUIT_THRESHOLD = 0.85            # 正常 ≥0.97；被游標蓋住的梅花 J 0.61
-MIN_GAP = 40                    # 兩張牌左上角至少差幾 px（刁牌時約 70）
+ROW_BAND = 10                   # 點數框上下容許偏差（px）
+MIN_GAP = 45                    # 兩張牌左上角至少差幾 px（刁牌時約 70）
 
 
 def ink(image: np.ndarray) -> np.ndarray:
@@ -59,7 +61,7 @@ def crop(image, x: int, top: int, box) -> np.ndarray:
 def uniform_positions(image: np.ndarray) -> list[tuple[int, int]]:
     """一般排法（置中、等距）時每張牌的左上角；排法不符合時回傳 []。"""
     white = image.min(axis=2) > 200
-    band = white[760:880].mean(axis=0)
+    band = white[830:960].mean(axis=0)
     cols = np.where(band > 0.4)[0]
     if len(cols) == 0:
         return []
@@ -70,7 +72,7 @@ def uniform_positions(image: np.ndarray) -> list[tuple[int, int]]:
     out = []
     for i in range(round(n)):
         x = int(round(left + SPACING * i))
-        raised = white[TOP_RAISED + 5:TOP_RAISED + 45, x + 10:x + 120].mean() > 0.8
+        raised = white[TOP_RAISED + 2:TOP_NORMAL - 4, x + 76:x + 130].mean() > 0.6   # 點數字右側的牌面
         out.append((x, TOP_RAISED if raised else TOP_NORMAL))
     return out
 
@@ -110,7 +112,7 @@ def _looks_like_card(image: np.ndarray, x: int, y: int) -> bool:
     top = y - RANK_BOX[1]
     if min(abs(top - TOP_NORMAL), abs(top - TOP_RAISED)) > 4:
         return False
-    face = image[top + 2:top + 70, x + 60:x + 110]
+    face = image[top + 2:top + 84, x + 76:x + 120]
     return face.size > 0 and (face.min(axis=2) > 90).mean() > 0.5   # 變暗的牌面約 109
 
 
@@ -133,8 +135,22 @@ def read_hand(image: np.ndarray, directory: Path = TEMPLATE_DIR) -> list[HandCar
         better = result > best
         best[better] = result[better]
         best_label[better] = rank
-    column = best.max(axis=0)
-    rows = best.argmax(axis=0)
+    # 每一欄先看那張牌有沒有選起來，只在牌實際所在的高度取分數：選起的牌下方（平常的高度）
+    # 曾把方塊 5 配成 3、分數 0.98 比正確的 5（0.96）還高（Google Play 錄影 4:13）。
+    # 選起來＝牌左上角右邊（點數字右側）在平常牌面上緣之上就是白的
+    white = (image[TOP_RAISED + 2:TOP_NORMAL - 4].min(axis=2) > 200).mean(axis=0)
+    window = np.convolve(white, np.ones(54) / 54, mode="full")[53:]          # [x, x+54) 的平均
+    raised_col = np.zeros(best.shape[1], dtype=bool)
+    lefts = np.arange(best.shape[1]) - RANK_BOX[0] + 76
+    ok = (lefts >= 0) & (lefts < len(window))
+    raised_col[ok] = window[lefts[ok]] > 0.6
+    bands = {}
+    for flag, top in ((True, TOP_RAISED), (False, TOP_NORMAL)):
+        r0 = max(0, top + RANK_BOX[1] - y0 - ROW_BAND)
+        r1 = min(best.shape[0], top + RANK_BOX[1] - y0 + ROW_BAND + 1)
+        bands[flag] = (best[r0:r1].max(axis=0), best[r0:r1].argmax(axis=0) + r0)
+    column = np.where(raised_col, bands[True][0], bands[False][0])
+    rows = np.where(raised_col, bands[True][1], bands[False][1])
     peaks = []
     for x in np.argsort(-column):
         score = float(column[x])

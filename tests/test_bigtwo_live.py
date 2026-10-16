@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from bigtwo.buttons import BUTTONS, button_state, my_turn, swap_phase
+from bigtwo.buttons import BUTTONS, button_state, center, my_turn, swap_phase
 from bigtwo.cards import parse_cards
 from bigtwo.combos import classify
 from bigtwo.counts import DIGIT_DIR, read_counts
@@ -96,7 +96,7 @@ def test_clicker_clicks_card_and_buttons_without_randomness():
     clicker.card(HandCard(card=0, x=97, raised=False, score=1.0))
     clicker.card(HandCard(card=1, x=228, raised=True, score=1.0))
     clicker.button("出牌")
-    assert clicks == [(162, 878), (293, 825), (1350, 630)]
+    assert clicks == [(167, 960), (298, 895), (1438, 670)]
 
 
 def test_auto_mode_requires_explicit_yes():
@@ -107,8 +107,9 @@ def test_auto_mode_requires_explicit_yes():
 # ---------- 畫面（需要 train/bigtwo/ 的截圖） ----------
 
 @pytest.mark.parametrize("name, turn, swap, play", [
-    ("變暗", True, False, "off"), ("出牌亮", True, False, "on"), ("帶頭", False, False, None),
-    ("換三張", False, True, None), ("手牌_a", False, False, None), ("結算", False, False, None),
+    ("輪到自己_出牌暗", True, False, "off"), ("出牌亮", True, False, "on"), ("帶頭_PASS暗", True, False, "on"),
+    ("換三張", False, True, None), ("手牌_24", False, False, None), ("結算", False, False, None),
+    ("對手出牌", False, False, None),
 ])
 def test_buttons(name, turn, swap, play):
     image = _image(name)
@@ -118,17 +119,18 @@ def test_buttons(name, turn, swap, play):
 
 
 def test_table_plays():
-    plays = read_plays(_image("對手出牌"))
-    assert plays == {0: c("Qd Qh"), 1: c("Kc Kh"), 2: None, 3: None}
-    plays = read_plays(_image("帶頭"))
-    assert plays[0] == c("Ac Ah") and plays[3] is None
+    # 上家的葫蘆散成扇形；下家的扇形左緣伸到對家的範圍也要整手算給下家
+    assert read_plays(_image("對手出牌")) == {0: None, 1: None, 2: None, 3: c("7d 7h Ac Ah As")}
+    assert read_plays(_image("下家葫蘆")) == {0: None, 1: c("6c 6d 6s Qc Qh"), 2: None, 3: None}
+    assert read_plays(_image("三家單張")) == {0: c("Js"), 1: c("Ad"), 2: None, 3: c("Td")}
+    assert read_plays(_image("帶頭_PASS暗")) == {s: None for s in range(4)}
 
 
 def test_counts():
     if not DIGIT_DIR.exists():
         pytest.skip("沒有數字模板")
-    assert read_counts(_image("帶頭")) == {1: 11, 2: 11, 3: 11}
-    assert read_counts(_image("刁牌")) == {1: 9, 2: 7, 3: 13}
+    assert read_counts(_image("張數")) == {1: 7, 2: 2, 3: 12}
+    assert read_counts(_image("出牌亮")) == {1: 8, 2: 13, 3: 6}
 
 
 # ---------- 小視窗文字 ----------
@@ -186,27 +188,27 @@ def test_swap_clicks_cards_once_then_confirms(tmp_path, monkeypatch):
     advisor.clock.now = 1.0
     advisor.stable_hand = lambda frame: hand_cards(text, "4d 5h 7d")
     advisor.handle_swap("t", None)
-    assert clicks[-1] == (1200, 587) and advisor.swap_finished   # 「換牌」中心
+    assert clicks[-1] == center("換牌") and advisor.swap_finished
 
 
 def test_execute_clears_wrong_selection_before_choosing(tmp_path, monkeypatch):
     advisor, clicks = make_auto(tmp_path, monkeypatch, {"重選": "on", "出牌": "on", "PASS": "on"})
     advisor.choice = c("Ac Ah")
     advisor.execute(hand_cards("3c 4d Ac Ah", "3c"), None)
-    assert clicks == [(752, 630)]                  # 重選
+    assert clicks == [center("重選")]
     advisor.clock.now = 1.0
     advisor.execute(hand_cards("3c 4d Ac Ah"), None)
     assert len(clicks) == 3                        # 點 A♣、A♥
     advisor.clock.now = 2.0
     advisor.execute(hand_cards("3c 4d Ac Ah", "Ac Ah"), None)
-    assert clicks[-1] == (1350, 630)               # 出牌
+    assert clicks[-1] == center("出牌")
 
 
 def test_execute_pass(tmp_path, monkeypatch):
     advisor, clicks = make_auto(tmp_path, monkeypatch, {"PASS": "on"})
     advisor.choice = None
     advisor.execute(hand_cards("3c"), None)
-    assert clicks == [(1045, 630)]
+    assert clicks == [center("PASS")]
 
 
 def test_auto_stops_when_clicks_have_no_effect(tmp_path, monkeypatch):

@@ -26,7 +26,7 @@ from .cards import HAND_SIZE, RANK_NAMES, SUIT_SYMBOLS, cards_text, rank_of, sui
 from .combos import Combo, legal_moves
 from .counts import read_counts
 from .game import View
-from .hand_reader import HandCard, read_hand
+from .hand_reader import TOP_NORMAL, TOP_RAISED, HandCard, read_hand
 from .mc_agent import make_mc_policy
 from .rules import DEFAULT_RULES
 from .screen import grab_screen, write_image
@@ -35,9 +35,9 @@ from .tracker import ME, Tracker
 
 RESULT_DIR = Path("result")
 SEAT_NAMES = {0: "自己", 1: "下家", 2: "對家", 3: "上家"}
-MOUSE_REST = (960, 60)          # 視窗標題列下方的黑邊：游標不要停在牌上
+MOUSE_REST = (450, 60)          # 左上角沙灘（Google Play 版）：游標不要停在牌或按鈕上
 CLICK_PAUSE = 0.25
-CARD_CLICK = (65, 130)          # 點牌：牌左上角往右下的位置（每張至少露出 65px 寬）
+CARD_CLICK = (70, 150)          # 點牌：牌左上角往右下的位置（每張露出 140px 寬；下緣 985 起是牌型提示鈕）
 ACTION_COOLDOWN = 0.8
 """點完一輪後至少等這麼久才看下一幀決定下一步：選起的牌要一下子才浮上來，太早再看會以為沒選到、
 又點一次反而取消選取（10/16 20:11 實戰換三張被打亂，可能原因之一）。"""
@@ -91,7 +91,7 @@ class Clicker:
         pyautogui.moveTo(*MOUSE_REST)
 
     def card(self, hand_card: HandCard) -> None:
-        top = 695 if hand_card.raised else 748
+        top = TOP_RAISED if hand_card.raised else TOP_NORMAL
         self.click((hand_card.x + CARD_CLICK[0], top + CARD_CLICK[1]))
         self.sleep(CLICK_PAUSE)
 

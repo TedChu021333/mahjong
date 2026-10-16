@@ -20,13 +20,13 @@ from .screen import read_image
 BUTTON_DIR = Path(__file__).resolve().parent.parent / "train" / "bigtwo" / "buttons"
 
 # 名稱 → (x0, y0, x1, y1)，點擊點取中心
-BUTTONS = {
-    "刁牌": (365, 600, 560, 660),
-    "重選": (655, 600, 850, 660),
-    "PASS": (950, 600, 1140, 660),
-    "出牌": (1240, 600, 1460, 660),
-    "不換": (610, 545, 830, 630),
-    "換牌": (1090, 545, 1310, 630),
+BUTTONS = {          # Google Play 版（全螢幕 1920x1080）
+    "刁牌": (225, 625, 480, 715),
+    "重選": (577, 625, 840, 715),
+    "PASS": (933, 625, 1200, 715),
+    "出牌": (1287, 625, 1590, 715),
+    "不換": (570, 570, 873, 672),
+    "換牌": (1050, 570, 1350, 672),
 }
 SHIFT = 8              # 比對時容許位置偏差（px）
 THRESHOLD = 0.8
@@ -42,6 +42,7 @@ def load_buttons(directory: Path = BUTTON_DIR) -> dict[str, list[tuple[str, np.n
     out: dict[str, list[tuple[str, np.ndarray]]] = {}
     for path in sorted(directory.glob("*.png")):
         name, state = path.stem.rsplit("_", 1)
+        state = state.rstrip("0123456789")        # on2：游標停在上面時顏色比較淺
         out.setdefault(name, []).append((state, read_image(path)))
     return out
 
@@ -53,7 +54,8 @@ def button_scores(image: np.ndarray, name: str, directory: Path = BUTTON_DIR) ->
     for state, template in load_buttons(directory).get(name, []):
         if area.shape[0] < template.shape[0] or area.shape[1] < template.shape[1]:
             continue
-        scores[state] = float(cv2.matchTemplate(area, template, cv2.TM_CCOEFF_NORMED).max())
+        score = float(cv2.matchTemplate(area, template, cv2.TM_CCOEFF_NORMED).max())
+        scores[state] = max(score, scores.get(state, -1.0))
     return scores
 
 

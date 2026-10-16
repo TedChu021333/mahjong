@@ -18,8 +18,8 @@ from typing import Callable
 
 WDA_EXCLUDEFROMCAPTURE = 0x11
 WIDTH, HEIGHT = 620, 86
-DEFAULT_POSITION = (140, 95)
-"""預設在左上角沙灘（「代打」右邊）：不擋手牌、按鈕、四家出牌區與剩幾張的數字。"""
+DEFAULT_POSITION = (170, 10)
+"""預設在左上角沙灘（「代打」右邊、Google Play 版）：不擋手牌、按鈕、四家出牌區與剩幾張的數字。"""
 POSITION_FILE = Path(__file__).with_name("overlay_position.txt")
 
 IDLE_TEXT = "等待中…"

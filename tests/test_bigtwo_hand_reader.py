@@ -10,15 +10,16 @@ TRAIN = Path(__file__).resolve().parent.parent / "train" / "bigtwo"
 
 pytestmark = pytest.mark.skipif(not (TEMPLATE_DIR / "rank").exists(), reason="沒有大老二模板（train/ 不進版控）")
 
-# 由錄影 bigtwo_train/Desktop 2026.10.16 - 18.22.28.03.mp4 擷取，標註目視確認
+# 由 Google Play 版錄影 bigtwo_train/Google Play Games 2026.10.16 - 20.59.16.05.mp4 擷取，標註目視確認
 CASES = {
-    "手牌_a": ("3h 3s 4c 4d 5h 7d Ts Qd Qh Ks Ac Ah 2s", "3s 4d 5h Ah 2s"),
-    "手牌_b": ("3c 3s 4s 5d 7h 7s 9d 9s Ts Ks Ac 2c 2s", ""),
-    "手牌_c": ("3h 4c 5c 5s 6d 6s 8c Tc Jc Jh Qc 2c 2h", ""),
-    # 刁牌：自己拖曳整理，左邊 5 張間距約 70px、右邊 5 張分開放
-    "刁牌": ("3h 4c 5d 6s 2c 3s Ts Jc Jh 2h", ""),
-    # 輪到自己、不能出的牌整張變暗；游標蓋住紅心 Q 的角落，只讀到 12 張
-    "變暗": ("3h 3s 4c 4d 5h 7d Ts Qd Ks Ac Ah 2s", "Ac"),
+    "手牌_24": ("3s 5c 6s 7c 7s Td Th Js Qc Qd Kh 2d 2s", ""),
+    "手牌_56": ("3h 3s 4s 7s 8d Tc Th Js Kh Ks Ah 2c 2s", ""),
+    "手牌_117": ("3c 5h 5s 6c 7c 8d 8s 9d 9s Jh Kd Ad Ah", ""),
+    "手牌_240": ("3d 5d 5h 5s 6d 6s 8d 9d 9h 9s Jc Kh Ks", "3d 8d"),
+    # 刁牌：自己拖曳整理，左邊 3 張疊得很緊、右邊分開
+    "刁牌": ("5d 5h 5s 6d 6h 6s 9d 9h 9s Jc Kh", ""),
+    "選起": ("3s 5h 7s 8d Tc Th Ts Js Kh Ks Ah 2c 2s", "Tc Th Ts"),
+    "換三張": ("3s 5c 6s 7h 7s Td Th Js Qc Qd Kh 2d 2s", "7h"),
 }
 
 
@@ -38,14 +39,23 @@ def test_read_hand(name):
     assert cards_text(c.card for c in hand if c.raised) == cards_text(parse_cards(raised))
 
 
-def test_covered_suit_rejects_whole_hand():
-    # 游標蓋住梅花 J 的花色：寧可整手不採用，也不要認成黑桃 J
-    assert read_hand(_image("刁牌_變暗_游標")) is None
+def test_covered_hand_is_not_guessed():
+    # 「你沒有更大的牌型可以出了！」提示字蓋住手牌下半：整手不採用
+    assert read_hand(_image("變暗_提示字")) is None
 
 
-def test_uniform_positions_only_for_even_layout():
-    assert len(uniform_positions(_image("手牌_b"))) == 13
-    assert uniform_positions(_image("刁牌")) == []
+def test_raised_five_not_read_as_three():
+    # 選起的方塊 5 下方（平常牌的高度）曾被配成 3、分數比 5 還高（錄影 4:13）
+    hand = read_hand(_image("選起5"))
+    assert [c.card for c in hand if c.raised] == parse_cards("5d")
+    assert parse_cards("3d")[0] not in [c.card for c in hand]
+
+
+def test_uniform_positions_for_template_extraction():
+    # 只在裁模板時用（一般排法）；刁牌時白色範圍可能剛好等於 13 張寬，執行時不靠它
+    positions = uniform_positions(_image("手牌_240"))
+    assert len(positions) == 13
+    assert [top for _, top in positions].count(745) == 2
 
 
 def test_no_hand_on_settlement():

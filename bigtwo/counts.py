@@ -15,7 +15,7 @@ from .screen import read_image, write_image
 DIGIT_DIR = Path(__file__).resolve().parent.parent / "train" / "bigtwo" / "digits"
 
 # 座位 1 下家（右）、2 對家（上）、3 上家（左）
-BADGES = {1: (1445, 277, 1510, 343), 2: (1015, 145, 1078, 212), 3: (425, 272, 488, 342)}
+BADGES = {1: (1555, 225, 1632, 312), 2: (1033, 65, 1102, 148), 3: (303, 225, 378, 312)}   # Google Play 版
 DIGIT_SIZE = (20, 30)
 DIGIT_THRESHOLD = 0.8
 
