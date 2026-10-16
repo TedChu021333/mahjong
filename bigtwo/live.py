@@ -46,6 +46,8 @@ ACTION_COOLDOWN = 0.8
 NO_EFFECT_LIMIT = 3
 """連續幾次點了牌、畫面上選起的牌都沒變，就停止自動點擊改成只提示。10/16 電腦版（StarMJ371）
 自動模式點擊完全沒反應：遊戲程式有保護（連權杖都不讓查），很可能忽略程式送出的點擊；不做任何繞過。"""
+THINK_SECONDS = 2.5
+"""實戰每手蒙地卡羅至少模擬 --samples 次，再繼續到用滿這麼多秒（每手限時 8 秒，點牌與動畫約 3 秒）。"""
 MAX_SHOTS = 300
 """每次執行最多存幾張決定當下的截圖（result/bigtwo/），檢查問題用。"""
 
@@ -144,7 +146,7 @@ class Advisor:
         self.show = show
         self.shown: str | None = None
         self.clicker = clicker
-        self.policy = make_mc_policy(samples=samples)
+        self.policy = make_mc_policy(samples=samples, time_limit=THINK_SECONDS)
         self.rng = Random(seed)
         self.tracker = Tracker()
         self.hand: list[HandCard] | None = None

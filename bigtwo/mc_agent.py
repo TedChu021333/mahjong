@@ -6,6 +6,7 @@
 差不多），跟牌時還拆一對 10 去壓 5（同一局面重算 6 次有 4 次選 6，是雜訊）。"""
 from __future__ import annotations
 
+import time
 from math import sqrt
 from random import Random
 
@@ -107,7 +108,11 @@ MAX_TRIES = 30
 
 
 def make_mc_policy(samples: int = 64, limit: int = 10, rollout=rule_policy, z: float = 2.0,
-                   pass_reject: float = PASS_REJECT):
+                   pass_reject: float = PASS_REJECT, time_limit: float | None = None,
+                   max_samples: int = 2000):
+    """time_limit：實戰用，至少模擬 samples 次，之後繼續到用完這麼多秒（最多 max_samples 次）。
+    10/17 實戰大家還有 11~12 張時用 2♠ 壓 2♦：1500 次模擬 PASS 好 1.46±0.82 張，但 64 次分不出來、
+    照規則式出 2；這個局面只有兩個候選，64 次只花 0.3 秒，限時 8 秒用不到一成。"""
     def mc_policy(view: View, rng: Random) -> Combo | None:
         candidates = _candidates(view, limit)
         if len(candidates) == 1:
@@ -117,7 +122,10 @@ def make_mc_policy(samples: int = 64, limit: int = 10, rollout=rule_policy, z: f
         others = [(view.seat + k) % PLAYERS for k in range(1, PLAYERS)]
         scores: list[list[float]] = [[] for _ in candidates]
         constraints = pass_constraints(view) if pass_reject > 0 else []
-        for _ in range(samples):
+        deadline = None if time_limit is None else time.monotonic() + time_limit
+        done = 0
+        while done < samples or (deadline is not None and done < max_samples and time.monotonic() < deadline):
+            done += 1
             for _ in range(MAX_TRIES):
                 rng.shuffle(unseen)
                 hands: list[list[int]] = [[] for _ in range(PLAYERS)]
