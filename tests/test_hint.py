@@ -139,62 +139,6 @@ def test_loop_saves_a_screenshot_when_win_is_lit_but_not_chosen(monkeypatch):
     assert "手牌 一萬一萬二萬" in lines[0][1] and "win" in lines[0][1]
 
 
-def test_loop_saves_a_screenshot_when_someone_new_declares(monkeypatch):
-    import hint.__main__ as hint_main
-
-    hand = T("11223789m99m4p56779s")
-    sequence = [frozenset(), frozenset({"top"}), frozenset({"top"}), frozenset({"top", "right"}),
-                frozenset(), frozenset({"top"})]  # 第 5 幀起是新的一局
-    frames = iter(Observation(hand, None, None, (), declared=seats) for seats in sequence)
-    monkeypatch.setattr(hint_main, "decide", lambda observation: None)
-    saved = []
-    hint_main.run(((str(i), "frame") for i in range(len(sequence))), readers=None,
-                  observe_fn=lambda frame, readers: next(frames),
-                  save_result=lambda frame, prefix="": saved.append(prefix) or "x.png",
-                  log=lambda line, detail=None, echo=True: None)
-    assert saved == ["宣告_對家_", "宣告_下家_", "宣告_對家_"]
-
-
-def test_loop_saves_a_frame_after_an_opponents_second_discard(monkeypatch):
-    import hint.__main__ as hint_main
-    from perception.river_tracker import RiverEvent
-
-    hand = T("11223789m99m4p56779s")
-    declared = iter([frozenset(), frozenset(), frozenset({"top"}), frozenset()])
-
-    class FakeRivers:
-        my_discards = 0
-
-        def __init__(self):
-            self.tracker = type("T", (), {"discards": {"left": [], "top": []}})()
-            self.events = iter([("left", 1), ("left", 2), ("top", 2), ("left", 3)])
-
-        def update(self, frame, observation):
-            seat, count = next(self.events)
-            self.tracker.discards[seat] = [0] * count
-            return [RiverEvent("discard", seat, 0, (0, 0, 1, 1))]
-
-        def discards(self):
-            return ((), (), (), ())
-
-        def meld_counts(self):
-            return (0, 0, 0, 0)
-
-        def exposed_tiles(self):
-            return ((), (), (), ())
-
-    monkeypatch.setattr(hint_main, "decide", lambda observation: None)
-    monkeypatch.setattr(hint_main, "RIVER_INTERVAL", 0)
-    saved = []
-    hint_main.run(((str(i), "frame") for i in range(4)), readers=None,
-                  observe_fn=lambda frame, readers: Observation(hand, None, None, (),
-                                                                declared=next(declared)),
-                  save_result=lambda frame, prefix="": saved.append(prefix) or "x.png",
-                  log=lambda line, detail=None, echo=True: None, rivers=FakeRivers())
-    # 上家第二張時沒認到宣告 → 存；對家第二張時已認到他宣告 → 不存；第三張不存
-    assert [prefix for prefix in saved if prefix.startswith("第二張")] == ["第二張_上家_"]
-
-
 def test_game_log_writes_detail_to_file(tmp_path):
     from hint.__main__ import GameLog
 

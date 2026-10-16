@@ -93,13 +93,6 @@ UNKNOWN_SCREEN_SECONDS = 15.0
 STUCK_SHOTS = 2
 STUCK_SHOT_INTERVAL = 0.5
 """卡住時除了當下那張，再每 0.5 秒多存 2 張（查 10/3 出牌點了沒反應 34 次的原因）。"""
-DECLARE_SHOTS = 300
-"""每次執行最多存幾張「宣告_」截圖：對家、下家的「聽」標記位置是猜的大範圍，10/6 曾兩次把下家
-認成對家（或反過來），收集實際畫面後再把 DECLARE_REGIONS 縮小分開。"""
-EARLY_DECLARE_SHOTS = 60
-"""每次執行最多存幾張「第二張_」截圖：對手打出第二張牌、還沒認到他宣告時存一張。10/15 放給已宣告者
-卻沒認到的 11 次中 9 次是地聽（第一張牌就聽），整局都沒認到；三家的「聽」標記位置與一般聽牌時
-相同處都沒有命中，可能地聽的標記不一樣。對照結算畫面有「地聽」的胡牌者找出這些截圖。"""
 SAVE_CLAIM_FRAMES = False
 """收集吃碰動畫截圖（10/2 一天存了 1116 張、2.7GB，夠用了，預設關閉）。"""
 
@@ -199,12 +192,6 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     focus_tried_at = float("-inf")
     unknown_saved_for = None
     """已經存過「不明畫面」截圖的那段期間（以 game_seen_at 區分）。"""
-    declared_seen: frozenset[str] = frozenset()
-    """目前這局認到的宣告者；有新增時存截圖（DECLARE_SHOTS），用來量對家、下家「聽」標記的位置。"""
-    declare_shots = 0
-    early_shots = 0
-    chow_shot_saved = False
-    """每次執行存一張「選吃法_」：多種吃法選項框的實戰截圖（測試用的 train/吃牌2.png 10/15 誤刪）。"""
     stuck_shots_left, stuck_shot_at = 0, float("-inf")
     """卡住後還要存幾張後續截圖（每 STUCK_SHOT_INTERVAL 秒一張），看點擊後畫面怎麼變。"""
     for stamp, frame in frames:
@@ -249,14 +236,6 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 for event in rivers.update(frame, observation):
                     name = tile_name(event.tile) if event.tile is not None else "?"
                     log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
-                    if (event.kind == "discard" and event.seat != "me"
-                            and early_shots < EARLY_DECLARE_SHOTS
-                            and len(rivers.tracker.discards.get(event.seat, ())) == 2
-                            and event.seat not in observation.declared):
-                        early_shots += 1
-                        path = save_result(frame, f"第二張_{DECLARED_NAMES[event.seat]}_")
-                        log(f"[{stamp}] {DECLARED_NAMES[event.seat]}打出第二張、沒認到宣告，"
-                            f"截圖存到 {path}", echo=False)
                     if SAVE_CLAIM_FRAMES and event.kind == "claimed" \
                             and clock() - banner_saved_at >= BANNER_COOLDOWN:
                         banner_saved_at = clock()
@@ -272,16 +251,6 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                                       my_discards=rivers.my_discards)
             if observation is not None:
                 game_seen_at = last_readable = clock()
-                new_declared = observation.declared - declared_seen
-                if new_declared and declare_shots < DECLARE_SHOTS:
-                    declare_shots += 1
-                    names = "".join(DECLARED_NAMES[seat] for seat in sorted(new_declared))
-                    log(f"[{stamp}] 認到{names}宣告，截圖存到 {save_result(frame, f'宣告_{names}_')}",
-                        echo=False)
-                declared_seen = observation.declared
-                if observation.chow_panels and not chow_shot_saved:
-                    chow_shot_saved = True
-                    log(f"[{stamp}] 選吃法畫面截圖存到 {save_result(frame, '選吃法_')}", echo=False)
                 if observation.dealer_streak is None and not streak_reported:
                     streak_reported = True  # 每次執行只存一張，補模板用
                     log(f"[{stamp}] 認不出連莊數（先當 {STREAK_UNKNOWN_GUESS}），截圖存到 "
