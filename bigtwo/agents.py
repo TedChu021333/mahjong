@@ -98,11 +98,82 @@ def plan_hand(hand) -> list[Combo]:
     return best[1]
 
 
-def rule_policy(view: View, rng: Random) -> Combo | None:
-    if not view.moves:
-        return None
+def _beatable_by(combo: Combo, unseen: list[int]) -> bool:
+    """看不到的牌裡有沒有同牌型更大的（只算單張、對子、三條；五張牌型與炸彈另判）。"""
+    if combo.kind == Kind.SINGLE:
+        return any(c > combo.cards[0] for c in unseen)
+    groups = [[] for _ in range(NUM_RANKS)]
+    for c in unseen:
+        groups[rank_of(c)].append(c)
+    if combo.kind == Kind.PAIR:
+        return any(len(g) >= 2 and max(g) > combo.key[0] for g in groups)
+    if combo.kind == Kind.TRIPLE:
+        return any(len(g) >= 3 and r > combo.key[0] for r, g in enumerate(groups))
+    return True
+
+
+def outlook(view: View, plan: list[Combo]) -> tuple[int, int]:
+    """（控制牌數, 小牌數）。控制＝別人很難壓的一手（2、別人壓不過的單張／對子／三條、葫蘆以上、
+    10 起頭以上的順子）；小牌＝8 以下的單張與對子（要靠上手才出得去）。依攻略「數控制與小牌」判斷好壞牌。"""
+    seen = view.played | set(view.hand)
+    unseen = [c for c in range(52) if c not in seen]
+    control = small = 0
+    for combo in plan:
+        if combo.size == 5:
+            control += combo.kind >= Kind.FULL_HOUSE or combo.key[0] >= 7
+        elif not _beatable_by(combo, unseen) or rank_of(combo.cards[-1]) == RANK_TWO:
+            control += 1
+        elif combo.kind in (Kind.SINGLE, Kind.PAIR) and rank_of(combo.cards[-1]) <= 5:
+            small += 1
+    return control, small
+
+
+ESCAPE_MARGIN = 1
+"""控制牌 + ESCAPE_MARGIN ≤ 小牌 就算爛牌。arena 6000 副（對 margin 2）：0 +0.13±0.12、1 +0.24±0.09、
+3 −0.26±0.06、一律逃牌 −0.21±0.16。"""
+ESCAPE_LIMIT = 9
+"""逃牌時手上超過幾張就拆牌也要出（輸家超過 9 張再乘倍率）。7 張 −0.06±0.05、11 張 −0.18±0.04。"""
+
+
+def make_rule_policy(escape: bool = True):
+    """escape：爛牌時改成逃牌——張數超過 9 張時帶頭出一次最多張的那手、跟牌時拆牌也要出，
+    先降到 9 張以下（輸家「超過9張」「13張未出」各再乘本局倍率；攻略「少輸比贏牌重要」）。
+    arena 8000 副（margin 2、會提早打 2 的版本）對不逃牌：+0.50±0.07 張/局。
+    提早把 2 打掉（攻略說 2 不要留到最後）實測反而差：不刻意打 2 +0.07±0.05，所以不做。"""
+
+    def policy(view: View, rng: Random) -> Combo | None:
+        if not view.moves:
+            return None
+        plan = plan_hand(view.hand)
+        if escape:
+            control, small = outlook(view, plan)
+            if control + ESCAPE_MARGIN <= small:
+                choice = _escape(view, plan)
+                if choice is not None:
+                    return choice
+        return _normal(view, plan)
+
+    return policy
+
+
+def _escape(view: View, plan: list[Combo]) -> Combo | None:
     moves = set(view.moves)
-    plan = plan_hand(view.hand)
+    many = len(view.hand) > ESCAPE_LIMIT
+    if view.last is None:
+        legal_plan = [c for c in plan if c in moves] or list(view.moves)
+        if many:   # 一次出最多張的那手（五張牌型、三條、對子）
+            return max(legal_plan, key=lambda c: (c.size, -_strength(c)[2][0] if c.size < 5 else 0))
+        return None    # 張數已安全：照一般打法
+    in_plan = sorted((c for c in plan if c in moves), key=_strength)
+    if in_plan:
+        return in_plan[0]
+    if many:               # 還超過 9 張：拆牌也要出
+        return max(view.moves, key=lambda c: (c.size, -_strength(c)[2][0] if c.size < 5 else 0))
+    return None
+
+
+def _normal(view: View, plan: list[Combo]) -> Combo | None:
+    moves = set(view.moves)
     nxt = view.counts[(view.seat + 1) % 4]
     danger = min(n for s, n in enumerate(view.counts) if s != view.seat)
 
@@ -139,6 +210,11 @@ def rule_policy(view: View, rng: Random) -> Combo | None:
     if danger <= 3 or len(view.hand) <= 4:
         return min(view.moves, key=_strength)
     return None
+
+
+
+rule_policy = make_rule_policy(escape=True)
+old_rule_policy = make_rule_policy(escape=False)     # 10/17 之前（沒有逃牌）
 
 
 SWAP_MAX_RANK = 8

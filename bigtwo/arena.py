@@ -9,7 +9,7 @@ import argparse
 from math import sqrt
 from random import Random
 
-from .agents import random_policy, rule_policy, rule_swap, smallest_policy
+from .agents import old_rule_policy, random_policy, rule_policy, rule_swap, smallest_policy
 from .cards import deal
 from .game import no_swap, play_game
 from .mc_agent import make_mc_policy
@@ -20,8 +20,9 @@ POLICIES = {
     "smallest": (smallest_policy, no_swap),
     "rule": (rule_policy, rule_swap),
     "rule-noswap": (rule_policy, no_swap),
+    "rule-old": (old_rule_policy, rule_swap),     # 10/17 之前（沒有逃牌）
     "mc": (make_mc_policy(), rule_swap),
-    "mc-old": (make_mc_policy(samples=24, limit=8, z=0.0), rule_swap),   # 10/16 之前：直接取平均最高
+    "mc-old": (make_mc_policy(samples=24, limit=8, z=0.0, rollout=old_rule_policy), rule_swap),  # 10/16 之前
 }
 
 
