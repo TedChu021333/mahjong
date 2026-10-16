@@ -30,6 +30,7 @@ from .hand_reader import TOP_NORMAL, TOP_RAISED, HandCard, read_hand
 from .mc_agent import make_mc_policy
 from .rules import DEFAULT_RULES
 from .screen import grab_screen, write_image
+from .settlement import is_settlement
 from .table_reader import read_plays
 from .tracker import ME, Tracker
 
@@ -146,6 +147,7 @@ class Advisor:
         self.shots = 0
         self.shot_dir = RESULT_DIR / "bigtwo"
         self.clock: Callable[[], float] = time.monotonic
+        self.settle_frame: np.ndarray | None = None
 
     def save_shot(self, frame, label: str) -> None:
         if self.shots >= MAX_SHOTS or self.clicker is None and not self.live:
@@ -193,7 +195,23 @@ class Advisor:
             self.shown = text
             self.show(text)
 
+    def save_settlement(self, stamp: str) -> None:
+        """結算畫面消失時存最後一張（加倍標籤都跳完了）：result/bigtwo/<時間>_結算.png，戰績統計用。"""
+        frame, self.settle_frame = self.settle_frame, None
+        if self.live:
+            path = self.shot_dir / f"{datetime.now():%Y%m%d_%H%M%S}_結算.png"
+            write_image(path, frame)
+            self.log(f"[{stamp}] 結算畫面存到 {path}")
+        else:
+            self.log(f"[{stamp}] 結算")
+
     def step(self, stamp: str, frame: np.ndarray) -> None:
+        if is_settlement(frame):
+            self.settle_frame = frame
+            self.display(None)
+            return
+        if self.settle_frame is not None:
+            self.save_settlement(stamp)
         if swap_phase(frame):
             if self.swap_finished and self.tracker.history:
                 self.swap_target, self.swap_finished = None, False   # 新的一局

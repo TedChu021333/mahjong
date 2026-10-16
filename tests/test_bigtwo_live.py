@@ -256,3 +256,23 @@ def test_mc_pass_constraints_from_history():
     history = [Play(1, c("5d")), Play(2, None), Play(3, c("9d")), Play(0, None)]
     view = View(0, tuple(parse_cards("3c")), (1, 12, 12, 12), c("9d"), 3, history, [], True)
     assert pass_constraints(view) == [(2, c("5d"), 1)]
+
+
+def test_settlement_detected_and_saved_once(tmp_path, monkeypatch):
+    import numpy as np
+    import bigtwo.live as live
+    from bigtwo.settlement import is_settlement
+    assert is_settlement(_image("結算_48"))
+    assert not is_settlement(_image("出牌亮")) and not is_settlement(_image("換三張"))
+    saved = []
+    monkeypatch.setattr(live, "write_image", lambda path, frame: saved.append(path))
+    monkeypatch.setattr(live, "is_settlement", lambda frame: frame is not None and frame.mean() == 1)
+    monkeypatch.setattr(live, "swap_phase", lambda frame: False)
+    monkeypatch.setattr(live, "read_hand", lambda frame: None)
+    monkeypatch.setattr(live, "read_plays", lambda frame: {s: None for s in range(4)})
+    monkeypatch.setattr(live, "my_turn", lambda frame: False)
+    advisor = live.Advisor(live.Log(tmp_path, echo=False), live=True)
+    advisor.shot_dir = tmp_path
+    for value in (0, 1, 1, 1, 0, 0):
+        advisor.step("t", np.full((4, 4, 3), value, dtype=np.uint8))
+    assert len(saved) == 1 and "結算" in saved[0].name
