@@ -318,3 +318,17 @@ def test_counter_text_counts_cards_outside():
     text = counter_text(hand, played)
     assert "2:1" in text and "A:2" in text and "3:3" in text and "4:4" in text
     assert "2 ♥" in text and "A ♦♠" in text and "共 46 張" in text
+
+
+def test_to_beat_follows_pass_button(tmp_path, monkeypatch):
+    import bigtwo.live as live
+    advisor = live.Advisor(live.Log(tmp_path, echo=False))
+    t = advisor.tracker
+    feed_hand(t, "3c 4c 5c 6c 7c 8c 9c Tc Jc Qc Kc Ac 2c")
+    feed(t, {0: None, 1: c("2h"), 2: None, 3: None})
+    t.update({s: None for s in range(4)})               # 動畫把桌面清空一下：紀錄以為一墩結束
+    monkeypatch.setattr(live, "button_state", lambda frame, name: "on")
+    assert advisor.to_beat(None) == (c("2h"), 1)      # PASS 亮著：其實在跟牌
+    monkeypatch.setattr(live, "button_state", lambda frame, name: "off")
+    assert advisor.to_beat(None) == (None, None)      # PASS 暗：帶頭
+    assert live.button_state is not None

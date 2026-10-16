@@ -314,7 +314,7 @@ class Advisor:
         cards = tuple(c.card for c in hand)
         if self.tracker.hand != frozenset(cards):
             return                      # 手牌還沒連續讀到一樣（動畫蓋住幾張等）：等下一幀
-        last, last_seat = self.tracker.to_beat()
+        last, last_seat = self.to_beat(frame)
         key = (cards, last, len(self.tracker.history))
         if key != self.decided:
             counts = read_counts(frame)
@@ -335,6 +335,20 @@ class Advisor:
             self.save_shot(frame, "輪到自己")
         if self.clicker and self.ready():
             self.execute(hand, frame, stamp)
+
+    def to_beat(self, frame) -> tuple[Combo | None, int | None]:
+        """要壓的牌。帶頭時遊戲的 PASS 鈕是暗的（不能 PASS）、跟牌時是亮的，以畫面為準：
+        10/17 02:10 一墩還沒結束、桌面被動畫清空一下，出牌紀錄就當成自己帶頭。"""
+        last, last_seat = self.tracker.to_beat()
+        state = button_state(frame, "PASS")
+        if state == "off":
+            return None, None
+        if state == "on" and last is None:
+            play = next((p for p in reversed(self.tracker.history)
+                         if p.combo is not None and p.seat != ME), None)
+            if play is not None:
+                return play.combo, play.seat
+        return last, last_seat
 
     def execute(self, hand: list[HandCard], frame, stamp: str = "") -> None:
         # 先看上次點牌有沒有效果（不論接下來是按出牌、重選或再點牌）：只在點牌前才看時，點成功後
