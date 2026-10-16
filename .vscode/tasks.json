@@ -4,6 +4,15 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "總選單（麻將、大老二全部功能）",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv-train/Scripts/python.exe",
+      "args": ["start.py"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8" } },
+      "presentation": { "panel": "dedicated", "focus": true, "clear": true },
+      "problemMatcher": []
+    },
+    {
       "label": "麻將：自動模式（訓練場）",
       "type": "process",
       "command": "${workspaceFolder}/.venv-train/Scripts/python.exe",
