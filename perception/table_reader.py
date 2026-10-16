@@ -207,7 +207,8 @@ def read_chow_panels(image: np.ndarray) -> tuple[tuple[int, int], ...]:
                 if CHOW_PANEL_WIDTH[0] <= end - start <= CHOW_PANEL_WIDTH[1]:
                     panels.append(((start + end) // 2, (top + bottom) // 2))
                 start = None
-    return tuple(panels)
+    # 遊戲只在吃法不只一種時才跳選項框；只找到一個「框」是牌河裡一排連著的亮牌（10/16 兩次誤判）
+    return tuple(panels) if len(panels) >= 2 else ()
 
 
 def read_declared(image: np.ndarray, template: np.ndarray | None) -> frozenset[str]:
