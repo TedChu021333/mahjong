@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import time
-from math import sqrt
+from math import exp, sqrt
 from random import Random
 
 from .agents import _small_groups, _strength, plan_hand, rule_policy
@@ -107,9 +107,29 @@ PASS_REJECT = 0.7
 MAX_TRIES = 30
 
 
+def hand_strength(cards) -> float:
+    """對手手牌的強度：2 各 1、A 各 0.5、三條 1（有對子湊葫蘆再 +0.5）、鐵支 2。"""
+    counts = [0] * 13
+    for c in cards:
+        counts[rank_of(c)] += 1
+    pairs = sum(1 for k in counts if k >= 2)
+    score = counts[12] + 0.5 * counts[11]
+    for k in counts:
+        if k == 4:
+            score += 2
+        elif k == 3:
+            score += 1 + (0.5 if pairs > 1 else 0)
+    return score
+
+
+STRONG_BIAS = 0.0
+"""發牌偏向：每次抽 STRONG_PICK 種分法，以 exp(偏向 × 三家強度和) 的權重挑一種。0＝完全隨機。"""
+STRONG_PICK = 4
+
+
 def make_mc_policy(samples: int = 64, limit: int = 10, rollout=rule_policy, z: float = 2.0,
                    pass_reject: float = PASS_REJECT, time_limit: float | None = None,
-                   max_samples: int = 2000):
+                   max_samples: int = 2000, opponent_rollout=None, strong_bias: float = STRONG_BIAS):
     """time_limit：實戰用，至少模擬 samples 次，之後繼續到用完這麼多秒（最多 max_samples 次）。
     10/17 實戰大家還有 11~12 張時用 2♠ 壓 2♦：1500 次模擬 PASS 好 1.46±0.82 張，但 64 次分不出來、
     照規則式出 2；這個局面只有兩個候選，64 次只花 0.3 秒，限時 8 秒用不到一成。"""
@@ -124,8 +144,10 @@ def make_mc_policy(samples: int = 64, limit: int = 10, rollout=rule_policy, z: f
         constraints = pass_constraints(view) if pass_reject > 0 else []
         deadline = None if time_limit is None else time.monotonic() + time_limit
         done = 0
-        while done < samples or (deadline is not None and done < max_samples and time.monotonic() < deadline):
-            done += 1
+        policies = [opponent_rollout or rollout] * PLAYERS
+        policies[view.seat] = rollout
+
+        def draw() -> list[list[int]]:
             for _ in range(MAX_TRIES):
                 rng.shuffle(unseen)
                 hands: list[list[int]] = [[] for _ in range(PLAYERS)]
@@ -137,9 +159,19 @@ def make_mc_policy(samples: int = 64, limit: int = 10, rollout=rule_policy, z: f
                 bad = _violations(hands, constraints, view.history) if constraints else 0
                 if not bad or rng.random() >= 1 - (1 - pass_reject) ** bad:
                     break
+            return hands
+
+        while done < samples or (deadline is not None and done < max_samples and time.monotonic() < deadline):
+            done += 1
+            if strong_bias > 0:
+                options = [draw() for _ in range(STRONG_PICK)]
+                weights = [exp(strong_bias * sum(hand_strength(h[s]) for s in others)) for h in options]
+                hands = rng.choices(options, weights)[0]
+            else:
+                hands = draw()
             seed = rng.random()
             for i, move in enumerate(candidates):
-                result = continue_game(view, hands, move, [rollout] * PLAYERS, Random(seed))
+                result = continue_game(view, hands, move, policies, Random(seed))
                 scores[i].append(result.scores[view.seat])
         return choose(candidates, scores, z)
 

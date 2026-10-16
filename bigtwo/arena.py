@@ -9,7 +9,7 @@ import argparse
 from math import sqrt
 from random import Random
 
-from .agents import nofinish_policy, old_rule_policy, random_policy, rule_policy, rule_swap, smallest_policy
+from .agents import conservative_policy, nofinish_policy, old_rule_policy, random_policy, rule_policy, rule_swap, smallest_policy
 from .cards import deal
 from .game import no_swap, play_game
 from .mc_agent import make_mc_policy
@@ -24,6 +24,10 @@ POLICIES = {
     "rule-nofinish": (nofinish_policy, rule_swap),
     "mc": (make_mc_policy(), rule_swap),
     "mc-nopass": (make_mc_policy(pass_reject=0.0), rule_swap),     # 不用 PASS 推測
+    "cons": (conservative_policy, rule_swap),                         # 模仿實戰對手：留 2 與炸彈
+    "mc-cons": (make_mc_policy(opponent_rollout=conservative_policy), rule_swap),
+    "mc-strong": (make_mc_policy(strong_bias=0.5), rule_swap),
+    "mc-both": (make_mc_policy(opponent_rollout=conservative_policy, strong_bias=0.5), rule_swap),
     "mc-old": (make_mc_policy(samples=24, limit=8, z=0.0, rollout=old_rule_policy), rule_swap),  # 10/16 之前
 }
 

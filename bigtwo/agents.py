@@ -4,7 +4,7 @@ from __future__ import annotations
 from random import Random
 
 from .cards import CLUB_THREE, NUM_RANKS, RANK_TWO, rank_of, suit_of
-from .combos import STRAIGHTS, Combo, Kind, beats, classify
+from .combos import BOMBS, STRAIGHTS, Combo, Kind, beats, classify
 from .game import View
 
 
@@ -294,3 +294,31 @@ def rule_swap(hand, rng: Random) -> list[int]:
     """換三張：拆牌規劃裡落單的小牌（J 以下、不含梅花 3）由小到大最多 3 張。"""
     singles = sorted(c.cards[0] for c in plan_hand(hand) if c.kind == Kind.SINGLE)
     return [c for c in singles if rank_of(c) <= SWAP_MAX_RANK and c != CLUB_THREE][:3]
+
+
+HOLD_UNTIL = 4
+"""保守打法：有人剩這麼多張以下、或自己剩 5 張以下，才拿 2 與炸彈出來用。"""
+
+
+def _uses_big(combo: Combo) -> bool:
+    return combo.kind in BOMBS or any(rank_of(c) == RANK_TWO for c in combo.cards)
+
+
+def conservative_policy(view: View, rng: Random) -> Combo | None:
+    """模仿實戰對手：留 2、鐵支、同花順到最後才用（10/17 實戰對手常在後面連出 2 與炸彈）。
+    蒙地卡羅模擬裡的對手、以及 arena 裡代表「實戰對手」的基準都用它。"""
+    choice = rule_policy(view, rng)
+    if choice is None or not _uses_big(choice):
+        return choice
+    others = min(n for s, n in enumerate(view.counts) if s != view.seat)
+    if others <= HOLD_UNTIL or len(view.hand) <= 5:
+        return choice
+    if view.last is not None:
+        return None
+    small = [m for m in view.moves if not _uses_big(m)]
+    if not small:
+        return choice
+    lowest = min(view.hand)
+    with_lowest = [m for m in small if lowest in m.cards]
+    pool = with_lowest or small
+    return max(pool, key=lambda m: (m.size, -_strength(m)[2][0] if m.size < 5 else 0))
