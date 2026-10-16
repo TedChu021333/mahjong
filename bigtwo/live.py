@@ -1,6 +1,8 @@
 """大老二提示模式／自動模式（與麻將的 hint/ 分開）。
 
-python -m bigtwo.live                      提示模式：輪到自己時印出建議，人來點
+python -m bigtwo.live                      提示模式：輪到自己時印出建議並顯示浮動小視窗，人來點
+python -m bigtwo.live --no-overlay         只印在終端機
+python -m bigtwo.live --demo-overlay       預覽小視窗、拖曳調整位置
 python -m bigtwo.live --auto               自動點擊：只在對手全是電腦的場使用，啟動時要輸入 y 確認
 python -m bigtwo.live --video <mp4> [--start 秒] [--step 0.5]   用錄影回放測試
 
@@ -20,7 +22,7 @@ import numpy as np
 
 from .agents import rule_swap
 from .buttons import button_state, center, my_turn, swap_phase
-from .cards import HAND_SIZE, cards_text
+from .cards import HAND_SIZE, RANK_NAMES, SUIT_SYMBOLS, cards_text, rank_of, suit_of
 from .combos import Combo, legal_moves
 from .counts import read_counts
 from .game import View
@@ -40,6 +42,15 @@ CARD_CLICK = (65, 130)          # 點牌：牌左上角往右下的位置（每�
 
 def describe(combo: Combo | None) -> str:
     return "PASS" if combo is None else str(combo)
+
+
+def short(cards) -> str:
+    """小視窗用：♥3 ♣4（花色符號＋點數）。"""
+    return " ".join(SUIT_SYMBOLS[suit_of(c)] + RANK_NAMES[rank_of(c)] for c in sorted(cards))
+
+
+def overlay_text(combo: Combo | None) -> str:
+    return "PASS" if combo is None else "出 " + short(combo.cards)
 
 
 class Log:
@@ -104,8 +115,11 @@ def video_frames(path: Path, step: float, start: float = 0.0) -> Iterator[tuple[
 
 
 class Advisor:
-    def __init__(self, log: Log, clicker: Clicker | None = None, samples: int = 24, seed: int = 0):
+    def __init__(self, log: Log, clicker: Clicker | None = None, samples: int = 24, seed: int = 0,
+                 show: Callable[[str | None], None] = lambda text: None):
         self.log = log
+        self.show = show
+        self.shown: str | None = None
         self.clicker = clicker
         self.policy = make_mc_policy(samples=samples)
         self.rng = Random(seed)
@@ -123,6 +137,11 @@ class Advisor:
         steady = cards is not None and cards == self.previous_hand
         self.previous_hand = cards
         return hand if steady else None
+
+    def display(self, text: str | None) -> None:
+        if text != self.shown:
+            self.shown = text
+            self.show(text)
 
     def step(self, stamp: str, frame: np.ndarray) -> None:
         if swap_phase(frame):
@@ -142,6 +161,8 @@ class Advisor:
         self.turn_frames = self.turn_frames + 1 if my_turn(frame) else 0
         if self.turn_frames >= 2 and self.tracker.settled:
             self.handle_turn(stamp, frame)
+        elif self.turn_frames == 0:
+            self.display(None)
 
     def handle_swap(self, stamp: str, frame) -> None:
         if self.swap_done:
@@ -154,6 +175,7 @@ class Advisor:
         self.log(f"[{stamp}] 換三張：手牌 {cards_text(cards)} → 建議"
                  + (f"換 {cards_text(give)}" if give else "不換"))
         self.swap_done = True
+        self.display("換三張：" + (short(give) if give else "不換"))
         if self.clicker:
             for hc in hand:
                 if hc.card in give:
@@ -182,6 +204,7 @@ class Advisor:
             target = "帶頭" if last is None else f"壓{SEAT_NAMES[last_seat]}的 {describe(last)}"
             self.log(f"[{stamp}] 輪到自己（{target}；張數 下{count_tuple[1]} 對{count_tuple[2]} 上{count_tuple[3]}）"
                      f"手牌 {cards_text(cards)} → 建議 {describe(self.choice)}")
+            self.display(overlay_text(self.choice))
         if self.clicker:
             self.execute(hand, frame)
 
@@ -217,7 +240,14 @@ def main() -> None:
     parser.add_argument("--step", type=float, default=0.5)
     parser.add_argument("--interval", type=float, default=0.3)
     parser.add_argument("--samples", type=int, default=24, help="蒙地卡羅每個候選模擬幾次")
+    parser.add_argument("--no-overlay", action="store_true", help="不顯示浮動小視窗")
+    parser.add_argument("--demo-overlay", action="store_true", help="預覽小視窗（可拖曳調整位置）")
     args = parser.parse_args()
+
+    if args.demo_overlay:
+        from .overlay import demo
+        demo()
+        return
 
     if args.video:
         advisor = Advisor(Log(), None, args.samples)
@@ -230,10 +260,18 @@ def main() -> None:
             print("已取消。真人場請用提示模式（不加 --auto）。")
             return
         clicker = Clicker()
-    advisor = Advisor(Log(), clicker, args.samples)
-    advisor.log(f"[{datetime.now():%H:%M:%S}] 大老二{'自動' if clicker else '提示'}模式啟動（蒙地卡羅）")
-    for stamp, frame in screen_frames(args.interval):
-        advisor.step(stamp, frame)
+    def worker(show=lambda text: None) -> None:
+        advisor = Advisor(Log(), clicker, args.samples, show=show)
+        advisor.log(f"[{datetime.now():%H:%M:%S}] 大老二{'自動' if clicker else '提示'}模式啟動（蒙地卡羅）")
+        for stamp, frame in screen_frames(args.interval):
+            advisor.step(stamp, frame)
+
+    if args.no_overlay:
+        worker()
+        return
+    from .overlay import Overlay
+    window = Overlay()
+    window.run(lambda: worker(window.show))
 
 
 if __name__ == "__main__":

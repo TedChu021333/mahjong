@@ -129,3 +129,21 @@ def test_counts():
         pytest.skip("沒有數字模板")
     assert read_counts(_image("帶頭")) == {1: 11, 2: 11, 3: 11}
     assert read_counts(_image("刁牌")) == {1: 9, 2: 7, 3: 13}
+
+
+# ---------- 小視窗文字 ----------
+
+def test_overlay_text_uses_suit_symbols():
+    from bigtwo.live import overlay_text, short
+    assert overlay_text(c("3h 4c 5d 6s 2c")) == "出 ♥3 ♣4 ♦5 ♠6 ♣2"
+    assert overlay_text(None) == "PASS"
+    assert short(parse_cards("Th 2s")) == "♥10 ♠2"
+
+
+def test_advisor_display_only_sends_changes(tmp_path):
+    from bigtwo.live import Advisor, Log
+    shown = []
+    advisor = Advisor(Log(tmp_path, echo=False), show=shown.append)
+    for text in ("出 ♣2", "出 ♣2", None, None, "PASS"):
+        advisor.display(text)
+    assert shown == ["出 ♣2", None, "PASS"]

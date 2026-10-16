@@ -9,3 +9,4 @@ result/
 models/
 training/data/
 bigtwo_train/
+bigtwo/overlay_position.txt

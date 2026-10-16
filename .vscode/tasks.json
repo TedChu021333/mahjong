@@ -32,6 +32,24 @@
       "problemMatcher": []
     },
     {
+      "label": "大老二：提示模式（不自動點擊）",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv-train/Scripts/python.exe",
+      "args": ["-m", "bigtwo.live"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8" } },
+      "presentation": { "panel": "dedicated", "focus": true, "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "大老二：自動模式（只限對手全是電腦的場）",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv-train/Scripts/python.exe",
+      "args": ["-m", "bigtwo.live", "--auto"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8" } },
+      "presentation": { "panel": "dedicated", "focus": true, "clear": true },
+      "problemMatcher": []
+    },
+    {
       "label": "麻將：今天戰績",
       "type": "process",
       "command": "${workspaceFolder}/.venv-train/Scripts/python.exe",
