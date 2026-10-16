@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from random import Random
 
-from .cards import NUM_RANKS, RANK_TWO, rank_of, suit_of
+from .cards import CLUB_THREE, NUM_RANKS, RANK_TWO, rank_of, suit_of
 from .combos import STRAIGHTS, Combo, Kind, beats, classify
 from .game import View
 
@@ -139,3 +139,14 @@ def rule_policy(view: View, rng: Random) -> Combo | None:
     if danger <= 3 or len(view.hand) <= 4:
         return min(view.moves, key=_strength)
     return None
+
+
+SWAP_MAX_RANK = 8
+"""換三張只換 J 以下的落單牌。arena 2000 副（其他三家都換）：J 以下比 8 以下 +1.01±0.42 張；
+Q、K、A 以下 +0.03、−0.03、−0.27，10 以下 −0.21；連梅花 3 一起換 −0.18±0.16。"""
+
+
+def rule_swap(hand, rng: Random) -> list[int]:
+    """換三張：拆牌規劃裡落單的小牌（J 以下、不含梅花 3）由小到大最多 3 張。"""
+    singles = sorted(c.cards[0] for c in plan_hand(hand) if c.kind == Kind.SINGLE)
+    return [c for c in singles if rank_of(c) <= SWAP_MAX_RANK and c != CLUB_THREE][:3]

@@ -8,3 +8,4 @@ result/
 .venv-train/
 models/
 training/data/
+bigtwo_train/

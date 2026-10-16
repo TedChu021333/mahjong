@@ -5,7 +5,7 @@ import pytest
 from bigtwo.agents import plan_hand, random_policy, rule_policy, smallest_policy
 from bigtwo.cards import CLUB_THREE, card_code, parse_cards
 from bigtwo.combos import Kind, all_combos, beats, classify, legal_moves
-from bigtwo.game import View, continue_game, penalty, penalty_conditions, play_game
+from bigtwo.game import View, continue_game, penalty, penalty_conditions, play_game, swap_cards
 from bigtwo.mc_agent import make_mc_policy
 from bigtwo.rules import Rules
 
@@ -93,7 +93,16 @@ def test_penalty_conditions_stack():
     cond = penalty_conditions(hand, last, False)
     assert cond == ["超過9張牌", "老2未打", "最後脫手3"]
     assert penalty(hand, cond) == 11 * 8
-    assert penalty(hand, cond, Rules(stacking="add")) == 11 * 4
+    assert penalty(hand, cond, Rules(rate=3)) == 11 * 27
+
+
+def test_penalty_matches_recorded_settlement():
+    # 錄影 18:24 結算：贏家梅花三脫手，本局 2 倍、每張 5 分
+    winner_last = c("3c")
+    me = parse_cards("4c 4d Ts")
+    other = parse_cards("4s 8d 9h Td Js Qs 2h")
+    assert 5 * penalty(me, penalty_conditions(me, winner_last, False)) == 30
+    assert 5 * penalty(other, penalty_conditions(other, winner_last, False)) == 140
 
 
 def test_plan_hand_uses_few_plays():
@@ -158,3 +167,19 @@ def test_mc_policy_plays_legal_games():
     mc = make_mc_policy(samples=2, limit=3)
     result = play_game([mc, rule_policy, rule_policy, rule_policy], Random(5))
     assert sum(result.scores) == 0
+
+
+def test_swap_returns_same_counts_from_pooled_cards():
+    rng = Random(2)
+    hands = [sorted(parse_cards(h)) for h in (
+        "3c 4c 5c 6c 7c 8c 9c Tc Jc Qc Kc Ac 2c",
+        "3d 4d 5d 6d 7d 8d 9d Td Jd Qd Kd Ad 2d",
+        "3h 4h 5h 6h 7h 8h 9h Th Jh Qh Kh Ah 2h",
+        "3s 4s 5s 6s 7s 8s 9s Ts Js Qs Ks As 2s")]
+    picks = [lambda h, r: list(h[:3]), lambda h, r: list(h[:2]), lambda h, r: [], lambda h, r: list(h[:3])]
+    new = swap_cards(hands, picks, rng)
+    assert [len(h) for h in new] == [13] * 4
+    assert sorted(c for h in new for c in h) == list(range(52))
+    assert new[2] == hands[2]
+    pool = set(hands[0][:3] + hands[1][:2] + hands[3][:3])
+    assert set(new[1]) - set(hands[1]) <= pool

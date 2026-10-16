@@ -9,26 +9,33 @@ import argparse
 from math import sqrt
 from random import Random
 
-from .agents import random_policy, rule_policy, smallest_policy
+from .agents import random_policy, rule_policy, rule_swap, smallest_policy
 from .cards import deal
-from .game import play_game
+from .game import no_swap, play_game
 from .mc_agent import make_mc_policy
 
-POLICIES = {"random": random_policy, "smallest": smallest_policy, "rule": rule_policy,
-            "mc": make_mc_policy()}
+# 名稱 → (出牌策略, 換三張策略)
+POLICIES = {
+    "random": (random_policy, no_swap),
+    "smallest": (smallest_policy, no_swap),
+    "rule": (rule_policy, rule_swap),
+    "rule-noswap": (rule_policy, no_swap),
+    "mc": (make_mc_policy(), rule_swap),
+}
 
 
 def compare(variant, baseline, deals: int, seed: int = 0):
+    (variant, variant_swap), (baseline, baseline_swap) = variant, baseline
     rng = Random(seed)
     diffs, wins, base_wins = [], 0, 0
     for _ in range(deals):
         hands = deal(rng)
         game_seed = rng.random()
-        base = play_game([baseline] * 4, Random(game_seed), hands=hands)
+        base = play_game([baseline] * 4, Random(game_seed), hands=hands, swappers=[baseline_swap] * 4)
         for seat in range(4):
-            policies = [baseline] * 4
-            policies[seat] = variant
-            result = play_game(policies, Random(game_seed), hands=hands)
+            policies, swappers = [baseline] * 4, [baseline_swap] * 4
+            policies[seat], swappers[seat] = variant, variant_swap
+            result = play_game(policies, Random(game_seed), hands=hands, swappers=swappers)
             diffs.append(result.scores[seat] - base.scores[seat])
             wins += result.winner == seat
             base_wins += base.winner == seat

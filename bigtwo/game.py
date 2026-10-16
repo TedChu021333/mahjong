@@ -73,14 +73,40 @@ def penalty_conditions(hand, winner_last: Combo, starter_grand_slam: bool) -> li
 
 
 def penalty(hand, conditions, rules: Rules = DEFAULT_RULES) -> int:
-    k = len(conditions)
-    times = 1 + k if rules.stacking == "add" else 2 ** k
-    return len(hand) * times
+    return len(hand) * rules.rate ** len(conditions)
+
+
+SwapPolicy = Callable[[tuple[int, ...], Random], list[int]]
+
+
+def swap_cards(hands: list[list[int]], swappers: list[SwapPolicy], rng: Random) -> list[list[int]]:
+    """換三張：每家選 0～3 張放進同一堆，洗過後每家拿回同樣張數（可能拿回自己的牌）。"""
+    given = []
+    for s in range(PLAYERS):
+        out = list(dict.fromkeys(swappers[s](tuple(hands[s]), rng)))
+        if len(out) > 3 or any(c not in hands[s] for c in out):
+            raise RuntimeError(f"座位 {s} 換牌不合法：{out}")
+        given.append(out)
+    pool = [c for out in given for c in out]
+    rng.shuffle(pool)
+    new_hands = []
+    for s in range(PLAYERS):
+        kept = [c for c in hands[s] if c not in given[s]]
+        new_hands.append(sorted(kept + pool[:len(given[s])]))
+        pool = pool[len(given[s]):]
+    return new_hands
+
+
+def no_swap(hand, rng) -> list[int]:
+    return []
 
 
 def play_game(policies: list[Policy], rng: Random, rules: Rules = DEFAULT_RULES,
-              hands: list[list[int]] | None = None) -> GameResult:
+              hands: list[list[int]] | None = None,
+              swappers: list[SwapPolicy] | None = None) -> GameResult:
     hands = [sorted(h) for h in (hands or deal(rng))]
+    if rules.swap and swappers is not None:
+        hands = swap_cards(hands, swappers, rng)
     starter = next(s for s in range(PLAYERS) if CLUB_THREE in hands[s])
     return _run(hands, [], starter, None, None, set(), starter, policies, rng, rules)
 
