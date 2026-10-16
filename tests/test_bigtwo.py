@@ -65,8 +65,10 @@ def test_flush_not_a_kind_by_default():
 
 def test_bombs_only_beat_singles_when_enabled():
     four = c("5c 5d 5h 5s 3c")
-    assert not beats(four, c("2s"))
-    assert beats(four, c("2s"), Rules(bombs_beat_smaller=True))
+    assert beats(four, c("2s"))
+    assert beats(c("4h 5h 6h 7h 8h"), c("2c2s"))
+    assert not beats(four, c("2s"), Rules(bombs_beat_smaller=False))
+    assert not beats(c("2s"), four)
 
 
 def test_legal_moves_follow_and_first_lead():
@@ -74,7 +76,7 @@ def test_legal_moves_follow_and_first_lead():
     moves = legal_moves(hand, None, must_include=CLUB_THREE)
     assert moves and all(CLUB_THREE in m.cards for m in moves)
     assert {m.kind for m in moves} == {Kind.SINGLE, Kind.PAIR, Kind.STRAIGHT}
-    follow = legal_moves(hand, c("Ks"))
+    follow = legal_moves(hand, c("Ks"), Rules(bombs_beat_smaller=False))
     assert [card_code(m.cards[0]) for m in follow] == ["2h"]
 
 
@@ -90,8 +92,8 @@ def test_penalty_conditions_stack():
     last = c("3c")
     cond = penalty_conditions(hand, last, False)
     assert cond == ["超過9張牌", "老2未打", "最後脫手3"]
-    assert penalty(hand, cond) == 11 * 4
-    assert penalty(hand, cond, Rules(stacking="double")) == 11 * 8
+    assert penalty(hand, cond) == 11 * 8
+    assert penalty(hand, cond, Rules(stacking="add")) == 11 * 4
 
 
 def test_plan_hand_uses_few_plays():
@@ -109,7 +111,6 @@ def test_games_finish_and_scores_balance(policy):
         assert sum(result.scores) == 0
         assert not result.hands[result.winner]
         assert result.history[0].seat == result.starter
-        assert CLUB_THREE in result.history[0].combo.cards
 
 
 def test_rule_policy_beats_random():
@@ -126,7 +127,8 @@ def test_rule_policy_beats_random():
 def test_pass_locks_out_variant_runs():
     rng = Random(3)
     for _ in range(100):
-        result = play_game([rule_policy] * 4, rng, Rules(pass_locks_out=True, bombs_beat_smaller=True))
+        result = play_game([rule_policy] * 4, rng, Rules(pass_locks_out=True, first_must_include_club3=True))
+        assert CLUB_THREE in result.history[0].combo.cards
         assert sum(result.scores) == 0
 
 

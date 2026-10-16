@@ -8,12 +8,14 @@
 - 特殊加倍（輸家負分再加一次本局倍率）：剩超過 9 張、手上有 2、13 張都沒出、
   贏家最後一手含梅花 3、有發牌權的人一路出完沒讓別人出過任何牌（滿貫全壘打）。
 
-還沒確認、先做成開關的（看實戰錄影／結算畫面再改）：
+使用者確認（10/16）：
+- 鐵支、同花順可以壓單張、對子、三條。
+- 第一手不一定要含梅花 3（梅花 3 留到最後出完還有「最後脫手3」加倍）。
+- PASS 之後同一輪還能再出。
+- 加倍是一項乘一次兩倍：剩 11 張又有 2 → 11 × 2 × 2。
+
+還沒確認、先做成開關的：
 - 牌型表沒有「同花」，`flush_enabled` 預設關。
-- 鐵支、同花順能不能壓單張／對子／三條（「必須出同樣的牌型」→ 預設不能）。
-- 第一手是否一定要含梅花 3（多數台灣規則要，預設要）。
-- PASS 之後同一輪還能不能再出（預設可以）。
-- 加倍是「多加一倍」還是「再乘一倍」：預設輸家扣 張數 ×（1 + 符合項數）。
 """
 from __future__ import annotations
 
@@ -23,10 +25,10 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Rules:
     flush_enabled: bool = False
-    bombs_beat_smaller: bool = False
-    first_must_include_club3: bool = True
+    bombs_beat_smaller: bool = True
+    first_must_include_club3: bool = False
     pass_locks_out: bool = False
-    stacking: str = "add"   # "add"：張數 × (1 + k)；"double"：張數 × 2^k
+    stacking: str = "double"   # "double"：張數 × 2^k；"add"：張數 × (1 + k)
 
 
 DEFAULT_RULES = Rules()
