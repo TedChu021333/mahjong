@@ -296,12 +296,18 @@ def use_worker_pool(pool, workers: int) -> None:
 _network = None
 
 
-def use_network(path: str, efficiency_turns: int = 0) -> None:
-    """學習型 AI 的權重（--ai nn；需要 PyTorch）；efficiency_turns 見 agent.nn_agent.efficient_discard。"""
+def use_network(path: str, efficiency_turns: int = 0, guard: bool = True) -> None:
+    """學習型 AI 的權重（--ai nn；需要 PyTorch）；efficiency_turns 見 agent.nn_agent.efficient_discard，
+    guard 見 NetworkPolicy.guard（按聽照規則式、有人宣告時檢查放槍）。"""
     from agent.nn_agent import NetworkPolicy
 
     global _network
-    _network = NetworkPolicy.from_file(path, efficiency_turns=efficiency_turns)
+    _network = NetworkPolicy.from_file(path, efficiency_turns=efficiency_turns, guard=guard)
+
+
+def last_note() -> str | None:
+    """上一個決定被網路的 guard 改掉的原因（沒有就是 None）。"""
+    return _network.last_note if _policy == "nn" and _network is not None else None
 
 
 def use_policy(name: str) -> None:

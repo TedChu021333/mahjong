@@ -10,7 +10,14 @@ from random import Random
 import numpy as np
 import torch
 
-from agent.rule_agent import choose_rule_action_for_player, gold_in_use, keep_value, visible_tile_counts
+from agent.rule_agent import (
+    choose_rule_action_for_player,
+    declare_is_worth,
+    gold_in_use,
+    keep_value,
+    visible_tile_counts,
+)
+from agent.safety import claim_is_worse, safer_discard
 from agent.shanten import effective_tiles, shanten
 from game.rules import Action, ActionType, GameState, Phase, legal_actions
 from training.actions import DISCARD, legal_mask
@@ -20,20 +27,27 @@ from training.model import MahjongNet, load, masked_logits
 
 class NetworkPolicy:
     def __init__(self, model: MahjongNet, device: str = "cpu", temperature: float = 0.0,
-                 efficiency_turns: int = 0) -> None:
+                 efficiency_turns: int = 0, guard: bool = False) -> None:
         self.model = model.to(device).eval()
         self.device = device
         self.temperature = temperature
         """0 = 一律選分數最高的動作；>0 依 softmax(分數 / temperature) 抽樣（自我對打探索用）。"""
         self.efficiency_turns = efficiency_turns
         """前幾手、沒人宣告聽牌時湊牌優先（見 efficient_discard）；0 = 不用。"""
+        self.guard = guard
+        """實戰用（提示模式預設開啟）：按聽照規則式（只有地聽才按，declare_is_worth），有對手宣告時
+        用期望值檢查打牌與吃碰（agent.safety）。10/17 實戰 45 局按聽 11 次、放槍 10 次（6 次放給已宣告的人），
+        使用者 10/5 也說過太容易按聽。自我對打訓練不開。"""
+        self.last_note: str | None = None
+        """上一個決定被 guard 改掉的原因（記錄用）。"""
 
     @classmethod
     def from_file(cls, path, device: str = "cpu", temperature: float = 0.0,
-                  efficiency_turns: int = 0) -> "NetworkPolicy":
-        return cls(load(path, device), device, temperature, efficiency_turns)
+                  efficiency_turns: int = 0, guard: bool = False) -> "NetworkPolicy":
+        return cls(load(path, device), device, temperature, efficiency_turns, guard)
 
     def __call__(self, state: GameState, player: int, rng: Random) -> Action | None:
+        self.last_note = None
         actions = legal_actions(state, player)
         if not actions:
             return None
@@ -51,11 +65,41 @@ class NetworkPolicy:
             if self.efficiency_turns:
                 choice = efficient_discard(state, player, choice, lookup, logits.cpu().numpy(),
                                            self.efficiency_turns)
+            if self.guard:
+                try:
+                    choice = self._guarded(state, player, choice, actions, rng)
+                except ValueError:  # 局面不合法（例如辨識出的張數不對）：照網路
+                    self.last_note = None
             return choice
         probs = torch.softmax(logits / self.temperature, 0).cpu().numpy().astype(np.float64)
         indices = np.nonzero(mask)[0]
         weights = probs[indices] / probs[indices].sum()
         return lookup[int(rng.choices(list(indices), weights=list(weights))[0])]
+
+    def _guarded(self, state: GameState, player: int, choice: Action, actions: list[Action],
+                 rng: Random) -> Action:
+        notes = []
+        if choice.kind in (ActionType.CHOW, ActionType.PUNG):
+            note = claim_is_worse(state, player, choice, rng)
+            if note is not None:
+                self.last_note = note
+                return next(action for action in actions if action.kind == ActionType.PASS)
+            return choice
+        if choice.kind not in (ActionType.DISCARD, ActionType.DECLARE):
+            return choice
+        tile, note = safer_discard(state, player, choice.tile, rng)
+        if note is not None:
+            notes.append(note)
+        declare = Action(ActionType.DECLARE, tile=tile)
+        wants_declare = choice.kind == ActionType.DECLARE or tile != choice.tile
+        if wants_declare and declare in actions and declare_is_worth(state, player, tile):
+            result = declare
+        else:
+            if choice.kind == ActionType.DECLARE:
+                notes.append("不按聽（只有地聽才按）")
+            result = Action(ActionType.DISCARD, tile=tile)
+        self.last_note = "；".join(notes) or None
+        return result
 
 
 def efficient_discard(state: GameState, player: int, choice: Action, lookup: dict[int, Action],

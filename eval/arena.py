@@ -85,18 +85,21 @@ def make_policy(spec: str) -> PlayerPolicy:
     if name == "nneff" and arg:
         turns, _, path = arg.partition(":")
         return _network_policy(path, int(turns))
+    if name == "nnguard" and arg:
+        return _network_policy(arg, guard=True)
     raise ValueError(f"未知的策略代號：{spec}")
 
 
 @lru_cache(maxsize=4)
-def _network_policy(path: str, efficiency_turns: int = 0) -> PlayerPolicy:
-    """學習型 AI（需要 PyTorch）；每個程序只載入一次。nneff:<手數>:<權重> 為前幾手湊牌優先。"""
+def _network_policy(path: str, efficiency_turns: int = 0, guard: bool = False) -> PlayerPolicy:
+    """學習型 AI（需要 PyTorch）；每個程序只載入一次。nneff:<手數>:<權重> 為前幾手湊牌優先，
+    nnguard:<權重> 為提示模式用的版本（按聽照規則式、有人宣告時檢查放槍，見 NetworkPolicy.guard）。"""
     import torch
 
     from agent.nn_agent import NetworkPolicy
 
     torch.set_num_threads(1)  # 每個 arena 子程序一條執行緒，多個程序才不會互搶 CPU
-    return NetworkPolicy.from_file(path, efficiency_turns=efficiency_turns)
+    return NetworkPolicy.from_file(path, efficiency_turns=efficiency_turns, guard=guard)
 
 
 def _mc_claim_policy(state, player, rng, rollouts):

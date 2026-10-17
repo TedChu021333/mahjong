@@ -36,6 +36,7 @@ from hint.advisor import (
     decide,
     describe,
     hand_after_claim,
+    last_note,
     observe,
     use_network,
     use_policy,
@@ -174,7 +175,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     """已經存過「胡按鈕亮著卻沒選胡」截圖的畫面。"""
     last_claim = None
     """(最近讀到的放大牌, 時間)。"""
-    decided_for = decided_action = None
+    decided_for = decided_action = decided_note = None
     stuck_for = None
     win_pressed_at = float("-inf")
     river_updated_at = float("-inf")
@@ -338,6 +339,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             # 同一個畫面只決定一次：蒙地卡羅 AI 每次要約 2 秒且有隨機性，重算會讓建議閃動
             if observation != decided_for:
                 decided_for, decided_action = observation, decide(observation)
+                decided_note = last_note()
             action = decided_action
             if action is not None and action.kind in (ActionType.CHOW, ActionType.PUNG):
                 used = list(action.tiles)
@@ -354,7 +356,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     hand_text(observation))
             if advice != last_advice:
                 if advice is not None:
-                    log(f"[{stamp}] {advice}", hand_text(observation))
+                    note = f"（{decided_note}）" if decided_note else ""
+                    log(f"[{stamp}] {advice}{note}", hand_text(observation))
                 if show is not None:
                     show(advice)
             last_advice = advice
@@ -410,6 +413,8 @@ def main() -> None:
     parser.add_argument("--model", default="models/rl3_0960.pt", help="--ai nn 用的網路權重")
     parser.add_argument("--efficiency-turns", type=int, default=0,
                         help="--ai nn 前幾手湊牌優先（同向聽時改打進張最多的牌）；0 = 照網路")
+    parser.add_argument("--raw-network", action="store_true",
+                        help="--ai nn 完全照網路（不限制按聽、有人宣告時不檢查放槍）")
     parser.add_argument("--workers", type=int, default=4,
                         help="蒙地卡羅平行模擬的程序數（預設 4；之前用 CPU 核心數 − 2＝14 個，"
                              "每手出牌時整台電腦滿載，10/3 出牌點了沒反應 34 次）")
@@ -420,7 +425,7 @@ def main() -> None:
     args = parser.parse_args()
     use_policy(args.ai)
     if args.ai == "nn":
-        use_network(args.model, args.efficiency_turns)
+        use_network(args.model, args.efficiency_turns, guard=not args.raw_network)
     if args.ai == "mc":
         import os
         from multiprocessing import Pool

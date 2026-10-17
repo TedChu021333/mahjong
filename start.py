@@ -1,8 +1,9 @@
 """所有執行指令的總選單。
 
-./start.sh            顯示選單，輸入數字啟動
-./start.sh 4          直接啟動第 4 項（後面可再接參數，例如 ./start.sh 1 --efficiency-turns 6）
+python start.py       顯示選單，輸入數字啟動（任何終端機都可以，會自動用 .venv-train）
+python start.py 4     直接啟動第 4 項（後面可再接參數，例如 python start.py 1 --efficiency-turns 6）
 VS Code：Ctrl+Shift+P →「Tasks: Run Task」→「總選單」
+這是唯一的啟動入口（10/17 刪掉 run.sh、run_hint.sh、start.sh 等腳本）。
 
 自動模式只在對手全是電腦的場使用，啟動後各程式還會再問一次 y 確認。
 """
