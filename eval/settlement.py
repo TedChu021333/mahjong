@@ -41,6 +41,11 @@ TING_TEMPLATE = Path(__file__).with_name("tai_ting.png")
 TING_REGION = (150, 200, 520, 760)
 """左邊台數明細的範圍；「聽牌」「地聽」都有「聽」字（有 ≥0.93、沒有 ≤0.45）。"""
 TING_MIN_SCORE = 0.8
+DU_TEMPLATE = Path(__file__).with_name("tai_du.png")
+"""「獨聽」的「獨」：獨聽的「聽」字也會配上（0.90），前一個字是「獨」的不算宣告（10/18 00:09 誤判）。"""
+DU_MIN_SCORE = 0.8
+CHAR_PITCH = 40
+"""台數明細一個字的寬度（獨聽的「獨」在「聽」左邊 40 像素）。"""
 DEALER_BOX = (695, 83, 750, 133)
 """各列風位標籤下方「莊」的紅色方塊（相對於列頂）。"""
 DEALER_MIN_RED = 0.4
@@ -79,9 +84,11 @@ def is_face(region: np.ndarray) -> bool:
 
 
 class SettlementReader:
-    def __init__(self, classifier: TileClassifier, ting: np.ndarray | None) -> None:
+    def __init__(self, classifier: TileClassifier, ting: np.ndarray | None,
+                 du: np.ndarray | None = None) -> None:
         self.classifier = classifier
         self.ting = ting
+        self.du = du
 
     @classmethod
     def load(cls, directory: Path = SETTLEMENT_TEMPLATE_DIR) -> "SettlementReader":
@@ -93,7 +100,10 @@ class SettlementReader:
         ting = None
         if TING_TEMPLATE.exists():
             ting = cv2.cvtColor(read_image(TING_TEMPLATE), cv2.COLOR_BGR2GRAY)
-        return cls(classifier, ting)
+        du = None
+        if DU_TEMPLATE.exists():
+            du = cv2.cvtColor(read_image(DU_TEMPLATE), cv2.COLOR_BGR2GRAY)
+        return cls(classifier, ting, du)
 
     def classify(self, region: np.ndarray) -> tuple[int | None, float, float]:
         """(牌, 分數, 領先第二名多少)；分數或領先不夠時牌為 None。"""
@@ -122,7 +132,22 @@ class SettlementReader:
             return False
         left, top, right, bottom = TING_REGION
         gray = cv2.cvtColor(image[top:bottom, left:right], cv2.COLOR_BGR2GRAY)
-        return float(cv2.matchTemplate(gray, self.ting, cv2.TM_CCOEFF_NORMED).max()) >= TING_MIN_SCORE
+        scores = cv2.matchTemplate(gray, self.ting, cv2.TM_CCOEFF_NORMED)
+        height, width = self.ting.shape
+        for y, x in zip(*np.nonzero(scores >= TING_MIN_SCORE)):
+            if not self._is_du(gray, x - CHAR_PITCH, y, width, height):
+                return True  # 聽牌、地聽
+        return False
+
+    def _is_du(self, gray: np.ndarray, x: int, y: int, width: int, height: int) -> bool:
+        """(x, y) 附近是不是「獨」字（容許幾個像素的偏差）。"""
+        if self.du is None:
+            return False
+        pad = 4
+        area = gray[max(0, y - pad):y + height + pad, max(0, x - pad):x + width + pad]
+        if area.shape[0] < self.du.shape[0] or area.shape[1] < self.du.shape[1]:
+            return False
+        return float(cv2.matchTemplate(area, self.du, cv2.TM_CCOEFF_NORMED).max()) >= DU_MIN_SCORE
 
 
 def is_dealer(image: np.ndarray, top: int) -> bool:
