@@ -342,3 +342,13 @@ def test_partial_table_read_of_own_play_waits_for_whole_hand():
     assert feed(t, {0: c("4h"), 1: None, 2: None, 3: None}) == []
     played = feed_hand(t, "3d 8c")
     assert [(p.seat, p.combo) for p in played] == [(0, c("3c 4h 5d 6s 2c"))]
+
+
+def test_confirm_and_play_presses_play_right_after_cards_rise(tmp_path, monkeypatch):
+    import bigtwo.live as live
+    advisor, clicks = make_auto(tmp_path, monkeypatch, {"出牌": "on", "重選": "on", "PASS": "on"})
+    advisor.choice = c("3c 4h 5d 6s 2c")
+    advisor.grab = lambda: None
+    monkeypatch.setattr(live, "read_hand", lambda frame: hand_cards("3c 3d 4h 5d 6s 2c", "3c 4h 5d 6s 2c"))
+    advisor.execute(hand_cards("3c 3d 4h 5d 6s 2c"), None)
+    assert len(clicks) == 6 and clicks[-1] == center("出牌")    # 5 張牌＋同一輪就按出牌

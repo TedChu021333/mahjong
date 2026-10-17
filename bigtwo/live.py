@@ -38,7 +38,7 @@ from .tracker import ME, Tracker
 RESULT_DIR = Path("result")
 SEAT_NAMES = {0: "自己", 1: "下家", 2: "對家", 3: "上家"}
 MOUSE_REST = (450, 60)          # 左上角沙灘（Google Play 版）：游標不要停在牌或按鈕上
-CLICK_PAUSE = 0.25
+CLICK_PAUSE = 0.1
 CARD_CLICK = (70, 150)          # 點牌：牌左上角往右下的位置（每張露出 140px 寬；下緣 985 起是牌型提示鈕）
 ACTION_COOLDOWN = 0.8
 """點完一輪後至少等這麼久才看下一幀決定下一步：選起的牌要一下子才浮上來，太早再看會以為沒選到、
@@ -46,8 +46,11 @@ ACTION_COOLDOWN = 0.8
 NO_EFFECT_LIMIT = 3
 """連續幾次點了牌、畫面上選起的牌都沒變，就停止自動點擊改成只提示。10/16 電腦版（StarMJ371）
 自動模式點擊完全沒反應：遊戲程式有保護（連權杖都不讓查），很可能忽略程式送出的點擊；不做任何繞過。"""
-THINK_SECONDS = 2.5
-"""實戰每手蒙地卡羅至少模擬 --samples 次，再繼續到用滿這麼多秒（每手限時 8 秒，點牌與動畫約 3 秒）。"""
+THINK_SECONDS = 1.2
+"""實戰每手蒙地卡羅至少模擬 --samples 次，再繼續到用滿這麼多秒。10/17 14:20 用 2.5 秒時，輪到自己後
+6 秒才按出牌（思考 2.5 秒＋點牌冷卻＋等兩三幀確認選起），8 秒限時差點到、順子沒出去。"""
+RAISE_WAIT = 0.35
+"""點完牌後等這麼久（牌浮上來）就立刻再截一張確認選起的牌，對了馬上按出牌，不等下一輪完整辨識。"""
 MAX_SHOTS = 300
 """每次執行最多存幾張決定當下的截圖（result/bigtwo/），檢查問題用。"""
 
@@ -163,6 +166,7 @@ class Advisor:
         self.shot_dir = RESULT_DIR / "bigtwo"
         self.clock: Callable[[], float] = time.monotonic
         self.settle_frame: np.ndarray | None = None
+        self.grab: Callable[[], np.ndarray] | None = None     # 實戰：點完牌立刻再截圖確認
         self.continue_seen: str | None = None
 
     def save_shot(self, frame, label: str) -> None:
@@ -378,6 +382,23 @@ class Advisor:
         for hc in pick:
             self.clicker.card(hc)
         self.clicked_cards(hand, stamp, [hc.card for hc in pick])
+        self.confirm_and_play(stamp, choice)
+
+    def confirm_and_play(self, stamp: str, choice: Combo) -> None:
+        """點完牌馬上再截一張：選起的牌就是決定的牌、出牌鈕亮著就直接按出牌（省掉一兩輪辨識的時間）。"""
+        if self.grab is None:
+            return
+        self.clicker.sleep(RAISE_WAIT)
+        frame = self.grab()
+        hand = read_hand(frame)
+        if not hand or {c.card for c in hand if c.raised} != set(choice.cards):
+            return
+        if button_state(frame, "出牌") == "on":
+            self.clicked_raised = None          # 選起來了：點牌有效
+            self.no_effect = 0
+            self.clicker.button("出牌")
+            self.log(f"[{stamp}] 按「出牌」")
+            self.acted()
 
 
 def confirm_training_room(ask=input) -> bool:
@@ -415,6 +436,7 @@ def main() -> None:
         clicker = Clicker()
     def worker(show=lambda text: None, show_counts=lambda text: None) -> None:
         advisor = Advisor(Log(), clicker, args.samples, show=show, live=True, show_counts=show_counts)
+        advisor.grab = grab_screen
         advisor.log(f"[{datetime.now():%H:%M:%S}] 大老二{'自動' if clicker else '提示'}模式啟動（蒙地卡羅）")
         for stamp, frame in screen_frames(args.interval):
             advisor.step(stamp, frame)
