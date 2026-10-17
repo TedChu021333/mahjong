@@ -352,3 +352,14 @@ def test_confirm_and_play_presses_play_right_after_cards_rise(tmp_path, monkeypa
     monkeypatch.setattr(live, "read_hand", lambda frame: hand_cards("3c 3d 4h 5d 6s 2c", "3c 4h 5d 6s 2c"))
     advisor.execute(hand_cards("3c 3d 4h 5d 6s 2c"), None)
     assert len(clicks) == 6 and clicks[-1] == center("出牌")    # 5 張牌＋同一輪就按出牌
+
+
+def test_own_play_recorded_at_click_time_keeps_order():
+    t = Tracker()
+    feed_hand(t, "3c 4c 5c 6c 7c 8c 9c Tc Jc Qc Kc Ac 2c")
+    t.expect = frozenset(parse_cards("3c"))
+    assert t.record_own(c("3c")).seat == 0
+    feed(t, {0: None, 1: c("5d"), 2: None, 3: None})          # 下家接著壓
+    assert feed_hand(t, "4c 5c 6c 7c 8c 9c Tc Jc Qc Kc Ac 2c") == []   # 手牌少了 3♣：已經記過
+    assert [(p.seat, p.combo) for p in t.history] == [(0, c("3c")), (1, c("5d"))]
+    assert t.record_own(c("3c")) is None

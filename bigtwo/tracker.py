@@ -129,6 +129,13 @@ class Tracker:
     def last_play(self) -> Play | None:
         return next((p for p in reversed(self.history) if p.combo is not None), None)
 
+    def record_own(self, combo: Combo) -> Play | None:
+        """自動模式按下「出牌」當下就記自己的出牌：等手牌少了才記會晚 2~3 秒，記錄裡排在下一家的出牌後面，
+        從出牌順序推 PASS 時就會推錯（10/17 實戰記錄 65 局只有 34 局推得回順序）。"""
+        if set(combo.cards) & self.played_cards() or not set(combo.cards) <= self.my_cards:
+            return None
+        return self._record(ME, combo)
+
     def to_beat(self) -> tuple[Combo | None, int | None]:
         """輪到自己時要壓的牌與出那手的人；自己帶頭時 (None, None)。"""
         last = self.last_play

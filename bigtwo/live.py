@@ -371,6 +371,7 @@ class Advisor:
             if button_state(frame, "出牌") == "on":
                 self.clicker.button("出牌")
                 self.log(f"[{stamp}] 按「出牌」")
+                self.played_now(stamp, choice)
                 self.acted()
             return
         if raised - set(choice.cards) and button_state(frame, "重選") == "on":
@@ -383,6 +384,11 @@ class Advisor:
             self.clicker.card(hc)
         self.clicked_cards(hand, stamp, [hc.card for hc in pick])
         self.confirm_and_play(stamp, choice)
+
+    def played_now(self, stamp: str, choice: Combo) -> None:
+        play = self.tracker.record_own(choice)
+        if play is not None:
+            self.log(f"[{stamp}] 自己出 {describe(choice)}")
 
     def confirm_and_play(self, stamp: str, choice: Combo) -> None:
         """點完牌馬上再截一張：選起的牌就是決定的牌、出牌鈕亮著就直接按出牌（省掉一兩輪辨識的時間）。"""
@@ -397,6 +403,7 @@ class Advisor:
             self.clicked_raised = None          # 選起來了：點牌有效
             self.no_effect = 0
             self.clicker.button("出牌")
+            self.played_now(stamp, choice)
             self.log(f"[{stamp}] 按「出牌」")
             self.acted()
 
