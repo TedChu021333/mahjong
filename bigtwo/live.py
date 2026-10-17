@@ -20,7 +20,7 @@ from typing import Callable, Iterator
 import cv2
 import numpy as np
 
-from .agents import conservative_policy, rule_swap
+from .agents import rule_swap
 from .buttons import button_state, center, my_turn, swap_phase
 from .cards import HAND_SIZE, RANK_NAMES, SUIT_SYMBOLS, cards_text, rank_of, suit_of
 from .combos import Combo, legal_moves
@@ -146,8 +146,7 @@ class Advisor:
         self.show = show
         self.shown: str | None = None
         self.clicker = clicker
-        self.policy = make_mc_policy(samples=samples, time_limit=THINK_SECONDS,
-                                     opponent_rollout=conservative_policy)
+        self.policy = make_mc_policy(samples=samples, time_limit=THINK_SECONDS)
         self.rng = Random(seed)
         self.tracker = Tracker()
         self.hand: list[HandCard] | None = None
