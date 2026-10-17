@@ -58,3 +58,12 @@ def test_guard_only_declares_on_the_first_discard():
     assert "不按聽" in policy.last_note
     state.players[0].discards = []  # 地聽照按
     assert policy._guarded(state, 0, declare, [declare], Random(0)) == declare
+
+
+def test_first_discard_needs_no_counted_discards_either():
+    from agent.rule_agent import declare_is_worth
+
+    state = state_with("123456789m123p11z5s")
+    assert declare_is_worth(state, 0, P("5s"))
+    state.min_discards = 3  # 牌河漏記，但提示迴圈數到自己已經打過
+    assert not declare_is_worth(state, 0, P("5s"))

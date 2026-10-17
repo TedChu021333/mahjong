@@ -401,8 +401,10 @@ def declare_is_worth(state: GameState, player: int, tile: int,
     if min_live is None:
         min_live = DECLARE_MIN_LIVE
     me = state.players[player]
-    if not me.discards:
-        return True  # 地聽 4 台
+    if not me.discards and not state.min_discards:
+        # 地聽 4 台。實戰牌河常漏記自己的牌，要提示迴圈數到的出牌數（min_discards）也是 0：
+        # 10/17 18:03 一幀手牌只讀到兩張、牌河也沒有自己的牌，被當成地聽建議按聽
+        return True
     if min_live is None:
         return False
     if min_live <= 0:

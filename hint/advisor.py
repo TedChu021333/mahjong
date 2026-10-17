@@ -335,6 +335,8 @@ def _added_kong(observation: Observation, state: GameState) -> Action | None:
 
 
 def decide(observation: Observation, rng: Random | None = None) -> Action | None:
+    if _network is not None:
+        _network.last_note = None  # 換三張、加槓不經過網路，不能沿用上一手的說明
     if observation.swap_prompt is not None:
         counts = [0] * NUM_TILE_TYPES
         for tile in observation.hand:
