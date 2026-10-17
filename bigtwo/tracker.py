@@ -107,6 +107,8 @@ class Tracker:
             if seat == ME:
                 if not cards <= self.my_cards or cards & played:
                     continue
+                if self.expect is not None and cards < self.expect:
+                    continue    # 決定出的順子先飛到桌上一張（10/17 14:20 記成單張 4♥，另外 4 張漏記）
             elif cards & self.my_cards or cards & played:
                 continue
             if grows:

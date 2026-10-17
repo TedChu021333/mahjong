@@ -332,3 +332,13 @@ def test_to_beat_follows_pass_button(tmp_path, monkeypatch):
     monkeypatch.setattr(live, "button_state", lambda frame, name: "off")
     assert advisor.to_beat(None) == (None, None)      # PASS 暗：帶頭
     assert live.button_state is not None
+
+
+def test_partial_table_read_of_own_play_waits_for_whole_hand():
+    # 10/17 14:20：決定出 23456 順子，桌面先讀到飛過來的 4♥ 就記成單張，另外 4 張漏記
+    t = Tracker()
+    feed_hand(t, "3c 3d 4h 5d 6s 8c 2c")
+    t.expect = frozenset(parse_cards("3c 4h 5d 6s 2c"))
+    assert feed(t, {0: c("4h"), 1: None, 2: None, 3: None}) == []
+    played = feed_hand(t, "3d 8c")
+    assert [(p.seat, p.combo) for p in played] == [(0, c("3c 4h 5d 6s 2c"))]
