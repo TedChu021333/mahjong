@@ -67,3 +67,40 @@ def test_first_discard_needs_no_counted_discards_either():
     assert declare_is_worth(state, 0, P("5s"))
     state.min_discards = 3  # 牌河漏記，但提示迴圈數到自己已經打過
     assert not declare_is_worth(state, 0, P("5s"))
+
+
+def test_no_open_kong_while_concealed():
+    from agent.rule_agent import choose_rule_action_for_player
+
+    # 21:52 的手：門清聽三六筒，別人打七條
+    state = state_with("123789m2245p234777s")
+    state.phase, state.last_discard, state.discard_player = Phase.RESPONSE, P("7s"), 2
+    state.response_players = [0]
+    action = choose_rule_action_for_player(state, 0, Random(0))
+    assert action.kind == ActionType.PASS
+
+
+def test_open_kong_when_already_open():
+    from agent.rule_agent import choose_rule_action_for_player
+    from game.rules import Meld
+
+    state = state_with("789m2245p234777s")
+    state.players[0].melds = [Meld("chow", tuple(parse("123m")), 3)]
+    state.phase, state.last_discard, state.discard_player = Phase.RESPONSE, P("7s"), 2
+    state.response_players = [0]
+    action = choose_rule_action_for_player(state, 0, Random(0))
+    assert action.kind == ActionType.KONG
+
+
+def test_guard_passes_on_open_kong_while_concealed():
+    pytest.importorskip("torch")
+    from agent.nn_agent import NetworkPolicy
+
+    policy = NetworkPolicy.__new__(NetworkPolicy)
+    policy.last_note = None
+    state = state_with("123789m2245p234777s")
+    state.phase, state.last_discard, state.discard_player = Phase.RESPONSE, P("7s"), 2
+    kong = Action(ActionType.KONG, tile=P("7s"), tiles=(P("7s"),) * 4, from_player=2)
+    passing = Action(ActionType.PASS, tile=P("7s"), from_player=2)
+    assert policy._guarded(state, 0, kong, [passing, kong], Random(0)) == passing
+    assert policy.last_note == "門清不明槓"

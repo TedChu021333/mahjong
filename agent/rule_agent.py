@@ -248,6 +248,18 @@ def _without(hand: Sequence[int], tile: int) -> list[int]:
     return result
 
 
+def is_concealed(melds) -> bool:
+    """門清：沒有吃碰明槓（暗槓不算）。內容讀不到的佔位副露（提示模式）當成明的。"""
+    return all(meld.kind == "kong" and meld.from_player is None for meld in melds)
+
+
+def open_kong_is_worth(melds) -> bool:
+    """明槓別人打的牌：手上的暗刻本來就是一組，槓了向聽不會變好，只多槓牌 1 台與補一張，
+    門清時反而少門清 1 台（自摸時門清自摸 3 台變自摸 1 台）、暗刻變明的。10/17 21:52 門清聽牌時
+    明槓七條，之後自摸 4 台，沒槓是 5 台（使用者指出）。已經有副露時照槓。"""
+    return not is_concealed(melds)
+
+
 def choose_self_kong(state: GameState, player: int) -> Action | None:
     """輪到自己時要不要暗槓或加槓。"""
     me = state.players[player]
@@ -472,7 +484,7 @@ def choose_rule_action_for_player(
             # 吃碰要讓向聽數變好、或向聽相同但有效進張變多才值得（拆掉已成的面子去吃
             # 不划算）；明槓多摸一張，向聽不變差就槓
             if action.kind == ActionType.KONG:
-                worth = after[0] <= baseline[0]
+                worth = after[0] <= baseline[0] and open_kong_is_worth(current.melds)
                 after = (after[0], float("-inf"))  # 向聽相同時槓優先於碰（槓有台、多摸一張）
             else:
                 worth = claim_is_worth(state, player, action, baseline, after, claim_mode)

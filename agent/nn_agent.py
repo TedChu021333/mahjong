@@ -14,6 +14,7 @@ from agent.rule_agent import (
     choose_rule_action_for_player,
     declare_is_worth,
     gold_in_use,
+    open_kong_is_worth,
     keep_value,
     visible_tile_counts,
 )
@@ -79,6 +80,9 @@ class NetworkPolicy:
     def _guarded(self, state: GameState, player: int, choice: Action, actions: list[Action],
                  rng: Random) -> Action:
         notes = []
+        if choice.kind == ActionType.KONG and state.phase == Phase.RESPONSE                 and not open_kong_is_worth(state.players[player].melds):
+            self.last_note = "門清不明槓"
+            return next(action for action in actions if action.kind == ActionType.PASS)
         if choice.kind in (ActionType.CHOW, ActionType.PUNG):
             note = claim_is_worse(state, player, choice, rng)
             if note is not None:

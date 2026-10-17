@@ -15,6 +15,7 @@ from game.rules import (
     Action,
     ActionType,
     GameState,
+    Meld,
     Phase,
     PlayerState,
     apply_action,
@@ -323,8 +324,8 @@ def test_no_kong_when_the_fourth_tile_is_needed_in_a_run():
 
 def test_kong_is_preferred_over_pung_from_a_discard():
     players = [PlayerState() for _ in range(4)]
-    players[1].hand = C("555p123m456m789m124s7z")
-    assert sum(players[1].hand) == 16
+    players[1].hand = C("555p456m789m124s7z")
+    players[1].melds = [Meld("chow", tuple(parse("123m")), 0)]  # 已經有副露（門清時不明槓）
     players[3].discards = parse("5p")  # 對家打的（上家打的不能明槓）
     state = GameState([0] * 30, players, current_player=3, phase=Phase.RESPONSE,
                       last_discard=P("5p"), discard_player=3, response_player=1,
