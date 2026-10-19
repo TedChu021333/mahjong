@@ -703,3 +703,19 @@ def test_unknown_screen_is_saved_once():
     # 10/4 06:09 跳出升級畫面後停了 4 小時，沒有截圖可以做辨識
     lines = run_unrecognised(FakeGameWindow(idle=3.0))
     assert sum("認不出畫面" in line for line in lines) == 1
+
+
+def test_danger_table_lists_the_riskiest_tiles_in_hand():
+    from hint.advisor import danger_table
+
+    # 上家宣告、打過東南西：手上的字牌對他安全，中張比較危險
+    hand = T("123456789m2588p1237z")
+    observation = Observation(hand, None, None, (), discards=((), (), (), T("123z")),
+                              declared=frozenset({"left"}), my_discards=3)
+    text = danger_table(observation)
+    lines = text.splitlines()
+    assert lines[0].startswith("放槍機率") and len(lines) == 6
+    assert "上家★" in lines[1]
+    assert not any(line.startswith(("東", "南", "西")) for line in lines[1:])
+    # 不是自己打牌的時候沒有表
+    assert danger_table(Observation(hand[:-1], None, None, ())) is None

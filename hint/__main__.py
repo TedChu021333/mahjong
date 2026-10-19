@@ -35,6 +35,7 @@ from hint.advisor import (
     Readers,
     decide,
     describe,
+    danger_table,
     hand_after_claim,
     last_note,
     observe,
@@ -167,8 +168,9 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         actuator=None, observe_fn=observe, clock=time.monotonic, show=None,
         find_continue=None, save_result=save_result, log=print_log, rivers=None,
         find_win=None, find_buttons=None, find_popup=None, find_autoplay=None,
-        window=None) -> None:
-    """find_win(frame) 為「胡」按鈕是否亮著、find_buttons(frame) 讀按鈕列（都不依賴手牌辨識）；
+        window=None, show_danger=None) -> None:
+    """show_danger(text) 更新放槍表小視窗（輪到自己時手上放槍機率最高的幾張）。
+    find_win(frame) 為「胡」按鈕是否亮著、find_buttons(frame) 讀按鈕列（都不依賴手牌辨識）；
     find_popup(frame) 找會蓋住牌桌的彈出面板（自動模式按關閉）。window（control.window.GameWindow）
     讓自動模式在看不到遊戲、使用者又沒在用電腦時把遊戲切回前面。"""
     previous = None
@@ -202,6 +204,19 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     """已經存過「不明畫面」截圖的那段期間（以 game_seen_at 區分）。"""
     stuck_shots_left, stuck_shot_at = 0, float("-inf")
     hands = HandBook()
+    table_for = None
+    """放槍表算過的手牌（同一手只算一次）。"""
+
+    def update_table(observation) -> None:
+        nonlocal table_for
+        if show_danger is None or observation.hand == table_for:
+            return
+        table_for = observation.hand
+        try:
+            show_danger(danger_table(observation))
+        except ValueError:  # 局面不合法（例如張數讀錯）：這手不顯示
+            show_danger(None)
+
     hand_seen_at = None
     """最近一次讀到手牌的時間（局末截圖用）。"""
     end_shots: set[float] = set()
@@ -409,6 +424,11 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 if show is not None:
                     show(advice)
             last_advice = advice
+            if not observation.my_turn and table_for is not None and show_danger is not None:
+                table_for = None
+                show_danger(None)  # 打出去了：等下一次輪到自己
+            if observation.my_turn and (actuator is None or action is None):
+                update_table(observation)
             if actuator is None or action is None:
                 continue
             if observation == acted_for:
@@ -433,6 +453,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 log(f"[{stamp}] 畫面上找不到對應的按鈕或牌，略過", hand_text(observation))
             acted_for = observation
             acted_at = clock()
+            if observation.my_turn:
+                update_table(observation)  # 自動模式：點完再算，不拖慢出牌
         except Exception as error:  # 單一幀出錯不能讓整個迴圈停掉（浮動小視窗模式下看起來就像不動作）
             if type(error).__name__ == "FailSafeException":
                 raise  # 滑鼠甩到左上角的緊急停止一定要生效
@@ -555,7 +577,7 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
                            show=window.show, find_continue=find_continue, log=log,
                            rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
                            find_popup=popups.find, find_autoplay=autoplay_active,
-                           window=game_window))
+                           window=game_window, show_danger=window.show_table))
 
 
 def win_is_lit(frame: np.ndarray) -> bool:

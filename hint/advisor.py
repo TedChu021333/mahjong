@@ -405,3 +405,32 @@ def chow_options(observation: Observation) -> list[tuple[int, ...]]:
 def advise(observation: Observation, rng: Random | None = None) -> str | None:
     action = decide(observation, rng)
     return describe(action) if action is not None else None
+
+
+DANGER_ROWS = 5
+DANGER_MIN_VALID = 100
+"""放槍表：每位宣告者湊這麼多副有效的聽牌手牌（見 opponent_model.estimate_danger），約 0.1～0.3 秒。"""
+SEAT_NAMES = {1: "下家", 2: "對家", 3: "上家"}
+
+
+def danger_table(observation: Observation, rows: int = DANGER_ROWS) -> str | None:
+    """輪到自己時，手上每種牌打出去的放槍機率，最高的幾張（浮動小視窗的放槍表）。
+    每行：牌、放槍機率、最可能放給誰（宣告者加 ★）。不是自己打牌的畫面回傳 None。"""
+    from agent.opponent_model import estimate_danger
+
+    if not observation.my_turn:
+        return None
+    state = build_state(observation)
+    if state is None or state.phase != Phase.DISCARD:
+        return None
+    tiles = sorted(set(observation.hand))
+    danger = estimate_danger(state, ME, tiles, Random(0), samples=40,
+                             min_valid=DANGER_MIN_VALID)
+    lines = ["放槍機率（手上最高 5 張）"]
+    for tile in sorted(tiles, key=lambda t: -danger.probability[t])[:rows]:
+        per = {seat: risks[tile] for seat, risks in (danger.by_opponent or {}).items()}
+        seat = max(per, key=per.get) if per and max(per.values()) > 0 else None
+        who = "" if seat is None else \
+            f"  {SEAT_NAMES[seat]}{'★' if state.declared[seat] else ''}"
+        lines.append(f"{tile_name(tile):3}{danger.probability[tile]:6.1%}{who}")
+    return "\n".join(lines)
