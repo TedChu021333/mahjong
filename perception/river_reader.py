@@ -28,6 +28,7 @@ from perception.config import (
     RIVER_REGIONS,
     RIVER_ROW_TOLERANCE,
     RIVER_ROW_TOPS,
+    RIVER_SLOTS,
     RIVER_TEMPLATE_DIR,
 )
 from perception.hand_reader import Box, TileClassifier
@@ -86,8 +87,26 @@ def locate_river_tiles(image: np.ndarray) -> dict[str, list[Box]]:
                 tops.append((left, y, right))
         height = RIVER_FACE_HEIGHT[seat]
         result[seat] = [(left - RIVER_FACE_PAD, y, right + RIVER_FACE_PAD, y + height)
-                        for left, y, right in sorted(tops, key=lambda t: (t[1], t[0]))]
+                        for left, y, right in sorted(snap_to_slots(seat, tops),
+                                                     key=lambda t: (t[1], t[0]))]
     return result
+
+
+def snap_to_slots(seat: str, tops: list[tuple[int, int, int]]) -> list[tuple[int, int, int]]:
+    """把偵測到的上緣白色區段 (left, y, right) 對到最近的固定格位（RIVER_SLOTS），同一格只留一個；
+    沒有格位資料的列照偵測結果。"""
+    slots = RIVER_SLOTS.get(seat, {})
+    snapped: dict[tuple[int, int], tuple[int, int, int]] = {}
+    for left, y, right in tops:
+        row = min(slots, key=lambda top: abs(top - y), default=None)
+        if row is None or abs(row - y) > RIVER_ROW_TOLERANCE:
+            snapped[(y, left)] = (left, y, right)
+            continue
+        start, pitch, width = slots[row]
+        index = round(((left + right) / 2 - (start + width / 2)) / pitch)
+        x = round(start + index * pitch)
+        snapped.setdefault((row, index), (x, row, x + width))
+    return list(snapped.values())
 
 
 def crop_face(image: np.ndarray, box: Box) -> np.ndarray:

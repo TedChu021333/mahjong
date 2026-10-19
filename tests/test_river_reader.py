@@ -67,3 +67,28 @@ def test_reader_without_templates_still_locates_tiles(tmp_path):
     rivers = reader.read(screenshot("經典_牌河95"))
     assert {seat: len(tiles) for seat, tiles in rivers.items()} == COUNTS_95
     assert all(t.tile is None for tiles in rivers.values() for t in tiles)
+
+
+# 10/19 使用者標註的局末截圖（偵測順序）：自己第二排在上方、對家第二排在下方、上家一列第 4 張
+LABELS_SECOND_ROWS = {
+    "經典_牌河第二排": {   # 局末_20261019_190558
+        "me": "676m6z44z3z9p5p8m4z2z1p",
+        "right": "1s1p6p2m6z2p9m7z7p1p2p8m",
+        "top": "9p7p2z2s2z6m7z4p7p7p",
+        "left": "7z6z9m3p9m5z9m3z9p7z",
+    },
+    "經典_牌河對家第二排": {   # 局末_20261019_182648
+        "me": "3z8m1z1z2m7m1s8m4m1m",
+        "right": "4p6z1m9p5s2m5m2s8m2z2m",
+        "top": "1p2z7m1z6z5m2z2m2s7m3s3s",
+        "left": "1m4m1z2z1s6z1s9m2s3z",
+    },
+}
+
+
+@pytest.mark.parametrize("name", sorted(LABELS_SECOND_ROWS))
+def test_second_rows_are_located_and_read(name):
+    image = screenshot(name)
+    rivers = RiverReader.from_directory().read(image)
+    for seat, tiles in LABELS_SECOND_ROWS[name].items():
+        assert [tile.tile for tile in rivers[seat]] == parse(tiles), seat
