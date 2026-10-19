@@ -7,7 +7,8 @@
 每局的小結算畫面（「繼續」）有四列：輸贏金額在右邊，金色為贏、銀色為輸；自己那列的名字是
 黃色。金額用 eval/digit_templates/ 的數字模板辨識（字形比對，不需要 OCR 套件）。
 一圈的界線：大結算「繼續戰鬥」、倒數後的「再玩一局」、流局後的「再贏一局」截圖。
-流局沒有小結算畫面，不會出現在統計裡（輸贏都是 0）。
+流局沒有小結算畫面，不會出現在逐局統計裡（輸贏都是 0）；10/19 起提示迴圈在記錄檔寫下流局（hint.hand_end），
+另外列出。
 """
 from __future__ import annotations
 
@@ -219,7 +220,25 @@ def _rate(count: int, total: int) -> str:
     return f"{p:.0%}（±{margin:.0%}）"
 
 
-def report(rounds: list[Round]) -> str:
+def count_unsettled(directory: Path, date: str, since: str | None, until: str | None) -> tuple[int, int]:
+    """記錄檔裡沒有結算畫面就換局的次數：(流局, 結算畫面沒認到)，見 hint.hand_end（10/19 起才有）。"""
+    from hint.hand_end import DRAW_TEXT, MISSED_TEXT
+
+    path = directory / f"log_{date}.txt"
+    if not path.exists():
+        return 0, 0
+    draws = missed = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        clock = line[:8].replace(":", "")
+        if (since and clock < since) or (until and clock > until):
+            continue
+        draws += DRAW_TEXT in line
+        missed += MISSED_TEXT in line
+    return draws, missed
+
+
+def report(rounds: list[Round], draws: int = 0, missed: int = 0) -> str:
+    """draws、missed：記錄檔判斷的流局與漏認結算的局數（count_unsettled）。"""
     hands = [hand for rnd in rounds for hand in rnd.hands]
     lines = []
     for index, rnd in enumerate(rounds, 1):
@@ -240,7 +259,12 @@ def report(rounds: list[Round]) -> str:
     ]
     if counts["未知"]:
         lines.append(f"讀不出自己那列：{counts['未知']} 局")
-    lines.append("（流局沒有結算畫面，不計入；最後一圈若還沒打完，列出的是目前為止）")
+    if draws or missed:
+        everything = total + draws + missed
+        lines.append(f"另有流局 {draws} 局、結算畫面沒認到 {missed} 局（由記錄檔判斷）；全部算進去共 {everything} 局，"
+                     f"胡牌率 {_rate(wins, everything)}、放槍率 {_rate(counts['放槍'], everything)}"
+                     f"、流局率 {_rate(draws, everything)}")
+    lines.append("（流局沒有結算畫面，上面的局數與比率不含流局；最後一圈若還沒打完，列出的是目前為止）")
     return "\n".join(lines)
 
 
@@ -260,7 +284,8 @@ def main() -> None:
         return value.replace(":", "").ljust(6, "0") if value else None
 
     rounds = collect(args.dir, args.date, hhmmss(args.since), hhmmss(args.until), args.name)
-    print(report(rounds))
+    since, until = hhmmss(args.since), hhmmss(args.until)
+    print(report(rounds, *count_unsettled(args.dir, args.date, since, until)))
     if args.csv:
         with args.csv.open("w", newline="", encoding="utf-8-sig") as file:
             writer = csv.writer(file)

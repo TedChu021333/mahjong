@@ -69,3 +69,17 @@ def test_my_row_by_seat_wind_when_the_name_is_covered():
     rows = [read_row(image, top, load_digits(), my_name) for top in ROW_TOPS]
     assert not any(row.is_me for row in rows)
     assert wind_row(image) == 0 and rows[0].amount == -500
+
+
+def test_draws_from_the_log_are_counted(tmp_path):
+    from eval.stats import count_unsettled
+    from hint.hand_end import DRAW_TEXT, MISSED_TEXT
+
+    (tmp_path / "log_20261019.txt").write_text(
+        f"15:19:20 [15:19:20] 上一局沒有結算畫面：{DRAW_TEXT}\n"
+        f"15:23:30 [15:23:30] 上一局沒有結算畫面：{MISSED_TEXT}，莊家 對家 → 上家\n"
+        f"18:00:00 [18:00:00] 上一局沒有結算畫面：{DRAW_TEXT}\n", encoding="utf-8")
+    assert count_unsettled(tmp_path, "20261019", "150000", "170000") == (1, 1)
+    rounds = [Round([Hand("20261019_152519", 500, "胡牌")])]
+    text = report(rounds, 1, 1)
+    assert "另有流局 1 局、結算畫面沒認到 1 局" in text and "共 3 局" in text

@@ -267,3 +267,19 @@ def test_tiles_discarded_after_a_declaration_are_safe_for_the_declarer():
     assert safe[1] == safe[3] == safe[0] == ()
     watch.new_hand()
     assert watch.declared_safe() == ((), (), (), ())
+
+
+def test_empty_table_starts_a_new_hand():
+    # 流局沒有結算畫面：牌河整個清空就當成新的一局
+    from hint.river_watch import EMPTY_RESET_FRAMES
+
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    reader.current["top"] = [RiverTile(P("1z"), 0.9, (660, 284, 717, 334))]
+    frames(watch, waiting())
+    assert watch.has_discards()
+    reader.current["top"] = []
+    frames(watch, waiting(), EMPTY_RESET_FRAMES - 1)
+    assert watch.has_discards()  # 短暫被蓋住不算
+    frames(watch, waiting(), 1)
+    assert not watch.has_discards() and watch.reset_by_empty_table == 1

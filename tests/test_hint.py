@@ -517,6 +517,12 @@ def test_loop_saves_frames_from_before_a_claim(monkeypatch):
         def declared_safe(self):
             return ((), (), (), ())
 
+        def has_discards(self):
+            return False
+
+        def total_discards(self):
+            return 0
+
     monkeypatch.setattr(hint_main, "decide", lambda observation: None)
     monkeypatch.setattr(hint_main, "SAVE_CLAIM_FRAMES", True)
     saved = []

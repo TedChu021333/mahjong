@@ -36,6 +36,8 @@ BANNER_FRAMES = 10
 """大字出現後這麼多次更新（約 3 秒）內的「被拿走」才算這次吃碰。"""
 LABEL_FRAMES = 15
 """標註在這麼多幀內等不到那家牌河多一張就作廢。"""
+EMPTY_RESET_FRAMES = 10
+"""四家牌河連續這麼多次都讀不到任何牌、追蹤器卻記著牌時，當成新的一局（沒有換三張的場、流局沒有結算畫面）。"""
 
 
 def _read_banner(frame):
@@ -72,6 +74,9 @@ class RiverWatch:
         self._last_circle: tuple[str, int] | None = None
         self.my_discards = 0
         """這局自己打出幾張（由手牌張數變化得知，不靠牌河；漏看輪到自己的畫面時會少算）。"""
+        self._empty_frames = 0
+        self.reset_by_empty_table = 0
+        """因為牌河整個清空而自動當成新局的次數（記錄用）。"""
         self._declare_marks: dict[str, dict[str, int]] = {}
         """第一次認到某家宣告時，各家牌河（含被吃碰的）已有幾張；之後別家打出的牌他一定不聽
         （遊戲代打、自動胡），見 declared_safe。"""
@@ -89,6 +94,7 @@ class RiverWatch:
         self._banner = None
         self.my_discards = 0
         self._declare_marks = {}
+        self._empty_frames = 0
 
     def update(self, frame: np.ndarray, observation: Observation) -> list[RiverEvent]:
         self._frame += 1
@@ -98,7 +104,15 @@ class RiverWatch:
         if banner is not None and not self._banner_visible:
             self._banner = (*banner, self._frame)  # 只記剛出現的那一次
         self._banner_visible = banner is not None
-        events = self.tracker.update(self.reader.read(frame))
+        reading = self.reader.read(frame)
+        if any(reading.values()) or not self.has_discards():
+            self._empty_frames = 0
+        else:
+            self._empty_frames += 1
+            if self._empty_frames >= EMPTY_RESET_FRAMES:
+                self.new_hand()
+                self.reset_by_empty_table += 1
+        events = self.tracker.update(reading)
         for seat in observation.declared:
             if seat not in self._declare_marks:
                 # 同一幀剛出現的牌不算（可能是宣告前打的）
@@ -165,6 +179,12 @@ class RiverWatch:
             if seat != "me":
                 result[RIVER_SEAT[seat]] = min(count, 5)
         return tuple(result)
+
+    def has_discards(self) -> bool:
+        return any(self.tracker.history.values())
+
+    def total_discards(self) -> int:
+        return sum(len(tiles) for tiles in self.tracker.history.values())
 
     def declared_safe(self) -> tuple[tuple[int, ...], ...]:
         """各宣告者在認到他宣告之後，別家打出的牌（依 advisor 的座位編號排列）。"""

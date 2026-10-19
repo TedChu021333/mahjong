@@ -41,6 +41,7 @@ from hint.advisor import (
     use_network,
     use_policy,
 )
+from hint.hand_end import HandBook
 from hint.river_watch import RiverWatch
 from hint.river_watch import summary as river_summary
 from perception.continue_button import ContinueButton
@@ -58,6 +59,12 @@ CLAIM_PROMPT_REPORT = 1.5
 RIVER_INTERVAL = 0.3
 """牌河追蹤的門檻以幀數計、依約 0.3 秒一幀調校；擷取變快後牌河仍照這個間隔更新。"""
 UNREADABLE_AFTER = 6.0
+END_SHOT_DELAYS = (1.0, 2.0, 4.0)
+"""一局快打完（牌河記到 END_SHOT_MIN_DISCARDS 張以上）卻讀不到手牌、也還沒認到結算時，在這些秒數各存一張
+「局末_」截圖：流局沒有結算畫面，要看清楚那時畫面上是什麼（10/19 只有 6 秒後的「讀不到」，已經在擲骰子）。"""
+END_SHOT_MIN_DISCARDS = 40
+END_SHOT_LIMIT = 45
+"""每次執行最多存幾張局末截圖。"""
 """牌局中連續這麼多秒讀不到手牌（又不是聽牌代打）就存一張截圖，查版面認不出的原因。"""
 CLAIM_MEMORY = 10.0
 """能吃碰時放大的牌可能先縮進牌河、按鈕卻還亮著；這段時間內沿用最近讀到的那張。"""
@@ -194,6 +201,13 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     unknown_saved_for = None
     """已經存過「不明畫面」截圖的那段期間（以 game_seen_at 區分）。"""
     stuck_shots_left, stuck_shot_at = 0, float("-inf")
+    hands = HandBook()
+    hand_seen_at = None
+    """最近一次讀到手牌的時間（局末截圖用）。"""
+    end_shots: set[float] = set()
+    """這段讀不到的期間已經存過的局末截圖（秒數）。"""
+    end_shots_saved = 0
+    continue_seen_at = float("-inf")
     """卡住後還要存幾張後續截圖（每 STUCK_SHOT_INTERVAL 秒一張），看點擊後畫面怎麼變。"""
     for stamp, frame in frames:
         try:
@@ -234,7 +248,19 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 recent.append((clock(), frame))
                 while recent and clock() - recent[0][0] > RECENT_SECONDS:
                     recent.popleft()
-                for event in rivers.update(frame, observation):
+                if observation.swap_prompt is not None and rivers.has_discards():
+                    # 換三張＝新的一局。流局沒有小結算，牌河不會在按結算時重設（10/19 15:23 連兩局沒有結算，
+                    # 三局的牌河疊在一起、牌牆估計剩 0 張，開局就當成最後一手在防守，拆了四五筒）
+                    log(f"[{stamp}] 新的一局（上一局沒有結算畫面），重設牌河："
+                        f"{river_summary(rivers)}", echo=False)
+                    rivers.new_hand()
+                    hands.hand_ended(settled=False)
+                resets = getattr(rivers, "reset_by_empty_table", 0)
+                events = rivers.update(frame, observation)
+                if getattr(rivers, "reset_by_empty_table", 0) != resets:
+                    log(f"[{stamp}] 牌河整個清空，當成新的一局、重設牌河", echo=False)
+                    hands.hand_ended(settled=False)
+                for event in events:
                     name = tile_name(event.tile) if event.tile is not None else "?"
                     log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
                     if SAVE_CLAIM_FRAMES and event.kind == "claimed" \
@@ -252,13 +278,26 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                                       my_discards=rivers.my_discards,
                                       declared_safe=rivers.declared_safe())
             if observation is not None:
-                game_seen_at = last_readable = clock()
+                game_seen_at = last_readable = hand_seen_at = clock()
+                end_shots.clear()
+                for message in hands.see_dealer(observation.dealer):
+                    log(f"[{stamp}] {message}", echo=False)
                 if observation.dealer_streak is None and not streak_reported:
                     streak_reported = True  # 每次執行只存一張，補模板用
                     log(f"[{stamp}] 認不出連莊數（先當 {STREAK_UNKNOWN_GUESS}），截圖存到 "
                         f"{save_result(frame, '連莊_')}")
             elif find_autoplay is not None and find_autoplay(frame):
                 game_seen_at = last_readable = clock()  # 聽牌後遊戲代打：「取消代打」蓋住手牌是正常的
+            if (observation is None and hand_seen_at is not None and rivers is not None
+                    and continue_seen_at < hand_seen_at and end_shots_saved < END_SHOT_LIMIT
+                    and rivers.total_discards() >= END_SHOT_MIN_DISCARDS):
+                for delay in END_SHOT_DELAYS:
+                    if delay not in end_shots and clock() - hand_seen_at >= delay:
+                        end_shots.add(delay)
+                        end_shots_saved += 1
+                        log(f"[{stamp}] 局末讀不到手牌、還沒有結算畫面（{delay:.0f} 秒），截圖存到 "
+                            f"{save_result(frame, '局末_')}", echo=False)
+                        break
             elif (last_readable is not None and clock() - last_readable >= UNREADABLE_AFTER
                   and not (decided_action is not None
                            and decided_action.kind == ActionType.DECLARE)):
@@ -304,6 +343,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 previous = observation
                 continue
             if isinstance(observation, ContinueButton):
+                continue_seen_at = clock()
                 if observation == acted_for:
                     if clock() - acted_at < RETRY_AFTER or retries >= MAX_RETRIES:
                         continue
@@ -315,6 +355,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                         log(f"[{stamp}] 本局牌河：{river_summary(rivers)}"
                             f"（累計自動收集 {rivers.saved} 張牌河模板）", echo=False)
                         rivers.new_hand()
+                    hands.hand_ended(settled=True)
                 acted_for, acted_at = observation, clock()
                 if actuator is None:  # 提示模式：只記錄，由人按繼續
                     retries = MAX_RETRIES
