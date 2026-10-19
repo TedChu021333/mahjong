@@ -78,6 +78,8 @@ class RiverWatch:
         self._last_circle: tuple[str, int] | None = None
         self.my_discards = 0
         """這局自己打出幾張（由手牌張數變化得知，不靠牌河；漏看輪到自己的畫面時會少算）。"""
+        self.my_pungs: list[int] = []
+        """這局自己碰過的牌（加槓只可能是這些）。"""
         self.rejected_labels = 0
         """和牌河的牌不像、沒採用的標註次數。"""
         self._empty_frames = 0
@@ -101,6 +103,7 @@ class RiverWatch:
         self.my_discards = 0
         self._declare_marks = {}
         self._empty_frames = 0
+        self.my_pungs = []
 
     def update(self, frame: np.ndarray, observation: Observation) -> list[RiverEvent]:
         self._frame += 1
@@ -170,6 +173,9 @@ class RiverWatch:
     def own_claim(self, tiles) -> None:
         """自己吃碰完成：用掉的手牌（被吃碰的那張已在別家牌河）。"""
         self.exposed["me"] += list(tiles)
+        tiles = list(tiles)
+        if len(tiles) == 2 and tiles[0] == tiles[1]:
+            self.my_pungs.append(tiles[0])
 
     def exposed_tiles(self) -> tuple[tuple[int, ...], ...]:
         """依 advisor 的座位編號排列。"""

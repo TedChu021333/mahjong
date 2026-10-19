@@ -276,7 +276,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                                       melds=rivers.meld_counts(),
                                       exposed=rivers.exposed_tiles(),
                                       my_discards=rivers.my_discards,
-                                      declared_safe=rivers.declared_safe())
+                                      declared_safe=rivers.declared_safe(),
+                                      my_pungs=tuple(rivers.my_pungs))
             if observation is not None:
                 game_seen_at = last_readable = hand_seen_at = clock()
                 end_shots.clear()

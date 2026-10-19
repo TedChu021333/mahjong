@@ -234,6 +234,20 @@ def test_added_kong_when_the_kong_button_is_lit():
     assert action.kind == ActionType.KONG and action.tile == parse("5z")[0]
     # 沒亮就照常打牌
     assert decide(Observation(hand, None, None, ())).kind != ActionType.KONG
+    # 有追蹤碰過哪些牌：碰過中才是加槓中
+    assert decide(replace(observation, my_pungs=(parse("5z")[0],))).kind == ActionType.KONG
+    assert decide(replace(observation, my_pungs=())).kind != ActionType.KONG
+
+
+def test_added_kong_does_not_break_a_run():
+    from hint.advisor import decide
+
+    # 10/19 18:23：碰了七條、手上有六七八條，摸進中「槓」亮著——能加槓的是七條，拆了順子不划算
+    hand = T("456m34468p678s77z5z")
+    assert len(hand) == 14
+    observation = Observation(hand, frozenset({"kong"}), None, (), my_pungs=(parse("7s")[0],))
+    action = decide(observation)
+    assert action.kind != ActionType.KONG
 
 
 def test_loop_survives_errors_and_reports_stuck_screens(monkeypatch):
@@ -522,6 +536,8 @@ def test_loop_saves_frames_from_before_a_claim(monkeypatch):
 
         def total_discards(self):
             return 0
+
+        my_pungs = []
 
     monkeypatch.setattr(hint_main, "decide", lambda observation: None)
     monkeypatch.setattr(hint_main, "SAVE_CLAIM_FRAMES", True)

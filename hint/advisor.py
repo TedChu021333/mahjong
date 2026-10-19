@@ -79,6 +79,8 @@ class Observation:
     exposed: tuple[tuple[int, ...], ...] = field(default=(), compare=False)
     """各家副露裡已知、又不在牌河的牌（座位同 discards）：自己吃碰用掉的手牌、推算出別家碰的
     那種牌另外兩張。用來扣掉看得到的牌（例如聽的牌其實已經被碰走）。"""
+    my_pungs: tuple[int, ...] | None = field(default=None, compare=False)
+    """這局自己碰過的牌（RiverWatch.my_pungs）；None＝沒有追蹤（離線測試）。"""
     declared_safe: tuple[tuple[int, ...], ...] = field(default=(), compare=False)
     """各家宣告後別家打出、他沒胡的牌（座位同 discards；RiverWatch.declared_safe）：一定不是他要胡的。"""
     my_discards: int = field(default=0, compare=False)
@@ -323,17 +325,23 @@ def use_policy(name: str) -> None:
 
 
 def _added_kong(observation: Observation, state: GameState) -> Action | None:
-    """輪到自己時「槓」亮著、手上卻沒有 4 張一樣的：是摸進的牌能加槓（碰過的刻子內容
-    讀不到，規則引擎列不出這個選項），划算就槓。"""
+    """輪到自己時「槓」亮著、手上卻沒有 4 張一樣的：是加槓（碰過的刻子內容讀不到，規則引擎列不出
+    這個選項），划算就槓。能加槓的只有自己碰過的牌（observation.my_pungs）：10/19 18:23 碰了七條、
+    手上有六七八條，摸進中時「槓」亮著，原本一律當成摸進的中要加槓，按下去遊戲卻是把六七八裡的七條
+    加槓上去，拆了順子。沒有追蹤碰過哪些牌時才退回「摸進的牌」。"""
     buttons = observation.buttons or frozenset()
     if not observation.my_turn or observation.claimed or "kong" not in buttons:
         return None
     me = state.players[ME]
     if any(count >= 4 for count in me.hand):
         return None  # 暗槓由 AI 自己判斷
-    drawn = observation.hand[-1]
-    if kong_is_worth(me.hand, me.open_melds, drawn):
-        return Action(ActionType.KONG, tile=drawn, tiles=(drawn,) * 4)
+    if observation.my_pungs is None:
+        candidates = [observation.hand[-1]]
+    else:
+        candidates = [tile for tile in dict.fromkeys(observation.my_pungs) if me.hand[tile]]
+    for tile in candidates:
+        if kong_is_worth(me.hand, me.open_melds, tile):
+            return Action(ActionType.KONG, tile=tile, tiles=(tile,) * 4)
     return None
 
 
