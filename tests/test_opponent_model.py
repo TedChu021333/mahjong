@@ -146,3 +146,15 @@ def test_sampling_continues_until_enough_valid_hands():
     finally:
         om.sample_waits = original
     assert sum(counted) >= 50 or len(counted) >= 50 * om.MAX_ATTEMPTS_PER_VALID
+
+
+def test_offense_value_fades_late_and_keeps_shanten_gaps():
+    # 10/20：樣本少的格子原本借到開局的值，中後盤三向聽、一向聽都約 1.42 台，護欄覺得拆牌沒有損失
+    from agent.opponent_model import default_calibration
+
+    cal = default_calibration()
+    assert cal.offense_value(3, 16, 10) < 0.3
+    assert cal.offense_value(1, 16, 10) < 1.0
+    for wall in (40, 30, 20):
+        assert cal.offense_value(0, 16, wall) > cal.offense_value(1, 16, wall) \
+            > cal.offense_value(2, 16, wall)

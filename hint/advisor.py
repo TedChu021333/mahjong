@@ -207,7 +207,8 @@ def estimate_wall(observation: Observation) -> int:
     return max(0, START_DRAWABLE - discards + claims)
 
 
-def build_state(observation: Observation) -> GameState | None:
+def build_state(observation: Observation, waiting: bool = False) -> GameState | None:
+    """waiting：不是自己的回合、也沒有可吃碰的牌時，仍建一個「等別人出牌」的局面（放槍表用）。"""
     claim = observation.claim
     responding = not observation.my_turn and observation.buttons is not None         and claim is not None and claim.tile is not None
     source = SOURCE_SEAT[claim.source] if responding else None
@@ -243,7 +244,11 @@ def build_state(observation: Observation) -> GameState | None:
                                   last_drawn=observation.hand[-1], **common)
         return parse_observed_table(table)
     if not responding:
-        return None
+        if not waiting:
+            return None
+        table = ObservedTable(players=tuple(players), current_player=(ME + 1) % 4,
+                              phase=Phase.DRAW, **common)
+        return parse_observed_table(table)
     table = ObservedTable(players=tuple(players), current_player=source, phase=Phase.RESPONSE,
                           last_discard=claim.tile, discard_player=source,
                           response_players=(ME,), **common)
@@ -414,19 +419,19 @@ SEAT_NAMES = {1: "下家", 2: "對家", 3: "上家"}
 
 
 def danger_table(observation: Observation, rows: int = DANGER_ROWS) -> str | None:
-    """輪到自己時，手上每種牌打出去的放槍機率，最高的幾張（浮動小視窗的放槍表）。
-    每行：牌、放槍機率、最可能放給誰（宣告者加 ★）。不是自己打牌的畫面回傳 None。"""
+    """手上每種牌打出去的放槍機率，最高的幾張（浮動小視窗的放槍表，10/20 使用者要一直亮著）。
+    不是自己的回合時算的是現在這 16 張，給下一手參考。每行：牌、放槍機率、最可能放給誰（宣告者加 ★）。
+    讀不出局面時回傳 None。"""
     from agent.opponent_model import estimate_danger
 
-    if not observation.my_turn:
-        return None
-    state = build_state(observation)
-    if state is None or state.phase != Phase.DISCARD:
+    state = build_state(observation, waiting=True)
+    if state is None:
         return None
     tiles = sorted(set(observation.hand))
     danger = estimate_danger(state, ME, tiles, Random(0), samples=40,
                              min_valid=DANGER_MIN_VALID)
-    lines = ["放槍機率（手上最高 5 張）"]
+    title = "放槍機率（手上最高 5 張）" if observation.my_turn else "放槍機率（下一手參考）"
+    lines = [title]
     for tile in sorted(tiles, key=lambda t: -danger.probability[t])[:rows]:
         per = {seat: risks[tile] for seat, risks in (danger.by_opponent or {}).items()}
         seat = max(per, key=per.get) if per and max(per.values()) > 0 else None

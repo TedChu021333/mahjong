@@ -717,5 +717,7 @@ def test_danger_table_lists_the_riskiest_tiles_in_hand():
     assert lines[0].startswith("放槍機率") and len(lines) == 6
     assert "上家★" in lines[1]
     assert not any(line.startswith(("東", "南", "西")) for line in lines[1:])
-    # 不是自己打牌的時候沒有表
-    assert danger_table(Observation(hand[:-1], None, None, ())) is None
+    # 別人的回合也有表（現在這 16 張，給下一手參考）
+    waiting = danger_table(Observation(hand[:-1], None, None, (), discards=((), (), (), T("123z")),
+                                       declared=frozenset({"left"}), my_discards=3))
+    assert waiting.splitlines()[0] == "放槍機率（下一手參考）" and len(waiting.splitlines()) == 6

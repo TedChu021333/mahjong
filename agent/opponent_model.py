@@ -37,6 +37,10 @@ UNDECLARED_TENPAI_SHARE = 0.5
 54% 是放給沒宣告的人。原本粗估 0.4。"""
 SEQUENCE_SHARE = 0.7
 """組面子時順子的比例（其餘為刻子）。"""
+OFFENSE_MIN_SAMPLES = 200
+"""進攻收益表一格至少要這麼多樣本，不夠就合併相鄰的格子（見 Calibration.raw_offense_value）。
+50 時一向聽、牌牆剩 8~15 的一格只有 111 筆、平均 1.29 台（雜訊；相鄰格 0.5~0.6），再被「進張多的不會比較低」
+推到所有進張較多的格子。"""
 TANKI_SHARE = 0.05
 """聽牌型態中單騎的比例（其餘為對子 + 搭子）。原本 0.2；10/5 從結算畫面讀 109 次放槍時胡牌者的聽法：
 兩面 63、雙碰 30、嵌張 8、邊張 6、單吊 2（eval.deal_in）。"""
@@ -95,18 +99,22 @@ class Calibration:
         return _monotone_offense(self, max(-1, min(shanten, 8)), outs_group, wall_group)
 
     def raw_offense_value(self, shanten: int, outs_group: int, wall_group: int) -> float:
-        wins = total = gain = 0
-        # 樣本太少時合併相鄰的牌牆、進張組別
-        for spread in range(0, 4):
-            for dw in range(-spread, spread + 1):
-                for do in range(-spread, spread + 1):
-                    if max(abs(dw), abs(do)) != spread:
-                        continue
-                    w, t, g = self.offense.get((shanten, outs_group + do, wall_group + dw),
-                                               (0, 0, 0))
-                    wins, total, gain = wins + w, total + t, gain + g
-            if total >= 50:
-                break
+        """樣本太少（< OFFENSE_MIN_SAMPLES）時先合併同一牌牆組的相鄰進張組，再合併同牌牆組全部進張，
+        最後才借相鄰一組牌牆；不往更遠的牌牆借。原本最遠借到 ±3 組牌牆（24 張），牌少時向聽數多的
+        格子（三向聽、牌牆剩 10 張）樣本很少，借到開局的值變成約 1.42 台，再經「向聽少的不會比較低」
+        推上去，中後盤一向聽也是 1.42（原始資料 0.19），有人宣告時護欄就覺得拆牌幾乎沒有損失（10/20 使用者：下車下得太徹底）。"""
+        groups = len(self.outs_buckets)
+        tries = [range(max(0, outs_group - spread), min(groups, outs_group + spread + 1))
+                 for spread in (0, 1, 2)] + [range(groups)]
+        for walls in ((wall_group,), (wall_group - 1, wall_group, wall_group + 1)):
+            for outs in tries:
+                total = gain = 0
+                for wall in walls:
+                    for group in outs:
+                        _, t, g = self.offense.get((shanten, group, wall), (0, 0, 0))
+                        total, gain = total + t, gain + g
+                if total >= OFFENSE_MIN_SAMPLES:
+                    return gain / total
         return gain / total if total else 0.0
 
     def loss_if_dealing_in(self, declared: bool) -> float:

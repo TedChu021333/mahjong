@@ -60,6 +60,8 @@ CLAIM_PROMPT_REPORT = 1.5
 RIVER_INTERVAL = 0.3
 """牌河追蹤的門檻以幀數計、依約 0.3 秒一幀調校；擷取變快後牌河仍照這個間隔更新。"""
 UNREADABLE_AFTER = 6.0
+TABLE_INTERVAL = 1.0
+"""別人的回合時放槍表最多幾秒重算一次（每次約 0.1 秒）。"""
 END_SHOT_DELAYS = (1.0, 2.0, 4.0)
 """一局快打完（牌河記到 END_SHOT_MIN_DISCARDS 張以上）卻讀不到手牌、也還沒認到結算時，在這些秒數各存一張
 「局末_」截圖：流局沒有結算畫面，要看清楚那時畫面上是什麼（10/19 只有 6 秒後的「讀不到」，已經在擲骰子）。"""
@@ -205,17 +207,25 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     stuck_shots_left, stuck_shot_at = 0, float("-inf")
     hands = HandBook()
     table_for = None
-    """放槍表算過的手牌（同一手只算一次）。"""
+    """放槍表算過的局面（手牌、各家牌河張數、宣告者），沒變就不重算。"""
+    table_at = float("-inf")
 
     def update_table(observation) -> None:
-        nonlocal table_for
-        if show_danger is None or observation.hand == table_for:
+        nonlocal table_for, table_at
+        if show_danger is None:
             return
-        table_for = observation.hand
+        key = (observation.hand, tuple(len(river) for river in observation.discards),
+               observation.declared)
+        # 自己的回合手牌一變就算；別人的回合最多每 TABLE_INTERVAL 秒算一次
+        if key == table_for or (not observation.my_turn and clock() - table_at < TABLE_INTERVAL):
+            return
+        table_for, table_at = key, clock()
         try:
-            show_danger(danger_table(observation))
-        except ValueError:  # 局面不合法（例如張數讀錯）：這手不顯示
-            show_danger(None)
+            text = danger_table(observation)
+        except ValueError:  # 局面不合法（例如張數讀錯）：保留上一次的表
+            return
+        if text is not None:
+            show_danger(text)
 
     hand_seen_at = None
     """最近一次讀到手牌的時間（局末截圖用）。"""
@@ -424,10 +434,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 if show is not None:
                     show(advice)
             last_advice = advice
-            if not observation.my_turn and table_for is not None and show_danger is not None:
-                table_for = None
-                show_danger(None)  # 打出去了：等下一次輪到自己
-            if observation.my_turn and (actuator is None or action is None):
+            # 放槍表一直亮著：別人的回合也算（現在這 16 張給下一手參考），吃碰按鈕亮著時先不算、不拖慢回應
+            if (not observation.my_turn and not observation.buttons) or                     (observation.my_turn and (actuator is None or action is None)):
                 update_table(observation)
             if actuator is None or action is None:
                 continue
