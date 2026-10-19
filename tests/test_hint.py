@@ -406,6 +406,33 @@ def test_unhandled_claim_prompt_is_reported():
     assert saved == ["吃碰未處理_"] and "讀不到手牌" in lines[-1]
 
 
+def test_own_turn_kong_and_chow_panels_are_not_unhandled_claims(monkeypatch):
+    import hint.__main__ as hint_main
+
+    # 10/19：自己回合「槓」亮著但 AI 決定不槓、選吃法的選項框——都不是沒處理的吃碰
+    now = [0.0]
+    my_turn = Observation(T("11678m2334556p67p"), frozenset({"kong", "declare"}), None, ())
+    panels = Observation(T("11223789m99m4p5677s"), frozenset({"chow"}), None, (),
+                         chow_panels=((500, 700), (900, 700)))
+    assert my_turn.my_turn and not panels.my_turn
+
+    def play(observation):
+        def frames():
+            for step in range(20):
+                now[0] = step * 0.1
+                yield str(step), observation
+        saved = []
+        monkeypatch.setattr(hint_main, "decide", lambda observation: None)
+        hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: frame,
+                      clock=lambda: now[0],
+                      save_result=lambda frame, prefix="": saved.append(prefix) or "x",
+                      log=lambda line, detail=None, echo=True: None)
+        return saved
+
+    assert "吃碰未處理_" not in play(my_turn)
+    assert "吃碰未處理_" not in play(panels)
+
+
 def test_popup_is_closed_in_auto_mode():
     import hint.__main__ as hint_main
     from perception.continue_button import ContinueButton

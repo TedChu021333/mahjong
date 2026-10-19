@@ -309,7 +309,11 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             # 吃碰槓按鈕亮著卻一直沒處理：存截圖查原因（手牌變暗讀不到、放大的牌讀不到…）
             lit = observation.buttons if observation is not None else \
                 (find_buttons(frame) if find_buttons is not None else None)
-            if lit and lit & {"chow", "pung", "kong"}:
+            # 自己的回合「槓」亮著（能暗槓／加槓，AI 決定不槓就照常打牌）、選吃法的選項框出現時都不是
+            # 等著回應的吃碰（10/19 三張「吃碰未處理」都是這兩種）
+            responding = observation is None or (not observation.my_turn
+                                                 and not observation.chow_panels)
+            if lit and lit & {"chow", "pung", "kong"} and responding:
                 if claim_prompt_since is None:
                     claim_prompt_since, claim_prompt_reported = clock(), False
                 handled = observation is not None and decided_for == observation \
