@@ -36,6 +36,10 @@ BANNER_FRAMES = 10
 """大字出現後這麼多次更新（約 3 秒）內的「被拿走」才算這次吃碰。"""
 LABEL_FRAMES = 15
 """標註在這麼多幀內等不到那家牌河多一張就作廢。"""
+LABEL_MIN_SCORE = 0.7
+"""標註（手牌變化、放大的牌）和這張牌河的牌比對，至少要這麼像才採用、存成模板。10/19 發現牌河模板 6753 張
+有 1447 張放錯資料夾或不是牌（吃碰動畫、暗條；標註套到錯的那張），自己打的牌只讀對約一半；清掉後今天讀錯的
+126 張全部讀對。門檻 0.7：正確的標註留下 99%、錯的擋下 91%。"""
 EMPTY_RESET_FRAMES = 10
 """四家牌河連續這麼多次都讀不到任何牌、追蹤器卻記著牌時，當成新的一局（沒有換三張的場、流局沒有結算畫面）。"""
 
@@ -74,6 +78,8 @@ class RiverWatch:
         self._last_circle: tuple[str, int] | None = None
         self.my_discards = 0
         """這局自己打出幾張（由手牌張數變化得知，不靠牌河；漏看輪到自己的畫面時會少算）。"""
+        self.rejected_labels = 0
+        """和牌河的牌不像、沒採用的標註次數。"""
         self._empty_frames = 0
         self.reset_by_empty_table = 0
         """因為牌河整個清空而自動當成新局的次數（記錄用）。"""
@@ -235,6 +241,10 @@ class RiverWatch:
         entry = self.tracker.history[event.seat][-1]
         if entry.tile == tile:
             return  # 已經認得，不必再存
+        classifier = getattr(self.reader, "classifier", None)
+        if classifier is not None and frame is not None                 and classifier.scores(crop_face(frame, event.box)).get(tile, -1.0) < LABEL_MIN_SCORE:
+            self.rejected_labels += 1  # 標註和這張牌不像：多半套錯了牌（或偵測到的不是牌），不改也不存
+            return
         path = self.template_dir / tile_code(tile) / \
             f"auto_{time.strftime('%Y%m%d_%H%M%S')}_{self._frame}_{event.seat}.png"
         self.save(path, crop_face(frame, event.box))

@@ -353,7 +353,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     log(f"[{stamp}] 結算截圖存到 {save_result(frame)}")
                     if rivers is not None:
                         log(f"[{stamp}] 本局牌河：{river_summary(rivers)}"
-                            f"（累計自動收集 {rivers.saved} 張牌河模板）", echo=False)
+                            f"（累計自動收集 {rivers.saved} 張牌河模板、"
+                            f"{getattr(rivers, 'rejected_labels', 0)} 次標註和牌不像沒採用）", echo=False)
                         rivers.new_hand()
                     hands.hand_ended(settled=True)
                 acted_for, acted_at = observation, clock()

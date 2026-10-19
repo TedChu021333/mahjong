@@ -283,3 +283,22 @@ def test_empty_table_starts_a_new_hand():
     assert watch.has_discards()  # 短暫被蓋住不算
     frames(watch, waiting(), 1)
     assert not watch.has_discards() and watch.reset_by_empty_table == 1
+
+
+def test_label_that_does_not_look_like_the_river_tile_is_rejected():
+    import numpy as np
+
+    class Classifier:
+        def scores(self, image):
+            return {P("9p"): 0.3, P("2p"): 0.9}
+
+    reader = FakeReader()
+    reader.classifier = Classifier()
+    watch, saved = watch_with(reader)
+    frame = np.zeros((1080, 1920, 3), np.uint8)
+    watch.update(frame, Observation(tuple(parse("11223789m99m4p56779s9p")), None, None, ()))
+    reader.current["me"] = [RiverTile(P("2p"), 0.9, (580, 651, 650, 717))]
+    for _ in range(CONFIRM_FRAMES):
+        watch.update(frame, waiting())
+    assert watch.tracker.discards["me"] == [P("2p")]  # 標註說九筒，但這張看起來不像：不改
+    assert saved == [] and watch.rejected_labels == 1
