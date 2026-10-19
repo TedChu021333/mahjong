@@ -51,6 +51,8 @@ class ObservedTable:
     """估計的牌牆可摸張數（畫面上看不到，只影響 state.drawable；牌牆內容以 0 佔位）。"""
     min_discards: int = 0
     """每位對手至少打過幾張（見 GameState.min_discards）。"""
+    declared_safe: tuple[tuple[int, ...], ...] = ()
+    """各家宣告後別人打出的牌（見 GameState.declared_safe）。"""
 
 
 def _validate_tile(tile: int, allow_flower: bool = False) -> None:
@@ -135,4 +137,6 @@ def parse_observed_table(observed: ObservedTable) -> GameState:
         dealer_known=observed.dealer is not None,
         dealer_streak=observed.dealer_streak if observed.dealer is not None else 0,
         min_discards=observed.min_discards,
+        declared_safe=[set(observed.declared_safe[seat]) if seat < len(observed.declared_safe)
+                       else set() for seat in range(4)],
     )

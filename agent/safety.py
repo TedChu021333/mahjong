@@ -31,8 +31,10 @@ OVERRIDE_MARGIN = 0.2
 """至少好這麼多台才推翻網路。進攻收益表依向聽與進張分組，同一組內的差別看不出來（很多改法顯示
 「進攻少 0.00」），太小的差距留給網路。10/17 記錄重放：門檻 0.05 時有人宣告的出牌 66 次改 37 次，
 0.2 改 29 次；放槍那幾手（少付 0.35～1.41 台）都還會改。"""
-SAMPLES = 160
-"""每位對手抽幾副聽牌手牌。"""
+SAMPLES = 40
+MIN_VALID = 150
+"""每位宣告者湊滿這麼多副有效的聽牌手牌（見 opponent_model.estimate_danger）；原本只嘗試 160 次、
+有效的約 24 副，估計值亂跳。"""
 
 
 @dataclass(frozen=True)
@@ -107,7 +109,8 @@ def safer_discard(state: GameState, player: int, tile: int, rng: Random,
     candidates = allowed_discards(me.hand, state.forbidden_discards if state.claimed else ())
     if tile not in candidates or len(candidates) < 2:
         return tile, None
-    danger = estimate_danger(state, player, candidates, rng, calibration, SAMPLES)
+    danger = estimate_danger(state, player, candidates, rng, calibration, SAMPLES,
+                             min_valid=MIN_VALID)
     choices = evaluate(state, player, me.hand, me.melds, candidates, danger.expected_loss,
                        danger.probability, calibration)
     current = choices[tile]
@@ -143,7 +146,8 @@ def claim_is_worse(state: GameState, player: int, action: Action, rng: Random,
     melds = list(me.melds) + [_claimed_meld(action)]
     after_claim = allowed_discards(hand, forbidden_after_claim(action, action.tile))
     tiles = [tile for tile, count in enumerate(me.hand) if count]
-    danger = estimate_danger(state, player, tiles, rng, calibration, SAMPLES)
+    danger = estimate_danger(state, player, tiles, rng, calibration, SAMPLES,
+                             min_valid=MIN_VALID)
     claimed = evaluate(state, player, hand, melds, after_claim, danger.expected_loss,
                        danger.probability, calibration)
     best = max(claimed.values(), key=lambda c: c.net)

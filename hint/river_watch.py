@@ -56,6 +56,8 @@ class RiverWatch:
         self.saved = 0
         self._frame = 0
         self._labels: dict[str, tuple[int, int]] = {}
+        self._unlabeled: dict[str, tuple[np.ndarray, RiverEvent, int]] = {}
+        """剛出現、還沒等到標註的出牌（畫面、事件、幀數）：自己的手牌變化常比牌河晚幾幀才看到。"""
         """座位 → (牌, 取得標註時的幀數)。"""
         self._turn_hand: tuple[int, ...] | None = None
         self.melds = {seat: 0 for seat in SEATS}
@@ -70,10 +72,14 @@ class RiverWatch:
         self._last_circle: tuple[str, int] | None = None
         self.my_discards = 0
         """這局自己打出幾張（由手牌張數變化得知，不靠牌河；漏看輪到自己的畫面時會少算）。"""
+        self._declare_marks: dict[str, dict[str, int]] = {}
+        """第一次認到某家宣告時，各家牌河（含被吃碰的）已有幾張；之後別家打出的牌他一定不聽
+        （遊戲代打、自動胡），見 declared_safe。"""
 
     def new_hand(self) -> None:
         self.tracker.reset()
         self._labels.clear()
+        self._unlabeled.clear()
         self._turn_hand = None
         self.melds = {seat: 0 for seat in SEATS}
         self.exposed = {seat: [] for seat in SEATS}
@@ -82,6 +88,7 @@ class RiverWatch:
         self._credited = None
         self._banner = None
         self.my_discards = 0
+        self._declare_marks = {}
 
     def update(self, frame: np.ndarray, observation: Observation) -> list[RiverEvent]:
         self._frame += 1
@@ -92,6 +99,11 @@ class RiverWatch:
             self._banner = (*banner, self._frame)  # 只記剛出現的那一次
         self._banner_visible = banner is not None
         events = self.tracker.update(self.reader.read(frame))
+        for seat in observation.declared:
+            if seat not in self._declare_marks:
+                # 同一幀剛出現的牌不算（可能是宣告前打的）
+                self._declare_marks[seat] = {other: len(tiles)
+                                             for other, tiles in self.tracker.history.items()}
         for event in events:
             if event.kind == "discard":
                 self._apply_label(frame, event)
@@ -154,6 +166,16 @@ class RiverWatch:
                 result[RIVER_SEAT[seat]] = min(count, 5)
         return tuple(result)
 
+    def declared_safe(self) -> tuple[tuple[int, ...], ...]:
+        """各宣告者在認到他宣告之後，別家打出的牌（依 advisor 的座位編號排列）。"""
+        result = [()] * 4
+        history = self.tracker.discards
+        for declarer, marks in self._declare_marks.items():
+            result[RIVER_SEAT[declarer]] = tuple(
+                tile for seat, tiles in history.items() if seat != declarer
+                for tile in tiles[marks.get(seat, 0):] if tile is not None)
+        return tuple(result)
+
     def discards(self) -> tuple[tuple[int, ...], ...]:
         """依 advisor 的座位編號排列，未知的牌略過。"""
         result = [()] * 4
@@ -176,14 +198,21 @@ class RiverWatch:
             gone = Counter(self._turn_hand) - Counter(observation.hand)
             if sum(gone.values()) == 1:
                 self._labels["me"] = (next(iter(gone)), self._frame)
+                pending = self._unlabeled.pop("me", None)
+                if pending is not None and self._frame - pending[2] <= LABEL_FRAMES:
+                    # 牌河先看到這張出牌、手牌變化晚到（10/18 03:24 打的八萬、九萬被記成二筒、三萬）
+                    self._apply_label(pending[0], pending[1], retry=True)
             self._turn_hand = None
 
-    def _apply_label(self, frame: np.ndarray, event: RiverEvent) -> None:
+    def _apply_label(self, frame: np.ndarray, event: RiverEvent, retry: bool = False) -> None:
+        """retry：標註晚到，回頭補標剛才的出牌。"""
         label = self._labels.pop(event.seat, None)
         if label is None or self._frame - label[1] > LABEL_FRAMES:
+            if not retry and event.seat == "me":
+                self._unlabeled["me"] = (frame, event, self._frame)  # 等手牌變化
             return
         tile = label[0]
-        entry = self.tracker.rivers[event.seat][-1]
+        entry = self.tracker.history[event.seat][-1]
         if entry.tile == tile:
             return  # 已經認得，不必再存
         path = self.template_dir / tile_code(tile) / \

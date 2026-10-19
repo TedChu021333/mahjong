@@ -79,6 +79,8 @@ class Observation:
     exposed: tuple[tuple[int, ...], ...] = field(default=(), compare=False)
     """各家副露裡已知、又不在牌河的牌（座位同 discards）：自己吃碰用掉的手牌、推算出別家碰的
     那種牌另外兩張。用來扣掉看得到的牌（例如聽的牌其實已經被碰走）。"""
+    declared_safe: tuple[tuple[int, ...], ...] = field(default=(), compare=False)
+    """各家宣告後別家打出、他沒胡的牌（座位同 discards；RiverWatch.declared_safe）：一定不是他要胡的。"""
     my_discards: int = field(default=0, compare=False)
     """這局自己已打出幾張（提示迴圈由手牌變化數出）。牌河追蹤只記到約八成的出牌（10/5 分析 1436 局），
     每位對手打過的張數至少算這麼多，聽牌率與牌牆剩餘才不會低估。"""
@@ -225,7 +227,8 @@ def build_state(observation: Observation) -> GameState | None:
     common = dict(gold_tiles=observation.gold_tiles, declared=tuple(declared), dealer=dealer,
                   dealer_streak=streak,
                   wall_remaining=estimate_wall(observation),
-                  min_discards=observation.my_discards)
+                  min_discards=observation.my_discards,
+                  declared_safe=observation.declared_safe)
     if dealer is not None:
         common["seat_winds"] = seat_winds_for_dealer(dealer)  # 門風跟著莊家轉，莊家是東
     if observation.my_turn:

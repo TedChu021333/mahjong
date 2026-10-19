@@ -16,9 +16,8 @@
 - `game/`       規則核心：tiles.py（牌編碼）、win.py（胡牌判定）、rules.py、scoring.py、simulator.py
 - `agent/`      shanten.py、rule_agent.py、mcts_agent.py、rl_agent.py
 - `perception/` 螢幕擷取 (mss)、牌面辨識 (OpenCV 模板比對 → YOLO)、state_parser.py
-- 啟動腳本：`run.bat`／`./run.sh` 學習型 AI 自動模式（訓練場）、`run_hint.bat`／`./run_hint.sh` 學習型 AI 提示模式（真人場），
-  `.bat` 可直接在檔案總管雙擊或在 PowerShell／cmd 執行（不用 Git Bash），
-  都用 `.venv-train` 與 `models/rl3_0960.pt`，後面可接其他參數（如 `--efficiency-turns 6`）。
+- 啟動：`start.py` 總選單（`python start.py [編號] [其他參數]`，或 VS Code 工作「總選單」），是唯一的啟動入口；
+  麻將選項都用 `.venv-train` 與 `models/rl3_0960.pt`。
 - `hint/`       提示模式：`python -m hint`（即時＋浮動小視窗）、`--no-overlay`、`--image`、`--video` 回放測試、`--auto` 訓練場自動點擊
 - `control/`    actuator.py（pyautogui）：把動作轉成點擊；滑鼠甩到左上角中止
   window.py：自動模式 60 秒看不到遊戲、使用者也 60 秒沒操作電腦時，把遊戲視窗（標題含「明星3缺1」）切回前面
@@ -84,6 +83,12 @@
     吃碰比較「吃碰完打最好的牌」與「不要」。被改掉時記錄檔附原因。10/17 記錄重放：有人宣告的出牌 66 次改 29 次，
     包含 02:41 兩家宣告、三向聽打五條（17%）→ 一筒（3%）。02:59 吃完聽牌打九筒放槍那手照算仍該吃（+5.11 vs +4.42）。
     待實戰驗證放槍率。
+    10/18 放槍估計修正（03:25 那手連續擋二筒，數字亂跳）：①宣告者由遊戲代打、自動胡，所以宣告後別人打出、他沒胡的牌
+    一定不聽（`GameState.declared_safe`，模擬器出牌時累積、提示模式由 `RiverWatch` 從第一次認到宣告起記；規則引擎也改成
+    宣告者能胡就只能胡）。牌河會讀錯，對手模型只把它們的危險度壓到約一成（`SAFE_TRUST` 0.9）。②原本每家只嘗試 160 次、
+    有效的約 24 副，同一張牌重算 2%～28%；改成湊滿 150 副有效手牌（`min_valid`，標準差約 2%），10/17～18 有人宣告的
+    245 手平均 0.31 秒、最慢 1.06 秒。③自己的牌河用手牌變化校正，手牌變化比牌河晚到時也回頭更正（03:24 打的八萬、九萬
+    被記成二筒、三萬）；`eval.deal_in` 自己的牌河改用記錄的決定，並能讀帶說明的出牌行（之前被護欄改過的步驟全被略過）。
   - 向聽數改成萬筒條字四組分開拆再組合（`_group_frontier`），與原逐張遞迴（`_reference_standard_shanten`）
     隨機 2 萬手全一致，模擬一局 1.9 → 0.13 秒（原本 95% 時間在向聽數）。
 

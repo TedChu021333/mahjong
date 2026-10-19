@@ -100,3 +100,49 @@ def test_missed_river_tiles_are_made_up_by_min_discards():
     state.min_discards = 10
     assert estimate_danger(state, 0, [P("5p")], Random(0), late, 100,
                            undeclared_share=1.0).probability[P("5p")] > 0.02
+
+
+def test_tiles_discarded_after_a_declaration_are_nearly_safe():
+    from random import Random
+
+    from agent.opponent_model import estimate_danger
+    from game.rules import GameState, Phase, PlayerState
+    from game.tiles import parse, to_counts
+
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("1479m258p369s1234567z"))
+    state = GameState(list(range(60)), players, phase=Phase.DISCARD)
+    state.declared[1] = True
+    five = parse("5p")[0]
+    before = estimate_danger(state, 0, [five], Random(0), samples=40, min_valid=150)
+    state.declared_safe[1] = {five}
+    after = estimate_danger(state, 0, [five], Random(0), samples=40, min_valid=150)
+    assert after.probability[five] < before.probability[five] * 0.3
+
+
+def test_sampling_continues_until_enough_valid_hands():
+    from random import Random
+
+    import agent.opponent_model as om
+    from game.rules import GameState, Phase, PlayerState
+    from game.tiles import parse, to_counts
+
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("1479m258p369s1234567z"))
+    players[1].discards = parse("123456789m")  # 宣告者打過很多：大部分抽樣作廢
+    state = GameState(list(range(60)), players, phase=Phase.DISCARD)
+    state.declared[1] = True
+    counted = []
+    original = om.sample_waits
+
+    def spy(*args, **kwargs):
+        result = original(*args, **kwargs)
+        counted.append(result is not None)
+        return result
+
+    om.sample_waits = spy
+    try:
+        om.estimate_danger(state, 0, [0], Random(0), samples=10, min_valid=50)
+    finally:
+        om.sample_waits = original
+    assert sum(counted) >= 50 or len(counted) >= 50 * om.MAX_ATTEMPTS_PER_VALID

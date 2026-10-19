@@ -37,7 +37,8 @@ from hint.advisor import ME, RIVER_SEAT, Observation, build_state
 from perception.capture import read_image
 
 LINE = re.compile(r"^\d\d:\d\d:\d\d \[(\d\d:\d\d:\d\d)\] (.*?)(?:　（(.*)）)?$")
-DISCARD = re.compile(r"^打 (\S+?)(，並按「聽」)?$")
+DISCARD = re.compile(r"^打 (\S+?)(，並按「聽」)?(?:（.*）)?$")
+"""10/17 起網路的護欄改掉決定時，後面附「（有人宣告，…）」「（不按聽…）」等說明。"""
 RIVER = re.compile(r"^牌河 (me|right|top|left) (discard|claimed|restored) (\S+)$")
 SETTLEMENT = re.compile(r"結算截圖存到 result[\\/](\d{8}_\d{6})\.png")
 MELD_SUMMARY = re.compile(r"(me|right|top|left) [^；（]*（副露 (\d)）")
@@ -134,7 +135,8 @@ def parse_log(path: Path) -> list[Game]:
             continue
         if river:
             seat, kind, name = river.groups()
-            if kind == "discard" and name in _NAMES:
+            # 自己的牌河用自己的決定（牌河辨識會讀錯：10/18 03:24 打的八萬記成二筒）
+            if kind == "discard" and name in _NAMES and seat != "me":
                 rivers[RIVER_SEAT[seat]].append(_NAMES[name])
             continue
         if discard and discard.group(1) in _NAMES:
@@ -145,6 +147,7 @@ def parse_log(path: Path) -> list[Game]:
                 game.decisions.append(Decision(clock, _NAMES[discard.group(1)],
                                                bool(discard.group(2)), hand, gold,
                                                tuple(tuple(r) for r in rivers), declared))
+                rivers[ME].append(_NAMES[discard.group(1)])
             continue
         settled = SETTLEMENT.search(text)
         if settled and game.stamp is None:
@@ -308,14 +311,28 @@ def is_suji(tile: int, river: tuple[int, ...]) -> bool:
     return any(partner in river for partner in partners)
 
 
+def declared_safe(decisions: list[Decision], index: int) -> tuple[tuple[int, ...], ...]:
+    """第 index 步時，各宣告者從第一次被認到宣告起、別家打出的牌（與 RiverWatch.declared_safe 相同）。"""
+    result: list[tuple[int, ...]] = [()] * 4
+    current = decisions[index]
+    for seat in current.declared or ():
+        first = next(d for d in decisions[:index + 1] if d.declared and seat in d.declared)
+        result[seat] = tuple(tile for other in range(4) if other != seat
+                             for tile in current.rivers[other][len(first.rivers[other]):])
+    return tuple(result)
+
+
 def to_state(decision: Decision, melds: tuple[int, ...], dealer: int | None,
-             declared: frozenset[int] = frozenset(), my_discards: int = 0):
-    """my_discards：這局之前記錄到幾次自己出牌（與提示迴圈的 RiverWatch.my_discards 相同用途）。"""
+             declared: frozenset[int] = frozenset(), my_discards: int = 0,
+             safe: tuple[tuple[int, ...], ...] = ()):
+    """my_discards：這局之前記錄到幾次自己出牌（與提示迴圈的 RiverWatch.my_discards 相同用途）；
+    safe：declared_safe 的結果。"""
     names = {value: key for key, value in RIVER_SEAT.items()}
     observation = Observation(
         decision.hand, None, None, decision.gold, discards=decision.rivers,
         melds=melds, dealer=None if dealer is None else names[dealer],
-        declared=frozenset(names[seat] for seat in declared), my_discards=my_discards)
+        declared=frozenset(names[seat] for seat in declared), my_discards=my_discards,
+        declared_safe=safe)
     try:
         return build_state(observation)
     except ValueError:
@@ -369,14 +386,16 @@ def analyse(game: Game, outcome: Outcome, rng: Random, samples: int) -> Analysis
     decision = game.decisions[-1]
     winner = outcome.winner
     declared = outcome.settlement.winner_declared
+    safe = declared_safe(game.decisions, len(game.decisions) - 1)
     state = to_state(decision, game.melds, outcome.dealer,
                      frozenset({winner}) if declared and winner else frozenset(),
-                     len(game.decisions) - 1)
+                     len(game.decisions) - 1,
+                     tuple(safe[seat] if seat == winner else () for seat in range(4)))
     if state is None:
         return None
     me = state.players[ME]
     candidates = allowed_discards(me.hand, ())
-    danger = estimate_danger(state, ME, candidates, rng, samples=samples)
+    danger = estimate_danger(state, ME, candidates, rng, samples=samples, min_valid=150)
     offense = offense_values(state)
     winner_row = outcome.settlement.rows[outcome.winner_row]
     shape, waits = "?", "?"

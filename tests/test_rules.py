@@ -312,3 +312,35 @@ def test_swap_rejects_more_than_three_tiles():
     except ValueError:
         return
     raise AssertionError("換 4 張應該被拒絕")
+
+
+def test_declared_player_always_wins_when_possible():
+    # 宣告後由遊戲代打：能胡就自動胡，不能選擇不胡
+    from game.rules import Action, ActionType, GameState, Phase, PlayerState, legal_actions
+    from game.tiles import parse, to_counts
+
+    players = [PlayerState() for _ in range(4)]
+    players[1].hand = to_counts(parse("123456789m123456p1z"))
+    state = GameState(list(range(30)), players, phase=Phase.RESPONSE, last_discard=parse("1z")[0],
+                      discard_player=0, response_player=1, response_players=[1])
+    state.declared[1] = True
+    assert [a.kind for a in legal_actions(state, 1)] == [ActionType.WIN]
+    state.last_discard = parse("9s")[0]
+    assert [a.kind for a in legal_actions(state, 1)] == [ActionType.PASS]
+
+
+def test_discards_after_a_declaration_become_safe_for_the_declarer():
+    from random import Random
+
+    from game.rules import Action, ActionType, Phase, apply_action, initial_state, legal_actions
+
+    state = initial_state(Random(3))
+    while state.phase != Phase.DISCARD:
+        apply_action(state, legal_actions(state)[0])
+    state.declared[2] = True
+    actor = state.current_player
+    tile = next(a.tile for a in legal_actions(state) if a.kind == ActionType.DISCARD)
+    apply_action(state, Action(ActionType.DISCARD, tile=tile))
+    if actor != 2:
+        assert tile in state.declared_safe[2]
+    assert not any(state.declared_safe[seat] for seat in range(4) if seat != 2)

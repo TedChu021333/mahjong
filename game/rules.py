@@ -136,6 +136,9 @@ class GameState:
     """各家是否已宣告聽牌。"""
     early_declared: list[bool] = field(default_factory=lambda: [False] * 4)
     """是否在第一次打牌時就宣告聽牌（地聽）。"""
+    declared_safe: list[set[int]] = field(default_factory=lambda: [set() for _ in range(4)])
+    """各家宣告後，別人打出、他沒胡的牌：宣告者由遊戲代打、自動胡，所以這些牌他一定不聽
+    （台麻沒有振聽，宣告前打過的牌不在此列）。宣告者自己打的牌不記。"""
     swap_players: list[int] = field(default_factory=list)
     """換三張階段還沒決定的玩家（依序）。"""
     min_discards: int = 0
@@ -319,9 +322,9 @@ def legal_actions(state: GameState, player: int | None = None) -> list[Action]:
             return []
         win = _win_action(current) if not state.claimed else None
         if state.declared[actor]:
-            # 聽牌後手牌鎖住：只能胡或打掉剛摸進的牌
+            # 聽牌後手牌鎖住：由遊戲代打，能胡就自動胡，否則打掉剛摸進的牌
             assert state.last_drawn is not None
-            return ([win] if win else []) + [Action(ActionType.DISCARD, tile=state.last_drawn)]
+            return [win] if win else [Action(ActionType.DISCARD, tile=state.last_drawn)]
         allowed = allowed_discards(current.hand, state.forbidden_discards if state.claimed else ())
         actions = [Action(ActionType.DISCARD, tile=t) for t in allowed]
         actions.extend(Action(ActionType.DECLARE, tile=t)
@@ -352,7 +355,9 @@ def legal_actions(state: GameState, player: int | None = None) -> list[Action]:
     if win:
         actions.append(Action(ActionType.WIN, tile=tile,
                               from_player=state.discard_player))
-    if state.robbing_kong or state.declared[actor]:
+    if state.declared[actor]:
+        return actions[1:] if win else actions  # 代打：能胡就自動胡
+    if state.robbing_kong:
         return actions
     if current.hand[tile] >= 2:
         actions.append(Action(ActionType.PUNG, tile=tile,
@@ -477,6 +482,9 @@ def apply_action(state: GameState, action: Action, player: int | None = None) ->
         return
     if action.kind in {ActionType.DISCARD, ActionType.DECLARE}:
         assert action.tile is not None
+        for seat in range(4):
+            if seat != actor and state.declared[seat]:
+                state.declared_safe[seat].add(action.tile)  # 他若聽這張就自動胡了，局面不再用到
         if action.kind == ActionType.DECLARE:
             state.declared[actor] = True
             state.early_declared[actor] = not current.discards

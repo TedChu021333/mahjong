@@ -249,7 +249,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 observation = replace(observation, discards=rivers.discards(),
                                       melds=rivers.meld_counts(),
                                       exposed=rivers.exposed_tiles(),
-                                      my_discards=rivers.my_discards)
+                                      my_discards=rivers.my_discards,
+                                      declared_safe=rivers.declared_safe())
             if observation is not None:
                 game_seen_at = last_readable = clock()
                 if observation.dealer_streak is None and not streak_reported:

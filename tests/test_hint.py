@@ -514,6 +514,9 @@ def test_loop_saves_frames_from_before_a_claim(monkeypatch):
         def exposed_tiles(self):
             return ((), (), (), ())
 
+        def declared_safe(self):
+            return ((), (), (), ())
+
     monkeypatch.setattr(hint_main, "decide", lambda observation: None)
     monkeypatch.setattr(hint_main, "SAVE_CLAIM_FRAMES", True)
     saved = []

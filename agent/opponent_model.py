@@ -4,8 +4,9 @@
 
 放槍機率：對每個可能聽牌的對手，從看不到的牌隨機組出「聽牌的手牌」（面子 + 對子 +
 搭子，或面子 + 單騎），看打出的牌落在他聽的牌裡的比例，再乘上他聽牌的機率：
-- 宣告聽牌的對手：一定聽牌；他打過的牌不可能是他要胡的（宣告後手牌鎖住，而且他
-  還沒胡），組出的手牌若聽到這些牌就重抽。
+- 宣告聽牌的對手：一定聽牌。他自己打過的牌當成不聽（台麻沒有振聽，這只是經驗上很少回頭聽），
+  組出的手牌聽到這些牌就重抽；宣告後別人打出、他沒胡的牌（遊戲代打、自動胡，GameState.declared_safe）
+  照理一定不聽，但牌河可能讀錯，聽到它的手牌以 SAFE_TRUST 的機率重抽。
 - 沒宣告的對手：聽牌機率依他打過幾張、幾組副露查表（表是所有人的聽牌率），再依「聽牌但
   不宣告的比例」q 換算成「沒宣告的人已聽牌」的機率 p·q / (1 − p + p·q)。模擬器裡的 AI 一律
   宣告（q = 0）；實戰 38 張結算畫面中約四成胡牌者沒有「聽牌」台（q ≈ 0.4）。
@@ -228,11 +229,26 @@ GOLD_WIN_TAI = 3
 """胡的那張是金牌再 +3 台（結算畫面「金牌胡牌 3 台」）。"""
 
 
+MAX_ATTEMPTS_PER_VALID = 20
+"""湊有效手牌時，最多嘗試目標數量的這麼多倍（極端局面組不出來時不要算太久）。"""
+MIN_UNDECLARED_VALID = 10
+SAFE_TRUST = 0.9
+"""宣告後別人打出的牌（GameState.declared_safe）有多可信：聽到它的抽樣有這個機率作廢。實戰牌河會讀錯
+（10/18 03:24 自己打的八萬記成二筒），完全相信的話讀錯一張就把危險牌當成絕對安全；
+0.9 讓這些牌的危險度降到約一成。"""
+
+
 def estimate_danger(state: GameState, player: int, candidates: Sequence[int],
                     rng: Random, calibration: Calibration | None = None,
                     samples: int = 120,
-                    undeclared_share: float = UNDECLARED_TENPAI_SHARE) -> Danger:
-    """打出金牌被胡時對方多 GOLD_WIN_TAI 台，算在損失裡。"""
+                    undeclared_share: float = UNDECLARED_TENPAI_SHARE,
+                    min_valid: int | None = None) -> Danger:
+    """打出金牌被胡時對方多 GOLD_WIN_TAI 台，算在損失裡。
+
+    每位對手先嘗試 samples 次；給了 min_valid 時，再繼續抽到有效（組得出、沒聽到不可能的牌）的
+    聽牌手牌湊滿 min_valid 副（沒宣告的人按聽牌機率減少，至少 MIN_UNDECLARED_VALID 副），最多嘗試
+    min_valid × MAX_ATTEMPTS_PER_VALID 次。宣告者的有效率常只有一成多：10/18 03:25 每家嘗試 160 次
+    只剩約 24 副，同一張牌重算 20 遍從 2% 到 28% 都有；湊滿 150 副標準差約 2%（每家約 0.15 秒）。"""
     calibration = calibration or default_calibration()
     pool = unseen_counts(state, player)
     gold = set(state.gold_tiles)
@@ -247,12 +263,21 @@ def estimate_danger(state: GameState, player: int, candidates: Sequence[int],
             discard_count(state, opponent), len(other.melds), undeclared_share)
         if p_tenpai < 0.02:
             continue
+        # 宣告者：自己打過的牌當成不聽（經驗上很少回頭聽）；宣告後別人打出、他沒胡的牌（代打會
+        # 自動胡）幾乎不可能，但牌河可能讀錯，見 SAFE_TRUST
         forbidden = set(other.discards) if declared else set()
+        safe = state.declared_safe[opponent] if declared else set()
+        target = 0
+        if min_valid:
+            target = min_valid if declared else max(MIN_UNDECLARED_VALID,
+                                                    round(min_valid * p_tenpai))
+        limit = max(samples, target * MAX_ATTEMPTS_PER_VALID)
         hits: Counter[int] = Counter()
-        valid = 0
-        for _ in range(samples):
+        valid = attempts = 0
+        while attempts < samples or (valid < target and attempts < limit):
+            attempts += 1
             waits = sample_waits(pool, len(other.melds), rng, forbidden)
-            if waits is None:
+            if waits is None or (safe.intersection(waits) and rng.random() < SAFE_TRUST):
                 continue
             valid += 1
             hits.update(waits)

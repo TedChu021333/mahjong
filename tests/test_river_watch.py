@@ -232,3 +232,38 @@ def test_own_discards_are_counted_from_the_hand_even_when_the_river_misses_them(
     assert watch.my_discards == 2 and watch.discards()[0] == ()
     watch.new_hand()
     assert watch.my_discards == 0
+
+
+def test_own_discard_is_relabelled_when_the_hand_change_arrives_late():
+    # 10/18 03:24：牌河先確認自己的出牌（讀成二筒），手牌變化晚幾幀才看到
+    import numpy as np
+
+    reader = FakeReader()
+    watch, saved = watch_with(reader)
+    frame = np.zeros((1080, 1920, 3), np.uint8)
+    turn = Observation(tuple(parse("11223789m99m4p56779s9p")), None, None, ())
+    reader.current["me"] = [RiverTile(P("2p"), 0.7, (580, 651, 650, 717))]
+    for _ in range(CONFIRM_FRAMES):
+        watch.update(frame, turn)  # 手牌還是打牌前的樣子
+    assert watch.tracker.discards["me"] == [P("2p")]
+    watch.update(frame, waiting())
+    assert watch.tracker.discards["me"] == [P("9p")]
+    assert len(saved) == 1 and saved[0].parent.name == "9p"
+
+
+def test_tiles_discarded_after_a_declaration_are_safe_for_the_declarer():
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    reader.current["left"] = left_river(P("7s"))
+    frames(watch, waiting())                         # 宣告前打的：不算
+    declared = Observation(tuple(parse("11223789m99m4p56779s")), None, None, (),
+                           declared=frozenset({"top"}))
+    frames(watch, declared, 1)
+    reader.current["right"] = [RiverTile(P("5z"), 0.9, (1151, 398, 1212, 450))]
+    reader.current["top"] = [RiverTile(P("1z"), 0.9, (660, 284, 717, 334))]
+    frames(watch, declared)
+    safe = watch.declared_safe()
+    assert safe[2] == (P("5z"),)                     # 對家自己打的東不算
+    assert safe[1] == safe[3] == safe[0] == ()
+    watch.new_hand()
+    assert watch.declared_safe() == ((), (), (), ())
