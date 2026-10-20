@@ -175,7 +175,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         actuator=None, observe_fn=observe, clock=time.monotonic, show=None,
         find_continue=None, save_result=save_result, log=print_log, rivers=None,
         find_win=None, find_buttons=None, find_popup=None, find_autoplay=None,
-        window=None, show_danger=None) -> None:
+        window=None, show_danger=None, stop_requested=None) -> None:
     """show_danger(text) 更新放槍表小視窗（輪到自己時手上放槍機率最高的幾張）。
     find_win(frame) 為「胡」按鈕是否亮著、find_buttons(frame) 讀按鈕列（都不依賴手牌辨識）；
     find_popup(frame) 找會蓋住牌桌的彈出面板（自動模式按關閉）。window（control.window.GameWindow）
@@ -242,6 +242,9 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     continue_seen_at = float("-inf")
     """卡住後還要存幾張後續截圖（每 STUCK_SHOT_INTERVAL 秒一張），看點擊後畫面怎麼變。"""
     for stamp, frame in frames:
+        if stop_requested is not None and stop_requested():
+            log(f"[{stamp}] 按了 Esc，程式停止")
+            return
         try:
             if stuck_shots_left and clock() - stuck_shot_at >= STUCK_SHOT_INTERVAL:
                 stuck_shots_left -= 1
@@ -564,7 +567,7 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
         from control.actuator import Actuator
 
         actuator = Actuator()
-        print("自動模式 3 秒後開始，請切回遊戲視窗。滑鼠甩到螢幕左上角可立即中止。", flush=True)
+        print("自動模式 3 秒後開始，請切回遊戲視窗。按 Esc 或滑鼠甩到螢幕左上角可立即中止。", flush=True)
         time.sleep(3)
     mode = "自動模式" if auto else "提示模式"
     readers = Readers()
@@ -584,26 +587,37 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
     log(f"[{time.strftime('%H:%M:%S')}] {mode}啟動，AI {advisor._policy}，{program_version()}"
         f"{network_options(advisor._network)}", echo=False)
     rivers = RiverWatch(RiverReader.from_directory())
+    esc_pressed()  # 清掉啟動前按過 Esc 的紀錄，免得一開始就停
     game_window = None
     if auto:
         from control.window import GameWindow
 
         game_window = GameWindow()  # 看不到遊戲、又沒人用電腦時把遊戲切回前面
     if not overlay:
-        print(f"{mode}啟動，Ctrl+C 結束", flush=True)
+        print(f"{mode}啟動，按 Esc 或 Ctrl+C 結束", flush=True)
         run(screen_frames(interval), readers, actuator=actuator, find_continue=find_continue,
             log=log, rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
-            find_popup=popups.find, find_autoplay=autoplay_active, window=game_window)
+            find_popup=popups.find, find_autoplay=autoplay_active, window=game_window,
+            stop_requested=esc_pressed)
         return
     from hint.overlay import Overlay
 
-    print(f"{mode}啟動（浮動小視窗），Ctrl+C 結束", flush=True)
+    print(f"{mode}啟動（浮動小視窗），按 Esc 或 Ctrl+C 結束", flush=True)
     window = Overlay()
     window.run(lambda: run(screen_frames(interval), readers, actuator=actuator,
                            show=window.show, find_continue=find_continue, log=log,
                            rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
                            find_popup=popups.find, find_autoplay=autoplay_active,
-                           window=game_window, show_danger=window.show_table))
+                           window=game_window, show_danger=window.show_table,
+                           stop_requested=esc_pressed))
+
+
+def esc_pressed() -> bool:
+    """Esc 有沒有被按下（不管哪個視窗在前面）：GetAsyncKeyState 的最高位元＝現在按著，
+    最低位元＝上次查詢之後按過（擷取一幀約 0.1 秒，短按也抓得到）。10/20 使用者要求按 Esc 停止程式。"""
+    import ctypes
+
+    return bool(ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8001)
 
 
 def program_version() -> str:

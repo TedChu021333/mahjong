@@ -76,7 +76,8 @@ def test_swap_screen_is_recognised_with_selected_tiles():
     selecting = observe(read_image(TRAIN_DIR / "經典_換三張.png"), readers)
     assert selecting.swap_prompt is True
     assert [i for i, up in enumerate(selecting.raised) if up] == [14, 15]
-    assert advise(selecting).startswith("換三張：換 西、白")
+    advice = advise(selecting)  # 一張一張挑（10/20 起），順序是挑的先後
+    assert advice.startswith("換三張：換 ") and {"西", "白"} <= set(advice[len("換三張：換 "):].split("、"))
     waiting = observe(read_image(TRAIN_DIR / "經典_碰.png"), readers)
     assert waiting.swap_prompt is None
 
@@ -731,3 +732,20 @@ def test_log_records_the_claimable_tile_and_version():
                               ClaimTile(parse("3m")[0], 0.9, "left"), ())
     assert "，可吃碰 三萬（上家）" in hand_text(observation)
     assert program_version().startswith(("版本 ", "版本不明"))
+
+
+def test_loop_stops_when_esc_is_pressed():
+    import hint.__main__ as hint_main
+
+    seen, lines = [], []
+
+    def frames():
+        for step in range(10):
+            seen.append(step)
+            yield str(step), None
+
+    presses = iter([False, False, True])
+    hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: None,
+                  log=lambda line, detail=None, echo=True: lines.append(line),
+                  stop_requested=lambda: next(presses, True))
+    assert seen == [0, 1, 2] and "Esc" in lines[-1]

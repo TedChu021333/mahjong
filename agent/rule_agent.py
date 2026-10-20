@@ -119,46 +119,62 @@ SWAP_MIN_GAIN = 0.02
 """期望向聽數至少要降低這麼多才值得換。"""
 
 
+SWAP_SAMPLES = 120
+"""換三張估計期望向聽數時，隨機抽幾組換回來的牌（每個候選用同一批，比較才公平）。"""
+
+
 def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP,
                       gold_tiles: Sequence[int] = (),
-                      valued_honors: Sequence[int] = ()) -> tuple[int, ...]:
-    """換三張：換掉「換一張隨機新牌後，期望向聽數比現在低」的牌，最多 limit 張。
+                      valued_honors: Sequence[int] = (),
+                      rng: Random | None = None) -> tuple[int, ...]:
+    """換三張：一張一張挑。每一步在「前面挑好的牌已經換掉」的手上，找換掉之後（換回來的牌隨機，
+    依自己看不到的張數抽樣）期望向聽數最低、又比不換這張低 SWAP_MIN_GAIN 以上的牌；沒有就停。
 
-    新牌的機率依自己看不到的張數（4 - 手上張數）估計。各張分開評估，
-    取期望向聽數最低的幾張；沒有值得換的就不換。對子多時向聽數由嚦咕嚦咕
-    決定，所有單張的期望值都一樣，此時再以一般牌型的期望向聽數區分
-    （例如孤張字牌比能搭子的數牌更該換）。用得上的金牌（gold_in_use）留著胡牌時每張 +1 台，不換；
-    孤張金牌照常可以換（實戰 10/2 17:28 曾換出五筒、留下孤張金牌中）。
-    會加台的字牌（valued_honors，見 honor_tai）成對以上也不換：向聽數只把它當普通對子，
-    實戰 10/2 12:57 曾把東風圈的一對東換掉一張。
+    原本各張分開評估：16 張時搭子太多，拆二三萬看起來不吃虧，和八筒、九筒一起換掉後卻少了一組搭子
+    （10/20 16:04 二三萬、六萬、三四六七八八九筒…換了九筒、八筒、二萬，留下孤張六萬）。
+    換出去的牌別人可能拿到：中張最好用，要自己明顯變好才值得送出去（swap_gift_cost）。
+    用得上的金牌（gold_in_use）留著胡牌時每張 +1 台，不換；孤張金牌照常可以換但多付 GOLD_SWAP_COST
+    （實戰 10/2 17:28 曾換出五筒、留下孤張金牌中）。會加台的字牌（valued_honors，見 honor_tai）成對以上也不換：
+    向聽數只把它當普通對子，實戰 10/2 12:57 曾把東風圈的一對東換掉一張。
     """
+    rng = rng or Random(0)
     gold = set(gold_tiles)
     valued = set(valued_honors)
     hand = list(hand)
-    current = shanten(hand, 0)
     unseen = [4 - count for count in hand]
-    candidates = []
-    for tile, count in enumerate(hand):
-        if not count or (tile in gold and gold_in_use(hand, tile)) \
-                or (tile in valued and count >= 2):
-            continue
-        hand[tile] -= 1
-        total = weighted = weighted_standard = 0
-        for new_tile, copies in enumerate(unseen):
-            if copies <= 0 or hand[new_tile] >= 4:
+    pool = [tile for tile, copies in enumerate(unseen) for _ in range(max(0, copies))]
+    draws = [rng.sample(pool, limit) for _ in range(SWAP_SAMPLES)]
+
+    def expected(remaining: list[int], swapped: int) -> tuple[float, float]:
+        """remaining 換回 swapped 張隨機牌後的平均向聽數（一般牌型的向聽數另外算，平手時用）。
+        抽的是自己看不到的牌，同種最多 4 張不會超過。"""
+        total = standard = 0.0
+        for draw in draws:
+            trial = list(remaining)
+            for tile in draw[:swapped]:
+                trial[tile] += 1
+            total += shanten(trial, 0)
+            standard += standard_shanten(trial, 0)
+        return total / len(draws), standard / len(draws)
+
+    chosen: list[int] = []
+    for _ in range(limit):
+        baseline = expected(hand, len(chosen))[0] if chosen else shanten(hand, 0)
+        best = None
+        for tile, count in enumerate(hand):
+            if not count or (tile in gold and gold_in_use(hand, tile))                     or (tile in valued and count >= 2):
                 continue
-            hand[new_tile] += 1
-            weighted += copies * shanten(hand, 0)
-            weighted_standard += copies * standard_shanten(hand, 0)
-            total += copies
-            hand[new_tile] -= 1
-        hand[tile] += 1
-        # 換出去的牌別人可能拿到：中張最好用，要自己明顯變好才值得送出去
-        expected = weighted / total + swap_gift_cost(tile) \
-                + (GOLD_SWAP_COST if tile in gold else 0.0)
-        if expected < current - SWAP_MIN_GAIN:
-            candidates.append((round(expected, 6), weighted_standard / total, tile))
-    return tuple(tile for *_, tile in sorted(candidates)[:limit])
+            hand[tile] -= 1
+            mean, standard = expected(hand, len(chosen) + 1)
+            hand[tile] += 1
+            score = mean + swap_gift_cost(tile) + (GOLD_SWAP_COST if tile in gold else 0.0)
+            if score < baseline - SWAP_MIN_GAIN and (best is None or (score, standard) < best[:2]):
+                best = (round(score, 6), standard, tile)
+        if best is None:
+            break
+        chosen.append(best[2])
+        hand[best[2]] -= 1
+    return tuple(chosen)
 
 
 def honor_tai(state: GameState, player: int, tile: int) -> int:

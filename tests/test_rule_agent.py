@@ -281,15 +281,17 @@ def test_declared_opponent_is_the_biggest_threat_and_triggers_folding():
     assert action.tile in parse("9m1z")  # 棄胡：打對聽牌者安全的牌
 
 
-def test_swap_never_gives_away_gold_tiles():
+def test_swap_prefers_non_gold_tiles_but_may_give_away_an_isolated_gold():
     from agent.rule_agent import choose_swap_tiles
 
-    # 21:12 那局的起手：金牌是一條、南、西，原本會換掉南、西
+    # 9/29 21:12 那局的起手：金牌是一條、南、西。沒有金牌時會換掉孤張的南、西
     hand = C("22238m23458p35689s23z")
     assert set(choose_swap_tiles(hand)) >= set(parse("23z"))
+    # 有金牌時先換非金牌；孤張金牌多付 GOLD_SWAP_COST，最多送出一張（10/20 使用者同意：孤張金牌字牌
+    # 很難湊成牌型，換掉讓起手牌較快成形；原本各張分開評估時南、西都留著）
     swapped = choose_swap_tiles(hand, gold_tiles=parse("1s23z"))
-    assert not set(swapped) & set(parse("1s23z"))
-    assert len(swapped) == 3
+    assert len(swapped) == 3 and swapped[0] not in parse("1s23z")
+    assert len(set(swapped) & set(parse("1s23z"))) <= 1
 
 
 def test_tenpai_prefers_the_wait_with_more_live_tiles():
