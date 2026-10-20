@@ -8,7 +8,8 @@
 10/19 6753 張中 1447 張可疑（目視抽查全對），自己打的牌原本只讀對約一半。
 
 做法：用和辨識時一樣的比對（TileClassifier：上下半張分開、取較低者），每張模板找最像的 K 張（不含自己），
-同資料夾的不到 MIN_AGREE 張、或最像的一張分數不到 MIN_SCORE 的就是可疑。移走後再算一輪，直到沒有可疑的。
+同資料夾的不到 MIN_AGREE 張、或最像的一張分數不到 MIN_SCORE 的就是可疑（人工標註的 manual_* 不算）。
+移走後再算一輪，直到沒有可疑的。
 約 6000 張一輪 2～3 分鐘。
 """
 from __future__ import annotations
@@ -79,7 +80,8 @@ def main() -> None:
     while True:
         rounds += 1
         paths, codes, images = load(args.dir)
-        flagged = suspicious(codes, *nearest(images, codes))
+        # 人工標註的（manual_ 開頭）不動：下家角度的牌樣本少，相似的模板不夠多也會被判可疑（10/20 19 張全是這種）
+        flagged = suspicious(codes, *nearest(images, codes)) &             np.array([not path.name.startswith("manual_") for path in paths])
         print(f"第 {rounds} 輪：{len(paths)} 張中可疑 {int(flagged.sum())} 張")
         if not args.move or not flagged.any():
             break

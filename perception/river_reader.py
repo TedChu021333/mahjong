@@ -37,6 +37,9 @@ SEATS = ("me", "right", "top", "left")
 """自己、下家、對家、上家（出牌順序）。"""
 MIN_WHITE_RATIO = 0.6
 """上緣區段中真正白色（不含箭頭）的比例下限。"""
+MAX_COLORFUL = 0.3
+"""框裡鮮豔像素（飽和度 >120、亮度 >80）的比例上限：牌面是白底，5315 張模板最多 0.25；「吃」「碰」大字等動畫
+是整片紫、橘、綠，最少 0.34。10/20 認不出的 85 張牌河切圖有 36 張是動畫（多在上家的區域），被當成出牌。"""
 MERGE_DISTANCE = 4
 """同一張牌的上緣可能在相鄰幾列都被偵測到。"""
 
@@ -86,10 +89,18 @@ def locate_river_tiles(image: np.ndarray) -> dict[str, list[Box]]:
                     continue
                 tops.append((left, y, right))
         height = RIVER_FACE_HEIGHT[seat]
-        result[seat] = [(left - RIVER_FACE_PAD, y, right + RIVER_FACE_PAD, y + height)
-                        for left, y, right in sorted(snap_to_slots(seat, tops),
-                                                     key=lambda t: (t[1], t[0]))]
+        boxes = [(left - RIVER_FACE_PAD, y, right + RIVER_FACE_PAD, y + height)
+                 for left, y, right in sorted(snap_to_slots(seat, tops), key=lambda t: (t[1], t[0]))]
+        result[seat] = [box for box in boxes if colorful_share(crop_face(image, box)) <= MAX_COLORFUL]
     return result
+
+
+def colorful_share(face: np.ndarray) -> float:
+    """鮮豔像素的比例（見 MAX_COLORFUL）。"""
+    if face.size == 0:
+        return 1.0
+    hsv = cv2.cvtColor(face, cv2.COLOR_BGR2HSV)
+    return float(((hsv[..., 1] > 120) & (hsv[..., 2] > 80)).mean())
 
 
 def snap_to_slots(seat: str, tops: list[tuple[int, int, int]]) -> list[tuple[int, int, int]]:

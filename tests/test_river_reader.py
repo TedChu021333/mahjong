@@ -36,7 +36,7 @@ def test_empty_table_has_no_river_tiles():
 
 def test_synthetic_tile_faces_are_found_in_each_region():
     image = np.zeros((1080, 1920, 3), np.uint8)
-    image[:] = (40, 90, 30)
+    image[:] = (50, 70, 45)  # 暗、不鮮豔的綠（框比白色方塊寬，飽和的純綠會被當成動畫）
     for seat, (x0, y0, x1, y1) in RIVER_REGIONS.items():
         top = RIVER_ROW_TOPS[seat][0]
         image[top:top + 60, x0 + 30:x0 + 90] = 250
@@ -92,3 +92,19 @@ def test_second_rows_are_located_and_read(name):
     rivers = RiverReader.from_directory().read(image)
     for seat, tiles in LABELS_SECOND_ROWS[name].items():
         assert [tile.tile for tile in rivers[seat]] == parse(tiles), seat
+
+
+def test_purple_claim_banner_is_not_a_river_tile():
+    # 10/20：上家的「吃」大字（整片紫色）被當成牌河的牌
+    from perception.config import RIVER_SLOTS
+
+    image = np.zeros((1080, 1920, 3), np.uint8)
+    image[:] = (40, 90, 30)
+    start, pitch, width = RIVER_SLOTS["left"][397]
+    left = int(start)
+    image[397:449, left - 5:left + width + 5] = 250            # 白色牌面：算牌
+    banner_left = int(start + pitch)
+    image[397:449, banner_left - 5:banner_left + width + 5] = (250, 250, 250)
+    image[400:449, banner_left - 5:banner_left + width + 5] = (200, 40, 160)  # 上緣白、下面整片紫：動畫
+    boxes = locate_river_tiles(image)["left"]
+    assert len(boxes) == 1 and boxes[0][0] == left - 5
