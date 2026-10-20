@@ -4,7 +4,7 @@ from __future__ import annotations
 from random import Random
 from typing import Sequence
 
-from .shanten import effective_tiles, shanten, standard_shanten
+from .shanten import effective_tiles, shanten
 from game.rules import (
     MAX_SWAP,
     Action,
@@ -119,8 +119,9 @@ SWAP_MIN_GAIN = 0.02
 """期望向聽數至少要降低這麼多才值得換。"""
 
 
-SWAP_SAMPLES = 120
-"""換三張估計期望向聽數時，隨機抽幾組換回來的牌（每個候選用同一批，比較才公平）。"""
+SWAP_SAMPLES = 40
+"""換三張估計期望向聽數時，隨機抽幾組換回來的牌（每個候選用同一批，比較才公平）。原本 120，模擬一局要 2.5 秒、
+七成時間花在換三張（10/20 自我對打每秒只有 15～20 局），改 40 並去掉重複計算的向聽數。"""
 
 
 def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP,
@@ -145,35 +146,33 @@ def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP,
     pool = [tile for tile, copies in enumerate(unseen) for _ in range(max(0, copies))]
     draws = [rng.sample(pool, limit) for _ in range(SWAP_SAMPLES)]
 
-    def expected(remaining: list[int], swapped: int) -> tuple[float, float]:
-        """remaining 換回 swapped 張隨機牌後的平均向聽數（一般牌型的向聽數另外算，平手時用）。
-        抽的是自己看不到的牌，同種最多 4 張不會超過。"""
-        total = standard = 0.0
+    def expected(remaining: list[int], swapped: int) -> float:
+        """remaining 換回 swapped 張隨機牌後的平均向聽數。抽的是自己看不到的牌，同種最多 4 張不會超過。
+        （明星三缺一沒有嚦咕嚦咕，shanten 就是一般牌型的向聽數，不必另算。）"""
+        total = 0
         for draw in draws:
             trial = list(remaining)
             for tile in draw[:swapped]:
                 trial[tile] += 1
             total += shanten(trial, 0)
-            standard += standard_shanten(trial, 0)
-        return total / len(draws), standard / len(draws)
+        return total / len(draws)
 
     chosen: list[int] = []
     for _ in range(limit):
-        baseline = expected(hand, len(chosen))[0] if chosen else shanten(hand, 0)
+        baseline = expected(hand, len(chosen)) if chosen else shanten(hand, 0)
         best = None
         for tile, count in enumerate(hand):
             if not count or (tile in gold and gold_in_use(hand, tile))                     or (tile in valued and count >= 2):
                 continue
             hand[tile] -= 1
-            mean, standard = expected(hand, len(chosen) + 1)
+            score = expected(hand, len(chosen) + 1) + swap_gift_cost(tile)                 + (GOLD_SWAP_COST if tile in gold else 0.0)
             hand[tile] += 1
-            score = mean + swap_gift_cost(tile) + (GOLD_SWAP_COST if tile in gold else 0.0)
-            if score < baseline - SWAP_MIN_GAIN and (best is None or (score, standard) < best[:2]):
-                best = (round(score, 6), standard, tile)
+            if score < baseline - SWAP_MIN_GAIN and (best is None or score < best[0]):
+                best = (round(score, 6), tile)
         if best is None:
             break
-        chosen.append(best[2])
-        hand[best[2]] -= 1
+        chosen.append(best[1])
+        hand[best[1]] -= 1
     return tuple(chosen)
 
 
