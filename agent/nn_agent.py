@@ -13,13 +13,13 @@ import torch
 from agent.rule_agent import (
     choose_rule_action_for_player,
     declare_is_worth,
-    gold_in_use,
+    network_claim_is_worth,
     open_kong_is_worth,
     keep_value,
     visible_tile_counts,
 )
 from agent.safety import claim_is_worse, safer_discard
-from agent.shanten import effective_tiles, shanten
+from agent.shanten import effective_tiles, improvement_count, next_step_outs, shanten
 from game.rules import Action, ActionType, GameState, Phase, legal_actions
 from training.actions import DISCARD, legal_mask
 from training.encoding import encode
@@ -83,6 +83,9 @@ class NetworkPolicy:
         if choice.kind == ActionType.KONG and state.phase == Phase.RESPONSE                 and not open_kong_is_worth(state.players[player].melds):
             self.last_note = "門清不明槓"
             return next(action for action in actions if action.kind == ActionType.PASS)
+        if choice.kind in (ActionType.CHOW, ActionType.PUNG)                 and not network_claim_is_worth(state, player, choice):
+            self.last_note = "吃碰不會讓向聽變好"
+            return next(action for action in actions if action.kind == ActionType.PASS)
         if choice.kind in (ActionType.CHOW, ActionType.PUNG):
             note = claim_is_worse(state, player, choice, rng)
             if note is not None:
@@ -110,36 +113,43 @@ class NetworkPolicy:
 
 def efficient_discard(state: GameState, player: int, choice: Action, lookup: dict[int, Action],
                       logits: np.ndarray, turns: int) -> Action:
-    """前 turns 手、沒有對手宣告聽牌時湊牌優先：網路要打的牌若比同向聽的其他牌少進張，改打進張最多的；
-    進張也一樣時先打最孤立的牌（孤張字牌 → 孤張么九，rule_agent.keep_value）。用得上的金牌不換掉。
+    """前 turns 手、沒有對手宣告聽牌時湊牌優先：在同向聽的牌中依序比 有效進張 → 改良牌 → 牌型（往後多看一步，
+    next_step_outs）都最多的，最後才比最孤立（孤張字牌 → 孤張么九；用得上的金牌算值得留，rule_agent.keep_value）。
 
     10/15 實戰：網路學到前期先打中張、留字牌與么九當後期的安全牌（規則式打孤張字牌的局面它 42% 改打
     數牌），例如 六八九萬 打六萬比打孤張東少 4 張進張。使用者認為湊牌應該優先。宣告聽牌、向聽不同、
-    中後期與有人宣告時都照網路的判斷。"""
+    中後期與有人宣告時都照網路的判斷。
+    10/20：原本用得上的金牌不列入候選，三四六七九筒（七九筒是金牌）進張、改良牌都一樣時打了六筒、留七九嵌張；
+    使用者要牌型勝過金牌，改成金牌也比，打九筒留兩組兩面。"""
     me = state.players[player]
     if (choice.kind != ActionType.DISCARD or state.phase != Phase.DISCARD
             or max(len(me.discards), state.min_discards) >= turns
             or any(state.declared[seat] for seat in range(4) if seat != player)):
         return choice
     visible = visible_tile_counts(state, player)
-    gold = set(state.gold_tiles)
+
+    def after(tile: int) -> list[int]:
+        hand = list(me.hand)
+        hand[tile] -= 1
+        return hand
 
     def evaluate(tile: int) -> tuple[int, int]:
-        after = list(me.hand)
-        after[tile] -= 1
-        outs = sum(max(0, 4 - visible[t]) for t in effective_tiles(after, me.open_melds))
-        return shanten(after, me.open_melds), outs
+        hand = after(tile)
+        outs = sum(max(0, 4 - visible[t]) for t in effective_tiles(hand, me.open_melds))
+        return shanten(hand, me.open_melds), outs
 
     options = [index - DISCARD for index in lookup if DISCARD <= index < DISCARD + 34]
     scored = {tile: evaluate(tile) for tile in options}
     level = scored[choice.tile][0]
-    same = [tile for tile in options if scored[tile][0] == level
-            and (tile == choice.tile or not (tile in gold and gold_in_use(me.hand, tile)))]
+    same = [tile for tile in options if scored[tile][0] == level]
     top = max(scored[tile][1] for tile in same)
     best = [tile for tile in same if scored[tile][1] == top]
+    for measure in (improvement_count, next_step_outs):  # 平手時才算（每張約 20～50 ms）
+        if len(best) > 1:
+            values = {tile: measure(after(tile), me.open_melds, visible) for tile in best}
+            best = [tile for tile in best if values[tile] == max(values.values())]
     pick = min(best, key=lambda tile: (keep_value(me.hand, tile, state.gold_tiles),
                                        -float(logits[DISCARD + tile])))
-    if choice.tile in best and keep_value(me.hand, choice.tile, state.gold_tiles) \
-            <= keep_value(me.hand, pick, state.gold_tiles):
+    if choice.tile in best and keep_value(me.hand, choice.tile, state.gold_tiles)             <= keep_value(me.hand, pick, state.gold_tiles):
         return choice
     return lookup[DISCARD + pick]

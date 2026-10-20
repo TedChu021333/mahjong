@@ -78,3 +78,14 @@ def test_grouped_shanten_matches_the_reference_search():
         if sum(counts) != size:
             continue
         assert standard_shanten(counts, opens) == _reference_standard_shanten(counts, opens), counts
+
+
+def test_next_step_outs_prefers_two_sided_over_closed_waits():
+    from agent.shanten import next_step_outs
+    from game.tiles import parse, to_counts
+
+    # 三四、六七筒（兩面兩組）比 三四、七九筒（一組嵌張）往後多看一步的進張多
+    two_sided = to_counts(parse("5567m3467p2236s8s66z1s"))
+    closed = to_counts(parse("5567m3479p2236s8s66z1s"))
+    nothing_seen = [0] * 34
+    assert next_step_outs(two_sided, 0, nothing_seen) > next_step_outs(closed, 0, nothing_seen)

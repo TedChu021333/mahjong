@@ -302,3 +302,20 @@ def test_label_that_does_not_look_like_the_river_tile_is_rejected():
         watch.update(frame, waiting())
     assert watch.tracker.discards["me"] == [P("2p")]  # 標註說九筒，但這張看起來不像：不改
     assert saved == [] and watch.rejected_labels == 1
+
+
+def test_unrecognized_river_tiles_are_saved_for_labelling(tmp_path):
+    import numpy as np
+
+    reader = FakeReader()
+    saved = []
+    watch = RiverWatch(reader, save=lambda path, image: saved.append(path), unknown_dir=tmp_path)
+    frame = np.zeros((1080, 1920, 3), np.uint8)
+    reader.current["top"] = [RiverTile(None, 0.3, (660, 284, 717, 334))]
+    for _ in range(CONFIRM_FRAMES):
+        watch.update(frame, waiting())
+    assert len(saved) == 1 and saved[0].name.endswith("_top.png") and tmp_path in saved[0].parents
+    reader.current["top"].append(RiverTile(P("1z"), 0.9, (720, 284, 777, 334)))
+    for _ in range(CONFIRM_FRAMES):
+        watch.update(frame, waiting())
+    assert len(saved) == 1  # 認得的不存

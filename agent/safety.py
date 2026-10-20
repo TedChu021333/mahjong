@@ -31,7 +31,8 @@ DANGER_SCALE = 1.0
 已經不低估，1.3 反而高估三成（使用者：打得太保守）。"""
 OVERRIDE_MARGIN = 0.2
 OVERRIDE_SHARE = 0.25
-"""至少好 max(OVERRIDE_MARGIN, OVERRIDE_SHARE × 網路那張牌的進攻收益) 台才推翻網路。進攻收益表依向聽與進張分組，
+"""至少好 OVERRIDE_MARGIN 台才推翻網路；要拆牌（向聽變差）時提高到 max(OVERRIDE_MARGIN, OVERRIDE_SHARE × 網路那張牌的
+進攻收益)（見 _margin）。進攻收益表依向聽與進張分組，
 同一組內的差別看不出來（很多改法顯示「進攻少 0.00」），太小的差距留給網路；手越接近聽牌、越大，網路的進攻判斷
 越重要，門檻跟著提高（聽牌約 1 台、一向聽約 0.5 台），沒希望的手照樣改打免費的安全牌。
 10/17 記錄重放：固定 0.05 時有人宣告的出牌 66 次改 37 次，0.2 改 29 次。10/20 使用者：還是太保守。"""
@@ -48,6 +49,8 @@ class Choice:
     offense: float
     danger: float
     """放槍機率（未乘 DANGER_SCALE）。"""
+    level: int = 0
+    """打完後的向聽數。"""
 
 
 def anyone_declared(state: GameState, player: int) -> bool:
@@ -99,7 +102,7 @@ def evaluate(state: GameState, player: int, hand: list[int], melds: list, candid
             offense *= _hand_value_ratio(state, player, after, melds, visible, calibration)
         offense *= 1 - RAKE
         result[tile] = Choice(tile, offense - DANGER_SCALE * loss[tile], offense,
-                              probability[tile])
+                              probability[tile], level)
     return result
 
 
@@ -121,10 +124,19 @@ def safer_discard(state: GameState, player: int, tile: int, rng: Random,
     safer = [c for c in choices.values() if c.danger < current.danger]
     if not safer:
         return tile, None
-    best = max(safer, key=lambda c: _gain(current, c))
-    if _gain(current, best) <= max(OVERRIDE_MARGIN, OVERRIDE_SHARE * current.offense):
+    worth = [c for c in safer if _gain(current, c) > _margin(current, c)]
+    if not worth:
         return tile, None
+    best = max(worth, key=lambda c: _gain(current, c))
     return best.tile, _describe(current, best)
+
+
+def _margin(current: Choice, other: Choice) -> float:
+    """改打 other 要好多少才推翻網路：向聽不變時 OVERRIDE_MARGIN；拆牌（向聽變差）時隨網路那張的進攻收益提高。
+    10/20 12:29 聽牌時八萬放槍 8.5%、改打四萬 0.9% 一樣聽牌，門檻卻因為聽牌的手值錢升到 1.5 台而沒換，放槍。"""
+    if other.level <= current.level:
+        return OVERRIDE_MARGIN
+    return max(OVERRIDE_MARGIN, OVERRIDE_SHARE * current.offense)
 
 
 def _gain(current: Choice, other: Choice) -> float:

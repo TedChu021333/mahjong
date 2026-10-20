@@ -124,3 +124,42 @@ def test_guard_passes_on_open_kong_while_concealed():
     passing = Action(ActionType.PASS, tile=P("7s"), from_player=2)
     assert policy._guarded(state, 0, kong, [passing, kong], Random(0)) == passing
     assert policy.last_note == "門清不明槓"
+
+
+def test_efficiency_mode_prefers_two_sided_shapes_over_gold_on_ties():
+    # 10/20 15:16：三四六七九筒（七、九筒是金牌）——打六筒和打九筒進張、改良牌都一樣，
+    # 往後多看一步打九筒（留三四、六七兩面）較好；原本金牌不列入候選而打了六筒
+    pytest.importorskip("torch")
+    import numpy as np
+
+    from agent.nn_agent import efficient_discard
+    from game.rules import legal_actions
+    from training.actions import legal_mask
+
+    state = state_with("5567m34679p2236s8s66z1s")
+    state.gold_tiles = parse("9p7p5m9m")
+    _, lookup = legal_mask(legal_actions(state, 0))
+    choice = Action(ActionType.DISCARD, tile=P("5m"))
+    action = efficient_discard(state, 0, choice, lookup, np.zeros(200), turns=6)
+    assert action == Action(ActionType.DISCARD, tile=P("9p"))
+
+
+def test_guard_rejects_claims_that_do_not_improve_the_hand():
+    pytest.importorskip("torch")
+    from agent.nn_agent import NetworkPolicy
+
+    policy = NetworkPolicy.__new__(NetworkPolicy)
+    policy.last_note = None
+
+    def respond(hand, tile):
+        state = state_with(hand)
+        state.phase, state.last_discard, state.discard_player = Phase.RESPONSE, P(tile), 2
+        pung = Action(ActionType.PUNG, tile=P(tile), tiles=(P(tile),) * 3, from_player=2)
+        passing = Action(ActionType.PASS, tile=P(tile), from_player=2)
+        return policy._guarded(state, 0, pung, [passing, pung], Random(0))
+
+    # 已經聽牌（一對五萬當眼、聽八條），碰了還是聽牌、沒變好：不碰
+    assert respond("123456789m123p55m79s", "5m").kind == ActionType.PASS
+    assert policy.last_note == "吃碰不會讓向聽變好"
+    # 同樣的手、眼是中：碰中（三元牌加台）向聽不變也碰
+    assert respond("123456789m123p55z79s", "5z").kind == ActionType.PUNG

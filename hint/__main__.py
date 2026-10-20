@@ -135,6 +135,10 @@ def hand_text(observation) -> str:
         text += "，金牌 " + "".join(tile_name(tile) for tile in observation.gold_tiles)
     if observation.buttons:
         text += "，按鈕 " + "、".join(sorted(observation.buttons))
+    claim = observation.claim
+    if claim is not None and claim.tile is not None and not observation.my_turn:
+        # 事後分析吃碰（包括按「不要」的）要知道是哪張牌、誰打的（10/20 起）
+        text += f"，可吃碰 {tile_name(claim.tile)}（{CLAIM_SOURCE_NAMES.get(claim.source, claim.source)}）"
     if observation.declared:
         # 事後分析放槍用：放給已宣告者的牌，要知道 AI 當下有沒有認到宣告（eval.deal_in）
         text += "，宣告 " + "、".join(DECLARED_NAMES[seat] for seat in sorted(observation.declared))
@@ -142,6 +146,7 @@ def hand_text(observation) -> str:
 
 
 DECLARED_NAMES = {"left": "上家", "top": "對家", "right": "下家"}
+CLAIM_SOURCE_NAMES = DECLARED_NAMES
 
 
 def screen_frames(interval: float) -> Iterator[tuple[str, np.ndarray]]:
@@ -206,6 +211,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     """已經存過「不明畫面」截圖的那段期間（以 game_seen_at 區分）。"""
     stuck_shots_left, stuck_shot_at = 0, float("-inf")
     hands = HandBook()
+    declared_seen: set[str] = set()
+    """這局已經記錄過宣告的對手。"""
     table_for = None
     """放槍表算過的局面（手牌、各家牌河張數、宣告者），沒變就不重算。"""
     table_at = float("-inf")
@@ -280,11 +287,13 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                         f"{river_summary(rivers)}", echo=False)
                     rivers.new_hand()
                     hands.hand_ended(settled=False)
+                    declared_seen = set()
                 resets = getattr(rivers, "reset_by_empty_table", 0)
                 events = rivers.update(frame, observation)
                 if getattr(rivers, "reset_by_empty_table", 0) != resets:
                     log(f"[{stamp}] 牌河整個清空，當成新的一局、重設牌河", echo=False)
                     hands.hand_ended(settled=False)
+                    declared_seen = set()
                 for event in events:
                     name = tile_name(event.tile) if event.tile is not None else "?"
                     log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
@@ -303,6 +312,13 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                                       my_discards=rivers.my_discards,
                                       declared_safe=rivers.declared_safe(),
                                       my_pungs=tuple(rivers.my_pungs))
+            if observation is not None and observation.declared - declared_seen:
+                # 對手什麼時候聽牌：第一次認到「聽」時各家牌河已有幾張（10/20 起，量遊戲電腦的習慣用）
+                sizes = "、".join(f"{name} {len(river)}" for name, river in
+                                  zip(("自己", "下家", "對家", "上家"), observation.discards))
+                for seat in sorted(observation.declared - declared_seen):
+                    log(f"[{stamp}] {DECLARED_NAMES[seat]}宣告聽牌（第一次認到；牌河 {sizes}）", echo=False)
+                declared_seen |= observation.declared
             if observation is not None:
                 game_seen_at = last_readable = hand_seen_at = clock()
                 end_shots.clear()
@@ -387,6 +403,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                             f"{getattr(rivers, 'rejected_labels', 0)} 次標註和牌不像沒採用）", echo=False)
                         rivers.new_hand()
                     hands.hand_ended(settled=True)
+                    declared_seen = set()
                 acted_for, acted_at = observation, clock()
                 if actuator is None:  # 提示模式：只記錄，由人按繼續
                     retries = MAX_RETRIES
@@ -564,7 +581,8 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
     print(f"記錄檔：{log.path}", flush=True)
     from hint import advisor
 
-    log(f"[{time.strftime('%H:%M:%S')}] {mode}啟動，AI {advisor._policy}", echo=False)
+    log(f"[{time.strftime('%H:%M:%S')}] {mode}啟動，AI {advisor._policy}，{program_version()}"
+        f"{network_options(advisor._network)}", echo=False)
     rivers = RiverWatch(RiverReader.from_directory())
     game_window = None
     if auto:
@@ -586,6 +604,28 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
                            rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
                            find_popup=popups.find, find_autoplay=autoplay_active,
                            window=game_window, show_danger=window.show_table))
+
+
+def program_version() -> str:
+    """記錄檔用：目前的 commit 與有沒有未提交的修改，統計時才能分開不同版本（10/20 起）。"""
+    import subprocess
+
+    root = Path(__file__).resolve().parent.parent
+    try:
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True,
+                                text=True, timeout=5).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=root,
+                               capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "版本不明"
+    return f"版本 {commit or '不明'}{'（有未提交的修改）' if dirty else ''}"
+
+
+def network_options(network) -> str:
+    if network is None:
+        return ""
+    return (f"，湊牌優先 {network.efficiency_turns} 手"
+            f"，護欄{'開' if getattr(network, 'guard', False) else '關'}")
 
 
 def win_is_lit(frame: np.ndarray) -> bool:

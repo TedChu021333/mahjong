@@ -721,3 +721,13 @@ def test_danger_table_lists_the_riskiest_tiles_in_hand():
     waiting = danger_table(Observation(hand[:-1], None, None, (), discards=((), (), (), T("123z")),
                                        declared=frozenset({"left"}), my_discards=3))
     assert waiting.splitlines()[0] == "放槍機率（下一手參考）" and len(waiting.splitlines()) == 6
+
+
+def test_log_records_the_claimable_tile_and_version():
+    from hint.__main__ import hand_text, program_version
+    from perception.table_reader import ClaimTile
+
+    observation = Observation(T("11223789m99m4p56779s"), frozenset({"chow"}),
+                              ClaimTile(parse("3m")[0], 0.9, "left"), ())
+    assert "，可吃碰 三萬（上家）" in hand_text(observation)
+    assert program_version().startswith(("版本 ", "版本不明"))

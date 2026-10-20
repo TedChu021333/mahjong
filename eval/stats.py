@@ -33,6 +33,13 @@ AMOUNT_X = (1300, 1800)
 NAME_BOX = (500, 138, 780, 230)
 """名字所在範圍（相對於列頂，含上下位移的餘裕）。"""
 MY_NAME = Path(__file__).with_name("my_name.png")
+"""自己名字的截圖：eval/my_name.png（「不沾」，10/20 以前）、my_name_2.png（「宋朝終笑晴」，10/20 改名後）……
+任何一個比對得上就是自己那列（load_names 讀進所有 my_name*.png）。"""
+
+
+def load_names(first: Path = MY_NAME) -> list[np.ndarray]:
+    paths = sorted({first, *first.parent.glob("my_name*.png")})
+    return [cv2.cvtColor(read_image(path), cv2.COLOR_BGR2GRAY) for path in paths if path.exists()]
 """自己的名字（黃字「不沾」）；換帳號時用 --name 指定一張裁好的名字圖。"""
 NAME_MIN_SCORE = 0.8
 """實測：自己那列 ≥0.98，其他列 ≤0.55；名字被提示條或卡片蓋住時讀不出來（約 15%）。"""
@@ -83,7 +90,7 @@ class Row:
 
 
 def read_row(image: np.ndarray, top: int, digits: list[tuple[str, np.ndarray]],
-             my_name: np.ndarray | None) -> Row:
+             my_name: np.ndarray | list[np.ndarray] | None) -> Row:
     left, right = AMOUNT_X
     region = image[top:top + ROW_HEIGHT, left:right]
     mask = text_mask(region)
@@ -112,7 +119,10 @@ def read_row(image: np.ndarray, top: int, digits: list[tuple[str, np.ndarray]],
     name_left, name_top, name_right, name_bottom = NAME_BOX
     name = cv2.cvtColor(image[top + name_top:top + name_bottom, name_left:name_right],
                         cv2.COLOR_BGR2GRAY)
-    is_me = my_name is not None and         float(cv2.matchTemplate(name, my_name, cv2.TM_CCOEFF_NORMED).max()) >= NAME_MIN_SCORE
+    names = [] if my_name is None else my_name if isinstance(my_name, list) else [my_name]
+    is_me = any(float(cv2.matchTemplate(name, template, cv2.TM_CCOEFF_NORMED).max()) >= NAME_MIN_SCORE
+                for template in names
+                if template.shape[0] <= name.shape[0] and template.shape[1] <= name.shape[1])
     return Row(amount, labelled, is_me)
 
 
@@ -182,7 +192,7 @@ def collect(directory: Path, date: str, since: str | None, until: str | None,
             name: Path = MY_NAME) -> list[Round]:
     buttons = ContinueButtons.from_directory()
     digits = load_digits()
-    my_name = cv2.cvtColor(read_image(name), cv2.COLOR_BGR2GRAY)
+    my_name = load_names(name)
     rounds, current = [], Round([])
     for path in sorted(directory.glob(f"{date}_*.png")):
         match = FILE_PATTERN.match(path.stem)
@@ -277,7 +287,7 @@ def main() -> None:
     parser.add_argument("--until", help="結束時間 HH:MM")
     parser.add_argument("--dir", type=Path, default=RESULT_DIR)
     parser.add_argument("--csv", type=Path, help="逐局結果另存 CSV")
-    parser.add_argument("--name", type=Path, default=MY_NAME, help="自己名字的截圖（預設「不沾」）")
+    parser.add_argument("--name", type=Path, default=MY_NAME, help="自己名字的截圖（預設 eval/my_name*.png 全部）")
     args = parser.parse_args()
 
     def hhmmss(value):

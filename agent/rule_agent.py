@@ -482,6 +482,21 @@ CLAIM_MODE = "improve"
 實戰 10/1：建議過吃碰的局放槍率 16~21%、平均每局 −23~−106，沒吃碰的局 12%、+165（有選擇偏差）。"""
 
 
+def network_claim_is_worth(state: GameState, player: int, action: Action) -> bool:
+    """網路要吃碰時的檢查：吃碰完打掉最好的一張後向聽一定要變好；碰會加台的字牌（三元、圈風、
+    認得出莊家時的門風）只要向聽不變差。10/20 02:51～15:17 網路吃碰 316 次中 26 次向聽沒變好（數牌 23 次，
+    其中 10 次是第一組副露、等於白白放掉門清），那 24 局胡牌 12%、被自摸 50%、平均每局 −470。
+    模擬器 arena：吃碰一定要讓向聽變好（improve）比放寬的版本好 +0.23±0.19（CLAIM_MODE 的說明）。"""
+    if action.kind not in (ActionType.CHOW, ActionType.PUNG) or state.last_discard is None:
+        return True
+    me = state.players[player]
+    before = hand_value(me.hand, me.open_melds)
+    after = claim_value(me.hand, me.open_melds, action, state.last_discard)
+    if action.kind == ActionType.PUNG and honor_tai(state, player, state.last_discard):
+        return after[0] <= before[0]
+    return after[0] < before[0]
+
+
 def claim_is_worth(state: GameState, player: int, action: Action, before: tuple[int, int],
                    after: tuple[int, int], mode: str | None = None) -> bool:
     """吃碰值不值得（明槓另外判斷）。"""

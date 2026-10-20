@@ -25,7 +25,7 @@ import numpy as np
 from game.tiles import tile_code
 from hint.advisor import RIVER_SEAT, Observation
 from perception.capture import write_image
-from perception.config import RIVER_TEMPLATE_DIR
+from perception.config import RIVER_TEMPLATE_DIR, TRAIN_DIR
 from perception.river_reader import SEATS, RiverReader, crop_face
 from perception.river_tracker import RiverEvent, RiverTracker
 from perception.table_reader import read_claim_banner
@@ -36,6 +36,9 @@ BANNER_FRAMES = 10
 """大字出現後這麼多次更新（約 3 秒）內的「被拿走」才算這次吃碰。"""
 LABEL_FRAMES = 15
 """標註在這麼多幀內等不到那家牌河多一張就作廢。"""
+UNKNOWN_DIR = TRAIN_DIR / "river_unknown"
+UNKNOWN_LIMIT = 200
+"""認不出的牌河牌切圖存到 train/river_unknown/<日期>/（每次執行最多這麼多張），之後標註補模板用（10/20 起）。"""
 LABEL_MIN_SCORE = 0.7
 """標註（手牌變化、放大的牌）和這張牌河的牌比對，至少要這麼像才採用、存成模板。10/19 發現牌河模板 6753 張
 有 1447 張放錯資料夾或不是牌（吃碰動畫、暗條；標註套到錯的那張），自己打的牌只讀對約一半；清掉後今天讀錯的
@@ -50,8 +53,10 @@ def _read_banner(frame):
 
 class RiverWatch:
     def __init__(self, reader: RiverReader, template_dir: Path = RIVER_TEMPLATE_DIR,
-                 save=write_image, read_banner=None) -> None:
+                 save=write_image, read_banner=None, unknown_dir: Path | None = UNKNOWN_DIR) -> None:
         self.reader = reader
+        self.unknown_dir = unknown_dir
+        self.unknown_saved = 0
         self.read_banner = read_banner or _read_banner
         self._banner: tuple[str, str, int] | None = None
         """剛出現、還沒對到被拿走的牌的大字：(吃碰者, chow/pung, 出現時的更新次數)。"""
@@ -130,6 +135,7 @@ class RiverWatch:
         for event in events:
             if event.kind == "discard":
                 self._apply_label(frame, event)
+                self._save_unknown(frame, event)
                 self._someone_discarded(event.seat)
             elif event.kind == "claimed":
                 if self._banner and self._frame - self._banner[2] <= BANNER_FRAMES \
@@ -235,6 +241,16 @@ class RiverWatch:
                     # 牌河先看到這張出牌、手牌變化晚到（10/18 03:24 打的八萬、九萬被記成二筒、三萬）
                     self._apply_label(pending[0], pending[1], retry=True)
             self._turn_hand = None
+
+    def _save_unknown(self, frame: np.ndarray | None, event: RiverEvent) -> None:
+        """套用標註後還是認不出的牌：切圖存起來，之後人工標註補模板。"""
+        entries = self.tracker.history[event.seat]
+        if (self.unknown_dir is None or frame is None or self.unknown_saved >= UNKNOWN_LIMIT
+                or not entries or entries[-1].tile is not None):
+            return
+        self.unknown_saved += 1
+        path = self.unknown_dir / time.strftime("%Y%m%d") /             f"{time.strftime('%H%M%S')}_{self._frame}_{event.seat}.png"
+        self.save(path, crop_face(frame, event.box))
 
     def _apply_label(self, frame: np.ndarray, event: RiverEvent, retry: bool = False) -> None:
         """retry：標註晚到，回頭補標剛才的出牌。"""

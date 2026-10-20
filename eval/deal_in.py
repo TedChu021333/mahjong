@@ -29,7 +29,7 @@ from agent.opponent_model import default_calibration, estimate_danger
 from agent.rule_agent import visible_tile_counts
 from agent.shanten import effective_tiles, shanten
 from eval.settlement import Settlement, SettlementReader, is_dealer
-from eval.stats import MY_NAME, RESULT_DIR, ROW_TOPS, classify, load_digits, read_row, wind_row
+from eval.stats import RESULT_DIR, ROW_TOPS, classify, load_digits, load_names, read_row, wind_row
 from game.rules import allowed_discards
 from game.tiles import NUM_TILE_TYPES, is_suited, tile_name
 from game.win import decompose, winning_tiles
@@ -177,7 +177,7 @@ class Outcome:
 class OutcomeReader:
     def __init__(self) -> None:
         self.digits = load_digits()
-        self.my_name = cv2.cvtColor(read_image(MY_NAME), cv2.COLOR_BGR2GRAY)
+        self.my_name = load_names()
         self.settlement = SettlementReader.load()
 
     def read(self, path: Path) -> Outcome | None:

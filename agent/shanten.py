@@ -237,3 +237,31 @@ def improvement_count(counts: Sequence[int], n_open_melds: int, visible: Sequenc
         if better:
             total += live
     return total
+
+
+def next_step_outs(counts: Sequence[int], n_open_melds: int, visible: Sequence[int]) -> int:
+    """牌型分數（往後多看一步）：每張有效進張摸到後、再打最好的一張，剩下的有效進張有幾張，
+    依那張進張看不到的張數加權加總。進張、改良牌都一樣時用來分出牌型好壞：
+    10/20 三四六七九筒打六筒（留三四、七九嵌張）和打九筒（留三四、六七兩面）進張 16、改良牌 56 都一樣，
+    但摸到二五筒補完三四之後，前者只剩八筒、後者剩五八筒。"""
+    hand = list(counts)
+    total = 0
+    for drawn in effective_tiles(hand, n_open_melds):
+        live = 4 - visible[drawn]
+        if live <= 0:
+            continue
+        hand[drawn] += 1
+        best = None
+        for discard in range(len(hand)):
+            if not hand[discard]:
+                continue
+            hand[discard] -= 1
+            level = shanten(hand, n_open_melds)
+            outs = sum(max(0, 4 - visible[tile] - (tile == drawn))
+                       for tile in effective_tiles(hand, n_open_melds))
+            hand[discard] += 1
+            if best is None or (level, -outs) < best:
+                best = (level, -outs)
+        hand[drawn] -= 1
+        total += live * -best[1]
+    return total
