@@ -314,7 +314,7 @@ def test_unrecognized_river_tiles_are_saved_for_labelling(tmp_path):
     reader.current["top"] = [RiverTile(None, 0.3, (660, 284, 717, 334))]
     for _ in range(CONFIRM_FRAMES):
         watch.update(frame, waiting())
-    assert len(saved) == 1 and saved[0].name.endswith("_top.png") and tmp_path in saved[0].parents
+    assert len(saved) == 1 and saved[0].name.endswith("_top_660_284.png") and tmp_path in saved[0].parents
     reader.current["top"].append(RiverTile(P("1z"), 0.9, (720, 284, 777, 334)))
     for _ in range(CONFIRM_FRAMES):
         watch.update(frame, waiting())

@@ -249,7 +249,8 @@ class RiverWatch:
                 or not entries or entries[-1].tile is not None):
             return
         self.unknown_saved += 1
-        path = self.unknown_dir / time.strftime("%Y%m%d") /             f"{time.strftime('%H%M%S')}_{self._frame}_{event.seat}.png"
+        # 檔名附框的左上角座標：10/20 對家區域反覆出現一種灰白色、不是牌的東西，要知道在哪
+        path = self.unknown_dir / time.strftime("%Y%m%d") /             f"{time.strftime('%H%M%S')}_{self._frame}_{event.seat}_{event.box[0]}_{event.box[1]}.png"
         self.save(path, crop_face(frame, event.box))
 
     def _apply_label(self, frame: np.ndarray, event: RiverEvent, retry: bool = False) -> None:

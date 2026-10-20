@@ -60,6 +60,8 @@ CLAIM_PROMPT_REPORT = 1.5
 RIVER_INTERVAL = 0.3
 """牌河追蹤的門檻以幀數計、依約 0.3 秒一幀調校；擷取變快後牌河仍照這個間隔更新。"""
 UNREADABLE_AFTER = 6.0
+OWN_TAKEN_LIMIT = 20
+"""自己的牌被判定吃碰拿走時存畫面，每次執行最多幾張（查是不是誤判）。"""
 TABLE_INTERVAL = 1.0
 """別人的回合時放槍表最多幾秒重算一次（每次約 0.1 秒）。"""
 END_SHOT_DELAYS = (1.0, 2.0, 4.0)
@@ -211,6 +213,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     """已經存過「不明畫面」截圖的那段期間（以 game_seen_at 區分）。"""
     stuck_shots_left, stuck_shot_at = 0, float("-inf")
     hands = HandBook()
+    own_taken_saved = 0
     declared_seen: set[str] = set()
     """這局已經記錄過宣告的對手。"""
     table_for = None
@@ -300,6 +303,11 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 for event in events:
                     name = tile_name(event.tile) if event.tile is not None else "?"
                     log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
+                    if event.seat == "me" and event.kind == "claimed" and own_taken_saved < OWN_TAKEN_LIMIT:
+                        # 10/20 18:36～19:34 自己的牌被判定拿走 32 次、只還原 6 次，太多：存畫面查是真的吃碰還是被蓋住
+                        own_taken_saved += 1
+                        log(f"[{stamp}] 自己的牌被判定拿走，畫面存到 "
+                            f"{save_result(frame, '自己的牌被拿走_')}", echo=False)
                     if SAVE_CLAIM_FRAMES and event.kind == "claimed" \
                             and clock() - banner_saved_at >= BANNER_COOLDOWN:
                         banner_saved_at = clock()
