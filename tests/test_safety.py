@@ -45,28 +45,48 @@ def test_claim_is_not_checked_without_a_declared_opponent():
     assert claim_is_worse(state, 0, chow, Random(0)) is None
 
 
-def test_guard_only_declares_on_the_first_discard():
+def test_guard_declares_by_wait_shape():
     pytest.importorskip("torch")
     from agent.nn_agent import NetworkPolicy
 
     policy = NetworkPolicy.__new__(NetworkPolicy)
     policy.last_note = None
-    state = state_with("123456789m123p11z5s", p0="9s")
-    declare = Action(ActionType.DECLARE, tile=P("5s"))
+    # 嵌張只聽二條、摸四條就能改成聽兩種：網路想按也先不按
+    state = state_with("123456789m12399p13s1z", p0="9s")
+    declare = Action(ActionType.DECLARE, tile=P("1z"))
     action = policy._guarded(state, 0, declare, [declare], Random(0))
-    assert action == Action(ActionType.DISCARD, tile=P("5s"))
+    assert action == Action(ActionType.DISCARD, tile=P("1z"))
     assert "不按聽" in policy.last_note
     state.players[0].discards = []  # 地聽照按
     assert policy._guarded(state, 0, declare, [declare], Random(0)) == declare
+    # 聽三種（二五八條）：網路沒想按也按
+    state = state_with("123456789m2345678s1z", p0="9s")
+    discard = Action(ActionType.DISCARD, tile=P("1z"))
+    declare = Action(ActionType.DECLARE, tile=P("1z"))
+    assert policy._guarded(state, 0, discard, [discard, declare], Random(0)) == declare
+    assert "按聽" in policy.last_note
+
+
+def test_declare_rule_follows_the_wait_shape():
+    from agent.rule_agent import declare_is_worth
+
+    def worth(hand, **discards):
+        state = state_with(hand, p0="9s", **discards)
+        return declare_is_worth(state, 0, P("1z"))
+
+    assert worth("123456789m2345678s1z")           # 聽二五八條三種
+    assert worth("123456789m12345p55s1z")          # 聽三六筒兩種、剩 8 張
+    assert not worth("123456789m12345p55s1z", p1="3p3p6p6p")  # 只剩 4 張
+    assert not worth("123456789m12399p13s1z")      # 嵌張、摸四條能改成兩面
 
 
 def test_first_discard_needs_no_counted_discards_either():
     from agent.rule_agent import declare_is_worth
 
-    state = state_with("123456789m123p11z5s")
-    assert declare_is_worth(state, 0, P("5s"))
+    state = state_with("123456789m12399p13s1z")   # 嵌張、還能改善：平常不按
+    assert declare_is_worth(state, 0, P("1z"))      # 但第一次打牌就聽（地聽）照按
     state.min_discards = 3  # 牌河漏記，但提示迴圈數到自己已經打過
-    assert not declare_is_worth(state, 0, P("5s"))
+    assert not declare_is_worth(state, 0, P("1z"))
 
 
 def test_no_open_kong_while_concealed():

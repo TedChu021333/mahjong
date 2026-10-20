@@ -25,12 +25,16 @@ from game.simulator import RAKE
 from game.tiles import tile_name
 from game.win import winning_tiles
 
-DANGER_SCALE = 1.3
-"""對手模型的放槍機率偏低：10/5 校準估計 27 次、實際 35 次。"""
+DANGER_SCALE = 1.0
+"""放槍損失的權重。原本 1.3（10/5 校準估計 27 次、實際 35 次）；牌河清理、宣告後的現物、湊滿有效手牌之後，
+10/19 晚～10/20 2207 手出牌重新校準：對已宣告者估計 17.4 次、實際 19（1.09），對沒宣告的估計 24.9、實際 25（1.00），
+已經不低估，1.3 反而高估三成（使用者：打得太保守）。"""
 OVERRIDE_MARGIN = 0.2
-"""至少好這麼多台才推翻網路。進攻收益表依向聽與進張分組，同一組內的差別看不出來（很多改法顯示
-「進攻少 0.00」），太小的差距留給網路。10/17 記錄重放：門檻 0.05 時有人宣告的出牌 66 次改 37 次，
-0.2 改 29 次；放槍那幾手（少付 0.35～1.41 台）都還會改。"""
+OVERRIDE_SHARE = 0.25
+"""至少好 max(OVERRIDE_MARGIN, OVERRIDE_SHARE × 網路那張牌的進攻收益) 台才推翻網路。進攻收益表依向聽與進張分組，
+同一組內的差別看不出來（很多改法顯示「進攻少 0.00」），太小的差距留給網路；手越接近聽牌、越大，網路的進攻判斷
+越重要，門檻跟著提高（聽牌約 1 台、一向聽約 0.5 台），沒希望的手照樣改打免費的安全牌。
+10/17 記錄重放：固定 0.05 時有人宣告的出牌 66 次改 37 次，0.2 改 29 次。10/20 使用者：還是太保守。"""
 SAMPLES = 40
 MIN_VALID = 150
 """每位宣告者湊滿這麼多副有效的聽牌手牌（見 opponent_model.estimate_danger）；原本只嘗試 160 次、
@@ -118,7 +122,7 @@ def safer_discard(state: GameState, player: int, tile: int, rng: Random,
     if not safer:
         return tile, None
     best = max(safer, key=lambda c: _gain(current, c))
-    if _gain(current, best) <= OVERRIDE_MARGIN:
+    if _gain(current, best) <= max(OVERRIDE_MARGIN, OVERRIDE_SHARE * current.offense):
         return tile, None
     return best.tile, _describe(current, best)
 

@@ -36,7 +36,7 @@ class NetworkPolicy:
         self.efficiency_turns = efficiency_turns
         """前幾手、沒人宣告聽牌時湊牌優先（見 efficient_discard）；0 = 不用。"""
         self.guard = guard
-        """實戰用（提示模式預設開啟）：按聽照規則式（只有地聽才按，declare_is_worth），有對手宣告時
+        """實戰用（提示模式預設開啟）：按聽照規則式（地聽或聽牌型態夠好才按，declare_is_worth），有對手宣告時
         用期望值檢查打牌與吃碰（agent.safety）。10/17 實戰 45 局按聽 11 次、放槍 10 次（6 次放給已宣告的人），
         使用者 10/5 也說過太容易按聽。自我對打訓練不開。"""
         self.last_note: str | None = None
@@ -94,13 +94,15 @@ class NetworkPolicy:
         tile, note = safer_discard(state, player, choice.tile, rng)
         if note is not None:
             notes.append(note)
+        # 按不按聽照規則（rule_agent.declare_is_worth：地聽、或聽牌型態夠好），不看網路想不想按
         declare = Action(ActionType.DECLARE, tile=tile)
-        wants_declare = choice.kind == ActionType.DECLARE or tile != choice.tile
-        if wants_declare and declare in actions and declare_is_worth(state, player, tile):
+        if declare in actions and declare_is_worth(state, player, tile):
             result = declare
+            if choice.kind != ActionType.DECLARE:
+                notes.append("按聽（聽牌型態夠好）")
         else:
             if choice.kind == ActionType.DECLARE:
-                notes.append("不按聽（只有地聽才按）")
+                notes.append("不按聽（聽牌型態還能改善或剩的牌太少）")
             result = Action(ActionType.DISCARD, tile=tile)
         self.last_note = "；".join(notes) or None
         return result

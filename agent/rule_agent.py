@@ -399,8 +399,16 @@ def should_fold(state: GameState, player: int, use_declared: bool = True,
     return own_shanten >= 2 and highest_threat >= 3
 
 
+DECLARE_WIDE_KINDS = 3
+"""聽這麼多種牌以上一定宣告（使用者 10/20）。"""
+DECLARE_TWO_KINDS_LIVE = 5
+"""聽兩種牌時，看不到的還剩這麼多張以上就宣告（「聽得牌還剩蠻多張也可按」；最多 8 張）。"""
+DECLARE_SINGLE_LIVE = 3
+"""只聽一種、而且怎麼摸都變不成聽更多種時，還剩這麼多張以上才宣告。"""
 DECLARE_MIN_LIVE = None
-"""聽的牌還剩（看不到的）幾張以上才宣告聽牌；0 = 一律宣告，None = 只有地聽才宣告（預設）。
+"""聽的牌還剩（看不到的）幾張以上才宣告聽牌；0 = 一律宣告，None = 照聽牌型態決定（預設，見 waits_worth_declaring）。
+10/5 起原本 None 是「只有地聽才宣告」；10/20 實戰網路想按聽被擋的 92 局胡了 40 局（每局少 1 台）、放槍 15%
+和平常一樣，使用者訂了照聽牌型態的規則。
 宣告後手牌鎖住，摸到什麼都只能打出去，發現危險也不能改打安全牌、不能換更好的聽；沒宣告也能胡
 （沒有振聽），只是少 1 台。使用者實戰回饋「太容易按聽，不可控性變很高」（10/5）；實戰別人胡牌時
 約一半沒宣告（opponent_model.UNDECLARED_TENPAI_SHARE），不宣告不會讓對手更好防。
@@ -418,7 +426,7 @@ def declare_is_worth(state: GameState, player: int, tile: int,
         # 10/17 18:03 一幀手牌只讀到兩張、牌河也沒有自己的牌，被當成地聽建議按聽
         return True
     if min_live is None:
-        return False
+        return waits_worth_declaring(state, player, tile)
     if min_live <= 0:
         return True
     after = list(me.hand)
@@ -426,6 +434,44 @@ def declare_is_worth(state: GameState, player: int, tile: int,
     visible = visible_tile_counts(state, player)
     live = sum(max(0, 4 - visible[wait]) for wait in winning_tiles(after, me.open_melds))
     return live >= min_live
+
+
+def waits_worth_declaring(state: GameState, player: int, tile: int) -> bool:
+    """打出 tile 後聽牌時，照聽牌型態決定要不要宣告（使用者 10/20 的規則）：聽 DECLARE_WIDE_KINDS 種以上一定按；
+    聽兩種、看不到的還剩 DECLARE_TWO_KINDS_LIVE 張以上就按；只聽一種時，若摸某張牌能改成聽更多種就先不按
+    （保留換聽的機會），變不了的話剩 DECLARE_SINGLE_LIVE 張以上才按。"""
+    me = state.players[player]
+    after = list(me.hand)
+    after[tile] -= 1
+    waits = winning_tiles(after, me.open_melds)
+    if not waits:
+        return False
+    visible = visible_tile_counts(state, player)
+    live = sum(max(0, 4 - visible[wait]) for wait in waits)
+    if len(waits) >= DECLARE_WIDE_KINDS:
+        return True
+    if len(waits) == 2:
+        return live >= DECLARE_TWO_KINDS_LIVE
+    return live >= DECLARE_SINGLE_LIVE and not wait_can_widen(after, me.open_melds, visible)
+
+
+def wait_can_widen(hand: list[int], open_melds: int, visible: list[int]) -> bool:
+    """聽牌的手（16 張那種）摸進某張還看得到的牌、再打一張後，能不能聽更多種牌。約 0.1 秒。"""
+    kinds = len(winning_tiles(hand, open_melds))
+    for draw in range(len(hand)):
+        if visible[draw] >= 4 or hand[draw] >= 4:
+            continue
+        drawn = list(hand)
+        drawn[draw] += 1
+        for discard, count in enumerate(drawn):
+            if not count or discard == draw:
+                continue
+            drawn[discard] -= 1
+            wider = len(winning_tiles(drawn, open_melds)) > kinds
+            drawn[discard] += 1
+            if wider:
+                return True
+    return False
 
 
 CLAIM_MODE = "improve"
