@@ -44,6 +44,9 @@ LABEL_MIN_SCORE = 0.7
 有 1447 張放錯資料夾或不是牌（吃碰動畫、暗條；標註套到錯的那張），自己打的牌只讀對約一半；清掉後今天讀錯的
 126 張全部讀對。門檻 0.7：正確的標註留下 99%、錯的擋下 91%。"""
 EMPTY_RESET_FRAMES = 10
+OWN_MISSING_FRAMES = 17
+"""手牌少了一張（自己打出）後這麼多次更新（約 5 秒）牌河還沒出現自己的出牌，就回報一次（存截圖查原因）。
+10/21 自己的出牌約 5.5% 牌河一直沒記到、記錄檔看不出原因。"""
 """四家牌河連續這麼多次都讀不到任何牌、追蹤器卻記著牌時，當成新的一局（沒有換三張的場、流局沒有結算畫面）。"""
 
 
@@ -90,6 +93,10 @@ class RiverWatch:
         self._empty_frames = 0
         self.reset_by_empty_table = 0
         """因為牌河整個清空而自動當成新局的次數（記錄用）。"""
+        self._own_pending: tuple[int | None, int] | None = None
+        """自己剛打出、牌河還沒看到的牌：(牌, 打出時的更新次數)。"""
+        self._own_seen_at = -LABEL_FRAMES - 1
+        """牌河最近一次出現自己出牌（或被拿走）時的更新次數。"""
         self._declare_marks: dict[str, dict[str, int]] = {}
         """第一次認到某家宣告時，各家牌河（含被吃碰的）已有幾張；之後別家打出的牌他一定不聽
         （遊戲代打、自動胡），見 declared_safe。"""
@@ -109,6 +116,7 @@ class RiverWatch:
         self._declare_marks = {}
         self._empty_frames = 0
         self.my_pungs = []
+        self._own_pending = None
 
     def update(self, frame: np.ndarray, observation: Observation) -> list[RiverEvent]:
         self._frame += 1
@@ -133,6 +141,9 @@ class RiverWatch:
                 self._declare_marks[seat] = {other: len(tiles)
                                              for other, tiles in self.tracker.history.items()}
         for event in events:
+            if event.seat == "me" and event.kind in ("discard", "claimed"):
+                self._own_pending = None
+                self._own_seen_at = self._frame
             if event.kind == "discard":
                 self._apply_label(frame, event)
                 self._save_unknown(frame, event)
@@ -234,6 +245,8 @@ class RiverWatch:
         elif self._turn_hand is not None and len(observation.hand) == len(self._turn_hand) - 1:
             self.my_discards += 1
             gone = Counter(self._turn_hand) - Counter(observation.hand)
+            if self._frame - self._own_seen_at > LABEL_FRAMES:  # 牌河已經先看到就不用等
+                self._own_pending = (next(iter(gone)) if sum(gone.values()) == 1 else None, self._frame)
             if sum(gone.values()) == 1:
                 self._labels["me"] = (next(iter(gone)), self._frame)
                 pending = self._unlabeled.pop("me", None)
@@ -241,6 +254,14 @@ class RiverWatch:
                     # 牌河先看到這張出牌、手牌變化晚到（10/18 03:24 打的八萬、九萬被記成二筒、三萬）
                     self._apply_label(pending[0], pending[1], retry=True)
             self._turn_hand = None
+
+    def overdue_own_discard(self) -> tuple[bool, int | None]:
+        """自己打出的牌過了 OWN_MISSING_FRAMES 次更新牌河還沒看到：回傳 (True, 那張牌)，每張只回報一次。"""
+        pending = self._own_pending
+        if pending is None or self._frame - pending[1] < OWN_MISSING_FRAMES:
+            return False, None
+        self._own_pending = None
+        return True, pending[0]
 
     def _save_unknown(self, frame: np.ndarray | None, event: RiverEvent) -> None:
         """套用標註後還是認不出的牌：切圖存起來，之後人工標註補模板。"""

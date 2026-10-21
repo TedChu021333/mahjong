@@ -62,6 +62,8 @@ RIVER_INTERVAL = 0.3
 """牌河追蹤的門檻以幀數計、依約 0.3 秒一幀調校；擷取變快後牌河仍照這個間隔更新。"""
 UNREADABLE_AFTER = 6.0
 OWN_TAKEN_LIMIT = 20
+OWN_MISSING_LIMIT = 20
+"""自己打出的牌約 5 秒牌河都沒看到時存畫面，每次執行最多幾張（10/21 約 5.5% 原因不明）。"""
 """自己的牌被判定吃碰拿走時存畫面，每次執行最多幾張（查是不是誤判）。"""
 TABLE_INTERVAL = 1.0
 """別人的回合時放槍表最多幾秒重算一次（每次約 0.1 秒）。"""
@@ -215,6 +217,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     stuck_shots_left, stuck_shot_at = 0, float("-inf")
     hands = HandBook()
     own_taken_saved = 0
+    own_missing_saved = 0
     meld_check = MeldCheck()
     meld_rejected = None
     """最近一次記錄過「副露數不合理」的 (副露數, 手牌)，同一個畫面只記一次。"""
@@ -335,6 +338,13 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                             code = tile_code(event.tile) if event.tile is not None else "x"
                             path = save_result(earlier, f"吃碰動畫_{event.seat}_{code}_")
                             log(f"[{stamp}] 有人吃碰，{delay} 秒前的畫面存到 {path}", echo=False)
+                overdue = getattr(rivers, "overdue_own_discard", None)
+                missing, tile = overdue() if overdue is not None else (False, None)
+                if missing and own_missing_saved < OWN_MISSING_LIMIT:
+                    own_missing_saved += 1
+                    name = tile_name(tile) if tile is not None else "?"
+                    log(f"[{stamp}] 自己打的 {name} 約 5 秒牌河都沒看到，畫面存到 "
+                        f"{save_result(frame, '自己的牌沒進牌河_')}", echo=False)
             if rivers is not None and observation is not None:
                 observation = replace(observation, discards=rivers.discards(),
                                       melds=rivers.meld_counts(),

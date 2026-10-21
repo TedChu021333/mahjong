@@ -319,3 +319,29 @@ def test_unrecognized_river_tiles_are_saved_for_labelling(tmp_path):
     for _ in range(CONFIRM_FRAMES):
         watch.update(frame, waiting())
     assert len(saved) == 1  # 認得的不存
+
+
+def test_own_discard_missing_from_the_river_is_reported_once():
+    from hint.river_watch import OWN_MISSING_FRAMES
+
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    watch.update(None, Observation(tuple(parse("11223789m99m4p56779s9p")), None, None, ()))
+    watch.update(None, waiting())  # 手牌少了九筒，牌河一直沒看到
+    for _ in range(OWN_MISSING_FRAMES - 1):
+        watch.update(None, waiting())
+    assert watch.overdue_own_discard() == (False, None)
+    watch.update(None, waiting())
+    assert watch.overdue_own_discard() == (True, P("9p"))
+    assert watch.overdue_own_discard() == (False, None)
+
+
+def test_own_discard_seen_in_the_river_is_not_reported():
+    from hint.river_watch import OWN_MISSING_FRAMES
+
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    watch.update(None, Observation(tuple(parse("11223789m99m4p56779s9p")), None, None, ()))
+    reader.current["me"] = [RiverTile(P("9p"), 0.9, (580, 651, 650, 717))]
+    frames(watch, waiting(), OWN_MISSING_FRAMES + 2)
+    assert watch.overdue_own_discard() == (False, None)
