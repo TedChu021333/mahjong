@@ -43,6 +43,7 @@ from hint.advisor import (
     use_policy,
 )
 from hint.hand_end import HandBook
+from hint.meld_check import MeldCheck
 from hint.river_watch import RiverWatch
 from hint.river_watch import summary as river_summary
 from perception.continue_button import ContinueButton
@@ -214,6 +215,9 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     stuck_shots_left, stuck_shot_at = 0, float("-inf")
     hands = HandBook()
     own_taken_saved = 0
+    meld_check = MeldCheck()
+    meld_rejected = None
+    """最近一次記錄過「副露數不合理」的 (副露數, 手牌)，同一個畫面只記一次。"""
     declared_seen: set[str] = set()
     """這局已經記錄過宣告的對手。"""
     table_for = None
@@ -274,6 +278,13 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     log(f"[{stamp}] 關閉「{popup.name}」面板", echo=False)
                     actuator.click(popup.center)
             observation = observe_fn(frame, readers)
+            if observation is not None and not meld_check.accept(observation.meld_count,
+                                                                 observation.buttons, clock()):
+                if meld_rejected != (observation.meld_count, observation.hand):
+                    meld_rejected = (observation.meld_count, observation.hand)
+                    log(f"[{stamp}] 手牌只讀到 {len(observation.hand)} 張（副露 {meld_check.count} → "
+                        f"{observation.meld_count} 組不合理，可能被動畫蓋住），不採用", echo=False)
+                observation = None
             if observation is not None:
                 if observation.claim is not None and observation.claim.tile is not None:
                     last_claim = (observation.claim, clock())
