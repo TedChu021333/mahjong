@@ -7,7 +7,7 @@ def test_choose_by_argument_passes_extra_args():
 
 
 def test_choose_from_menu_and_exit():
-    index, _ = start.choose([], ask=lambda prompt: "5")
+    index, _ = start.choose([], ask=lambda prompt: "4")
     assert start.MENU[index][1] == ["-m", "bigtwo.live"]
     assert start.choose([], ask=lambda prompt: "0") == (None, [])
     assert start.choose([], ask=lambda prompt: "abc") == (None, [])

@@ -18,13 +18,13 @@ ROOT = Path(__file__).resolve().parent
 MODEL = "models/rl3_0960.pt"
 
 MENU = [
-    ("麻將：自動模式（訓練場）", ["-m", "hint", "--auto", "--ai", "nn", "--model", MODEL]),
-    ("麻將：自動模式＋前期先丟字牌（訓練場）", ["-m", "hint", "--auto", "--ai", "nn", "--model", MODEL,
+    ("麻將：自動模式（訓練場）", ["-m", "hint", "--auto", "--ai", "nn", "--model", MODEL,
                                      "--efficiency-turns", "6"]),
     ("麻將：提示模式（真人場，不自動點擊）", ["-m", "hint", "--ai", "nn", "--model", MODEL]),
     ("大老二：自動模式（只限對手全是電腦的場）", ["-m", "bigtwo.live", "--auto"]),
     ("大老二：提示模式（不自動點擊）", ["-m", "bigtwo.live"]),
     ("麻將：今天戰績", ["-m", "eval.stats"]),
+    ("麻將：自己 vs 三家電腦（一圈）", ["-m", "play", "--model", MODEL]),
 ]
 
 

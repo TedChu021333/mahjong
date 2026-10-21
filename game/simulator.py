@@ -12,6 +12,8 @@ from .tiles import tile_name
 
 ActionChooser = Callable[[GameState, Random], tuple[int, Action] | None]
 PlayerPolicy = Callable[[GameState, int, Random], Action | None]
+StepObserver = Callable[[GameState, int, Action], None]
+"""每個動作套用之後呼叫 (局面, 玩家, 動作)；人機對戰的視窗用來更新畫面。"""
 
 
 def make_uniform_policy(policy: PlayerPolicy) -> PlayerPolicy:
@@ -209,6 +211,7 @@ def play_game(
     dealer: int = 0,
     swap: bool = False,
     dealer_streak: int = 0,
+    observer: StepObserver | None = None,
 ) -> GameResult:
     """執行一局對局；摸到留牌或達到步數上限都視為流局。"""
     if max_steps <= 0:
@@ -248,6 +251,8 @@ def play_game(
             discard_count += 1
             discards_by_player[player] += 1
         apply_action(state, action, player)
+        if observer is not None:
+            observer(state, player, action)
         if action.kind == ActionType.WIN:
             winner_state = state.players[player]
             score = score_hand(
