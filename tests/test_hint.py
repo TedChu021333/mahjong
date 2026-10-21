@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from dataclasses import replace
 
 import pytest
@@ -744,8 +745,35 @@ def test_loop_stops_when_esc_is_pressed():
             seen.append(step)
             yield str(step), None
 
-    presses = iter([False, False, True])
+    # 第一次按 Esc 等打完這圈，第二次立刻停
+    presses = iter([False, False, True, False, True])
     hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: None,
                   log=lambda line, detail=None, echo=True: lines.append(line),
-                  stop_requested=lambda: next(presses, True))
-    assert seen == [0, 1, 2] and "Esc" in lines[-1]
+                  stop_requested=lambda: next(presses, False))
+    assert seen == [0, 1, 2, 3, 4]
+    assert "打完這圈後停止" in lines[0] and "立刻停止" in lines[-1]
+
+
+def test_esc_stops_at_the_end_of_the_round():
+    import hint.__main__ as hint_main
+    from perception.continue_button import ContinueButton
+
+    small = ContinueButton("小結算", (1400, 977))
+    big = ContinueButton("大結算", (1660, 960))
+    screens = [small, small, small, big, big, big, small, small]
+    seen, lines, clicks = [], [], []
+
+    def frames():
+        for step, screen in enumerate(screens):
+            seen.append(step)
+            yield str(step), screen
+
+    presses = iter([True])
+    hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: None,
+                  find_continue=lambda frame: frame, actuator=SimpleNamespace(click=clicks.append),
+                  save_result=lambda frame, prefix="": "x.png",
+                  log=lambda line, detail=None, echo=True: lines.append(line),
+                  stop_requested=lambda: next(presses, False))
+    # 小結算照常按繼續；看到大結算（整圈結束）就停，不按
+    assert clicks == [small.center]
+    assert seen == [0, 1, 2, 3, 4] and "這圈打完了" in lines[-1]

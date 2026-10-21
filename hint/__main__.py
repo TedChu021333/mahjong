@@ -220,6 +220,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     """最近一次記錄過「副露數不合理」的 (副露數, 手牌)，同一個畫面只記一次。"""
     declared_seen: set[str] = set()
     """這局已經記錄過宣告的對手。"""
+    stop_after_round = False
+    """按過 Esc：看到整圈結束的畫面（大結算等）就停，不按繼續。"""
     table_for = None
     """放槍表算過的局面（手牌、各家牌河張數、宣告者），沒變就不重算。"""
     table_at = float("-inf")
@@ -250,8 +252,14 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     """卡住後還要存幾張後續截圖（每 STUCK_SHOT_INTERVAL 秒一張），看點擊後畫面怎麼變。"""
     for stamp, frame in frames:
         if stop_requested is not None and stop_requested():
-            log(f"[{stamp}] 按了 Esc，程式停止")
-            return
+            if stop_after_round:
+                log(f"[{stamp}] 又按了 Esc，立刻停止")
+                return
+            # 10/21 使用者：按 Esc 改成打完這圈再停（直接停會丟下打到一半的牌局）
+            stop_after_round = True
+            log(f"[{stamp}] 按了 Esc，打完這圈後停止（要立刻停再按一次 Esc）")
+            if show is not None:
+                show("打完這圈後停止")
         try:
             if stuck_shots_left and clock() - stuck_shot_at >= STUCK_SHOT_INTERVAL:
                 stuck_shots_left -= 1
@@ -426,6 +434,9 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                         rivers.new_hand()
                     hands.hand_ended(settled=True)
                     declared_seen = set()
+                if stop_after_round and observation.name in ROUND_END_SCREENS:
+                    log(f"[{stamp}] 這圈打完了（{observation.name}），程式停止")
+                    return
                 acted_for, acted_at = observation, clock()
                 if actuator is None:  # 提示模式：只記錄，由人按繼續
                     retries = MAX_RETRIES
@@ -586,7 +597,7 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
         from control.actuator import Actuator
 
         actuator = Actuator()
-        print("自動模式 3 秒後開始，請切回遊戲視窗。按 Esc 或滑鼠甩到螢幕左上角可立即中止。", flush=True)
+        print("自動模式 3 秒後開始，請切回遊戲視窗。按 Esc 會打完這圈再停（再按一次立刻停），滑鼠甩到螢幕左上角可立即中止。", flush=True)
         time.sleep(3)
     mode = "自動模式" if auto else "提示模式"
     readers = Readers()
@@ -613,7 +624,7 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
 
         game_window = GameWindow()  # 看不到遊戲、又沒人用電腦時把遊戲切回前面
     if not overlay:
-        print(f"{mode}啟動，按 Esc 或 Ctrl+C 結束", flush=True)
+        print(f"{mode}啟動，按 Esc 打完這圈後結束（再按一次立刻結束），或 Ctrl+C", flush=True)
         run(screen_frames(interval), readers, actuator=actuator, find_continue=find_continue,
             log=log, rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
             find_popup=popups.find, find_autoplay=autoplay_active, window=game_window,
@@ -621,7 +632,7 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
         return
     from hint.overlay import Overlay
 
-    print(f"{mode}啟動（浮動小視窗），按 Esc 或 Ctrl+C 結束", flush=True)
+    print(f"{mode}啟動（浮動小視窗），按 Esc 打完這圈後結束（再按一次立刻結束），或 Ctrl+C", flush=True)
     window = Overlay()
     window.run(lambda: run(screen_frames(interval), readers, actuator=actuator,
                            show=window.show, find_continue=find_continue, log=log,
@@ -631,12 +642,25 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
                            stop_requested=esc_pressed))
 
 
+ROUND_END_SCREENS = frozenset({"大結算", "繼續戰鬥", "破產再玩一局", "再拚一局", "再玩一局"})
+"""整圈結束才會出現的畫面與按鈕（「再贏一局」是流局後的下一局，不算）。"""
+
+
+_esc_down = False
+
+
 def esc_pressed() -> bool:
-    """Esc 有沒有被按下（不管哪個視窗在前面）：GetAsyncKeyState 的最高位元＝現在按著，
-    最低位元＝上次查詢之後按過（擷取一幀約 0.1 秒，短按也抓得到）。10/20 使用者要求按 Esc 停止程式。"""
+    """Esc 剛被按下嗎（不管哪個視窗在前面）：GetAsyncKeyState 的最高位元＝現在按著，
+    最低位元＝上次查詢之後按過（擷取一幀約 0.1 秒，短按也抓得到）。10/20 使用者要求按 Esc 停止程式。
+    按著不放只算一次：第二次按 Esc 是「立刻停」，按著不放不能被當成按了兩次。"""
     import ctypes
 
-    return bool(ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8001)
+    global _esc_down
+    state = ctypes.windll.user32.GetAsyncKeyState(0x1B)
+    down = bool(state & 0x8000)
+    pressed = (down and not _esc_down) or (bool(state & 1) and not down)
+    _esc_down = down
+    return pressed
 
 
 def program_version() -> str:
