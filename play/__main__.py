@@ -28,15 +28,15 @@ from play.game import (HUMAN, MONEY_PER_TAI, SEAT_NAMES, WIND_NAMES, HandSummary
 
 MODEL = "models/rl3_0960.pt"
 WIDTH, HEIGHT = 1400, 900
-DISCARD_DELAY = 2.0
-"""電腦輪到打牌時，從開始想到打出至少等這麼久（使用者 10/21 要求兩秒）。"""
+DISCARD_DELAY = 1.0
+"""電腦輪到打牌時，從開始想到打出至少等這麼久（使用者 10/21 要求，2 秒→1 秒）。"""
 CLAIM_DELAY = 0.7
 """電腦吃碰槓胡之後停一下，看得清楚。"""
 CLAIMS = {ActionType.CHOW, ActionType.PUNG, ActionType.KONG, ActionType.WIN}
 DISCARDS = {ActionType.DISCARD, ActionType.DECLARE}
 FONT = "Microsoft JhengHei"
 HAND_W, HAND_H = 60, 100
-RIVER_W, RIVER_H = 36, 58
+RIVER_W, RIVER_H = 32, 52
 MELD_W, MELD_H = 32, 52
 LAST_COLOR = (230, 50, 50)
 DECLARE_COLOR = (40, 120, 240)
@@ -44,12 +44,19 @@ BUTTON_COLORS = {
     "win": (215, 55, 55), "claim": (235, 145, 30), "pass": (140, 140, 140),
     "declare": (55, 130, 225), "swap": (35, 160, 105), "continue": (215, 165, 40),
 }
+COMPASS = (550, 330, 300, 150)
+"""中央羅盤 (x, y, 寬, 高)；四家的牌河圍在它四周，各在自己面前。"""
 SEATS = {
-    # 座位：頭像位置、牌背（每列張數、大小）、副露起點與換行寬度、牌河起點與每列張數
-    2: dict(avatar=(440, 12), backs=(690, 16, 16, 28, 44), melds=(690, 70, 700), river=(434, 128, 14)),
-    3: dict(avatar=(20, 140), backs=(20, 214, 8, 24, 36), melds=(20, 300, 430), river=(20, 420, 11)),
-    1: dict(avatar=(962, 140), backs=(962, 214, 8, 24, 36), melds=(962, 300, 1390), river=(962, 420, 11)),
+    # 座位：頭像位置、牌背（起點、每列張數、大小）、副露起點與換行寬度、
+    # 牌河（第一列左上角、每列張數、往下或往上長）
+    2: dict(avatar=(380, 10), backs=(600, 14, 16, 28, 44), melds=(1090, 14, 1390),
+            river=(550, 330 - RIVER_H - 3, 8, "up")),
+    3: dict(avatar=(20, 226), backs=(20, 300, 8, 24, 36), melds=(20, 392, 320),
+            river=(336, 330, 6, "down")),
+    1: dict(avatar=(1080, 226), backs=(1080, 300, 8, 24, 36), melds=(1080, 392, 1390),
+            river=(860, 330, 6, "down")),
 }
+MY_RIVER = (550, 330 + 150 + 8, 8, "down")
 
 
 def slow_bot(bot, delay: float = DISCARD_DELAY, sleep=time.sleep, clock=time.monotonic):
@@ -300,11 +307,12 @@ class App:
         if state.declared[seat]:
             self.image(bx, y + 2, art.badge_image("聽", (40, 110, 220)))
 
-    def river(self, x, y, tiles, per_row, gold, highlight_last=False) -> None:
+    def river(self, x, y, per_row, direction, tiles, gold, highlight_last=False) -> None:
+        step = RIVER_H + 3 if direction == "down" else -(RIVER_H + 3)
         for i, tile in enumerate(tiles):
             row, col = divmod(i, per_row)
             last = highlight_last and i == len(tiles) - 1
-            tx, ty = x + col * (RIVER_W + 2), y + row * (RIVER_H + 4)
+            tx, ty = x + col * (RIVER_W + 2), y + row * step
             self.tile(tx, ty, RIVER_W, RIVER_H, tile, gold=tile in gold,
                       outline=LAST_COLOR if last else None)
             if last:
@@ -334,21 +342,37 @@ class App:
             x += w + 1
 
     def draw_center(self, state: GameState) -> None:
-        x, y = 470, 290
-        self.image(x, y, art.panel_image(460, 220))
+        self.draw_info(state)
+        self.draw_compass(state)
+
+    def draw_info(self, state: GameState) -> None:
+        """左上角：局數、莊家、牌牆、金牌、最近的動作。"""
+        x, y = 16, 10
+        self.image(x, y, art.panel_image(340, 200))
         dealer = SEAT_NAMES[state.dealer] + (f"（連 {state.dealer_streak}）" if state.dealer_streak else "")
-        self.text(x + 20, y + 14, f"東風圈　第 {self.hand_number} 局", 17, bold=True, color="#ffe08a")
-        self.text(x + 20, y + 44, f"莊家 {dealer}　·　牌牆剩 {state.drawable} 張", 12, color="#d8efe2")
-        self.text(x + 20, y + 76, "金牌", 13, bold=True, color="#ffd84d")
+        self.text(x + 18, y + 12, f"東風圈　第 {self.hand_number} 局", 16, bold=True, color="#ffe08a")
+        self.text(x + 18, y + 42, f"莊家 {dealer}　·　牌牆剩 {state.drawable} 張", 11, color="#d8efe2")
+        self.text(x + 18, y + 80, "金牌", 13, bold=True, color="#ffd84d")
         for i, tile in enumerate(state.gold_tiles):
-            self.tile(x + 70 + i * 34, y + 68, 32, 50, tile, gold=True)
+            self.tile(x + 66 + i * 34, y + 66, 32, 50, tile, gold=True)
         for i, message in enumerate(self.messages):
-            self.text(x + 20, y + 128 + i * 19, message, 12, color="#cfe9da")
-        self.text(x + 20, y + 198, self.prompt(state), 13, bold=True, color="#ffe08a", anchor="w")
+            self.text(x + 18, y + 128 + i * 20, message, 12, color="#cfe9da")
+
+    def draw_compass(self, state: GameState) -> None:
+        """中央：四邊是各家門風（輪到的人亮起），中間是牌牆剩幾張或剛打出的牌。"""
+        x, y, w, h = COMPASS
+        self.image(x, y, art.panel_image(w, h, alpha=150))
+        cx, cy = x + w / 2, y + h / 2
+        spots = {HUMAN: (cx, y + h - 8, "s"), 1: (x + w - 12, cy, "e"), 2: (cx, y + 8, "n"), 3: (x + 12, cy, "w")}
+        for seat, (sx, sy, anchor) in spots.items():
+            on = self.active(state, seat) or (state.phase == Phase.RESPONSE and state.discard_player == seat)
+            self.text(sx, sy, WIND_NAMES[state.seat_winds[seat]], 22 if on else 15, anchor=anchor, bold=on,
+                      color="#ffd84d" if on else "#9fbfae")
         if state.last_discard is not None and state.phase == Phase.RESPONSE:
-            self.text(x + 420, y + 64, f"{SEAT_NAMES[state.discard_player]}打出", 12, anchor="ne",
-                      color="#ffd0d0")
-            self.tile(x + 370, y + 86, 50, 82, state.last_discard, outline=LAST_COLOR)
+            self.tile(cx - 22, cy - 38, 44, 72, state.last_discard, outline=LAST_COLOR)
+        else:
+            self.text(cx, cy - 12, f"{state.drawable}", 26, anchor="center", bold=True, color="#e8f5ec")
+            self.text(cx, cy + 20, "牌牆剩餘", 10, anchor="center", color="#9fbfae")
 
     def prompt(self, state: GameState) -> str:
         if not self.actions:
@@ -373,17 +397,17 @@ class App:
             row, col = divmod(i, per_row)
             self.back(bx + col * (bw + 2), by + row * (bh + 4), bw, bh)
         mx, my, right = layout["melds"]
-        x, y = self.melds(mx, my, player.melds, MELD_W, MELD_H, right, show_concealed=False, gold=gold)
-        self.flowers(x, y, player.flowers, MELD_W, MELD_H)
-        rx, ry, per_row = layout["river"]
+        _, y = self.melds(mx, my, player.melds, MELD_W, MELD_H, right, show_concealed=False, gold=gold)
+        # 花牌另起一行（接在副露後面會伸進牌河）
+        self.flowers(mx, y + MELD_H + 8 if player.melds else my, player.flowers, MELD_W, MELD_H)
         last = state.phase == Phase.RESPONSE and state.discard_player == seat
-        self.river(rx, ry, player.discards, per_row, gold, highlight_last=last)
+        self.river(*layout["river"], player.discards, gold, highlight_last=last)
 
     def draw_me(self, state: GameState) -> None:
         me = state.players[HUMAN]
         gold = set(state.gold_tiles)
         last = state.phase == Phase.RESPONSE and state.discard_player == HUMAN
-        self.river(434, 524, me.discards, 14, gold, highlight_last=last)
+        self.river(*MY_RIVER, me.discards, gold, highlight_last=last)
         self.plate(state, HUMAN, 20, 664)
         x, y = self.melds(300, 664, me.melds, 40, 66, 900, show_concealed=True, gold=gold)
         self.flowers(x, y, me.flowers, 40, 66)
@@ -413,6 +437,9 @@ class App:
                 (35, 160, 105) if i in self.selected else None
             self.tile(x, y, HAND_W, HAND_H, tile, tags=(f"tile:{i}",), dim=dim, gold=tile in gold,
                       outline=outline)
+        prompt = self.prompt(state)
+        if prompt:
+            self.text(x0, 750, prompt, 13, bold=True, color="#ffe08a", anchor="w")
         self.draw_buttons(actions, swapping)
 
     def draw_buttons(self, actions: list[Action], swapping: bool) -> None:
