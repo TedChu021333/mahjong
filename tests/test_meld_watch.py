@@ -73,3 +73,23 @@ def test_seat_labels_list_claims_and_unread_melds():
     assert labels["left"] == "上家　碰 白　吃 七八九筒　槓 二筒"
     assert labels["top"] == "對家　另有 1 組沒讀到"
     assert labels["right"] is None
+
+
+def test_melds_do_not_disappear_within_a_hand():
+    reader = FakeReader({"left": hits("111p"), "top": [], "right": []})
+    watch = MeldWatch(reader, template_dir=None, background=False)
+    frame = np.zeros((10, 10, 3), np.uint8)
+    watch.request(frame)
+    watch.collect({})
+    assert watch.melds["left"] == (Meld("pung", (P("1p"),) * 3, -1),)
+    # 下一次被擋住（或碰變成槓）只讀到一張：沿用之前讀到的碰
+    reader.result = {"left": hits("1p"), "top": [], "right": []}
+    watch.request(frame)
+    assert not watch.collect({})
+    assert watch.melds["left"] == (Meld("pung", (P("1p"),) * 3, -1),)
+    # 組數一樣或更多就用新的（萬子校正後的結果能更新上去）
+    reader.result = {"left": hits("111p234s"), "top": [], "right": []}
+    watch.request(frame)
+    assert watch.collect({}) and len(watch.melds["left"]) == 2
+    watch.new_hand()
+    assert watch.melds == {}

@@ -112,8 +112,13 @@ class MeldWatch:
             hits = read.get(seat, [])
             tiles = correct_manzu([hit.tile for hit in hits], known.get(seat, []))
             melds, _ = group_melds(tiles)
+            previous = self.melds.get(seat, ())
+            if len(melds) < len(previous):
+                # 副露在一局中不會變少：這次讀少了（被動畫、按鈕擋住，或碰變成槓、疊起來那張讀不到），
+                # 沿用之前的，只補上之前沒有的（10/22 19:34 上家加槓一筒後「碰一筒」就從紀錄消失）
+                melds = list(previous) + [meld for meld in melds if meld not in previous]
             if melds:
-                result[seat] = tuple(melds)
+                result[seat] = tuple(melds[:5])
             self._harvest(seat, hits, tiles, known.get(seat, []))
         changed = result != self.melds
         self.melds = result
