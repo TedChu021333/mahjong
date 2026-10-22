@@ -80,6 +80,8 @@ class RiverWatch:
         self.melds = {seat: 0 for seat in SEATS}
         """推算的各家副露數（自己的由手牌張數得知，這裡不算）。"""
         self.exposed: dict[str, list[int]] = {seat: [] for seat in SEATS}
+        self.claims: dict[str, list[tuple[int | None, str | None]]] = {seat: [] for seat in SEATS}
+        """推算出的各家吃碰：(被拿走的牌, "chow"／"pung"／None 分不出)，給讀副露時引導對家的吃用。"""
         """各家副露裡已知、不在牌河的牌：推算出的碰（另外兩張）、自己吃碰用掉的手牌。"""
         self._taken_from: tuple[str, int, int | None] | None = None
         """最新一張被拿走的牌是誰打的、當時自己的副露數、那張牌，等著看誰接著出牌。"""
@@ -113,6 +115,7 @@ class RiverWatch:
         self._turn_hand = None
         self.melds = {seat: 0 for seat in SEATS}
         self.exposed = {seat: [] for seat in SEATS}
+        self.claims = {seat: [] for seat in SEATS}
         self._taken_from = None
         self._last_circle = None
         self._credited = None
@@ -163,7 +166,7 @@ class RiverWatch:
                     self._banner = self._taken_from = None
                     tile = event.tile
                     self._credit(event.seat, claimer,
-                                 (tile, tile) if kind == "pung" and tile is not None else ())
+                                 (tile, tile) if kind == "pung" and tile is not None else (), tile, kind)
                     continue
                 self._taken_from = (event.seat, self._my_melds, event.tile)
             elif event.kind == "restored":
@@ -174,6 +177,8 @@ class RiverWatch:
                     self.melds[claimer] -= 1  # 其實只是被蓋住
                     for tile in tiles:
                         self.exposed[claimer].remove(tile)
+                    if self.claims[claimer]:
+                        self.claims[claimer].pop()
                     self._credited = None
         unseen = self._claimed_before_seen()
         if unseen is not None:
@@ -193,7 +198,7 @@ class RiverWatch:
         claimer, kind, _ = banner
         self._own_pending = self._banner = None
         self._own_seen_at = self._frame
-        self._credit("me", claimer, (tile, tile) if kind == "pung" and tile is not None else ())
+        self._credit("me", claimer, (tile, tile) if kind == "pung" and tile is not None else (), tile, kind)
         if tile is not None:
             self.unseen_claimed.append(tile)
         return RiverEvent("claimed_unseen", "me", tile, (0, 0, 0, 0))
@@ -208,10 +213,13 @@ class RiverWatch:
                 return  # 自己吃碰的
             claimer = "left"  # 自己沒吃碰卻輪到自己：是上家吃碰
         tile = taken[2]
-        tiles = (tile, tile) if tile is not None and claimer != NEXT_SEAT[taken[0]] else ()
-        self._credit(taken[0], claimer, tiles)
+        chow_possible = claimer == NEXT_SEAT[taken[0]]
+        tiles = (tile, tile) if tile is not None and not chow_possible else ()
+        self._credit(taken[0], claimer, tiles, tile, None if chow_possible else "pung")
 
-    def _credit(self, source: str, claimer: str, tiles: tuple[int, ...]) -> None:
+    def _credit(self, source: str, claimer: str, tiles: tuple[int, ...], tile: int | None = None,
+                kind: str | None = None) -> None:
+        self.claims[claimer].append((tile, kind))
         self.melds[claimer] += 1
         self.exposed[claimer] += tiles
         self._credited = (source, claimer, tiles)
@@ -239,9 +247,26 @@ class RiverWatch:
                 result[RIVER_SEAT[seat]] = min(max(count, len(read.get(seat, ()))), 5)
         return tuple(result)
 
+    def chow_hints(self) -> dict[str, list[int]]:
+        """可能是吃、還沒讀到的副露：各家被吃的那張數牌（讀到的副露裡已經有包含它的吃或碰就不算）。"""
+        read = self.meld_watch.melds if self.meld_watch is not None else {}
+        hints: dict[str, list[int]] = {}
+        for seat, claims in self.claims.items():
+            if seat == "me":
+                continue
+            covered = [tile for meld in read.get(seat, ()) for tile in meld.tiles]
+            for tile, kind in claims:
+                if tile is None or tile >= 27 or kind == "pung":
+                    continue
+                if tile in covered:
+                    covered.remove(tile)
+                    continue
+                hints.setdefault(seat, []).append(tile)
+        return hints
+
     def request_melds(self, frame: np.ndarray) -> bool:
-        """在背景讀對手副露（沒有 meld_watch 或上一次還沒讀完就不讀）。"""
-        return self.meld_watch is not None and self.meld_watch.request(frame)
+        """在背景讀對手副露（沒有 meld_watch 或上一次還沒讀完就不讀）；順便帶上可能是吃的那張牌引導搜尋。"""
+        return self.meld_watch is not None and self.meld_watch.request(frame, self.chow_hints())
 
     def collect_melds(self) -> bool:
         """背景讀完的副露套用進來（用牌河推算的碰校正萬子）；有變化回傳 True。"""

@@ -93,3 +93,32 @@ def test_melds_do_not_disappear_within_a_hand():
     assert watch.collect({}) and len(watch.melds["left"]) == 2
     watch.new_hand()
     assert watch.melds == {}
+
+
+def test_chow_hint_guides_the_search_and_harvests_its_tiles(tmp_path):
+    saved = []
+
+    class GuidedReader(FakeReader):
+        def guided_chow(self, image, seat, tile):
+            assert (seat, tile) == ("top", P("4p"))
+            return [MeldTile(t, 0.5, 1300 + 50 * i, np.zeros((45, 52, 3), np.uint8))
+                    for i, t in enumerate(parse("645p"))]
+
+    watch = MeldWatch(GuidedReader({"left": [], "top": [], "right": []}), template_dir=tmp_path,
+                      save=lambda path, image: saved.append(path), background=False)
+    watch.request(np.zeros((10, 10, 3), np.uint8), {"top": [P("4p")]})
+    assert watch.collect({})
+    assert watch.melds["top"] == (Meld("chow", tuple(parse("456p")), -1),)
+    assert len(saved) == 3 and {path.parent.name for path in saved} == {"4p", "5p", "6p"}
+
+
+def test_guided_chow_is_ignored_where_a_meld_was_already_read():
+    class GuidedReader(FakeReader):
+        def guided_chow(self, image, seat, tile):
+            return [MeldTile(t, 0.5, 30 * i, None) for i, t in enumerate(parse("345s"))]
+
+    watch = MeldWatch(GuidedReader({"left": hits("777z"), "top": [], "right": []}), template_dir=None,
+                      background=False)
+    watch.request(np.zeros((10, 10, 3), np.uint8), {"left": [P("5s")]})
+    watch.collect({})
+    assert watch.melds["left"] == (Meld("pung", (P("7z"),) * 3, -1),)

@@ -64,10 +64,12 @@ class MeldWatch:
         """各家讀到、能完整成組的副露（萬子已校正）。"""
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
-        self._pending: tuple[int, dict[str, list[MeldTile]]] | None = None
+        self._pending: tuple[int, dict[str, list[MeldTile]], list[tuple[str, list[MeldTile]]]] | None = None
+        """背景讀完的 (換局編號, 讀到的牌, 引導搜尋找到的吃)。"""
         self._generation = 0
         """換局時加一：換局前送出的讀取結果作廢。"""
         self.saved_templates = 0
+
         self.reads = 0
 
     def new_hand(self) -> None:
@@ -79,8 +81,10 @@ class MeldWatch:
     def busy(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def request(self, frame: np.ndarray) -> bool:
-        """開始讀這一幀（上一次還沒讀完就不讀）。"""
+    def request(self, frame: np.ndarray, chow_hints: dict[str, list[int]] | None = None) -> bool:
+        """開始讀這一幀（上一次還沒讀完就不讀）。chow_hints：各家可能吃了的那張牌（牌河推算、還沒讀到），
+        讀不到時用 MeldReader.guided_chow 引導搜尋（對家倒著的吃單張分數只有 0.5 左右）。"""
+        hints = {seat: list(tiles) for seat, tiles in (chow_hints or {}).items()}
         if self.busy():
             return False
         generation = self._generation
@@ -88,9 +92,21 @@ class MeldWatch:
 
         def work() -> None:
             read = self.reader.read(image)
+            found_chows: list[tuple[str, list[MeldTile]]] = []
+            guided = getattr(self.reader, "guided_chow", None)
+            for seat, tiles in hints.items():
+                for tile in tiles:
+                    found = guided(image, seat, tile) if guided is not None else None
+                    current = read.get(seat, [])
+                    grouped = _grouped_hits(current)
+                    if found and not _overlaps(found, grouped):
+                        # 沒成組的單張（多半是讀錯）在同一位置的換成引導搜尋找到的
+                        kept = [hit for hit in current if hit in grouped or not _overlaps([hit], found)]
+                        read[seat] = kept + found
+                        found_chows.append((seat, found))
             with self._lock:
                 if generation == self._generation:
-                    self._pending = (generation, read)
+                    self._pending = (generation, read, found_chows)
 
         if self.background:
             self._thread = threading.Thread(target=work, daemon=True)
@@ -109,7 +125,7 @@ class MeldWatch:
         read = pending[1]
         result: dict[str, tuple[Meld, ...]] = {}
         for seat in SEATS:
-            hits = read.get(seat, [])
+            hits = sorted(read.get(seat, []), key=lambda hit: hit.position, reverse=seat != "left")
             tiles = correct_manzu([hit.tile for hit in hits], known.get(seat, []))
             melds, _ = group_melds(tiles)
             previous = self.melds.get(seat, ())
@@ -120,9 +136,23 @@ class MeldWatch:
             if melds:
                 result[seat] = tuple(melds[:5])
             self._harvest(seat, hits, tiles, known.get(seat, []))
+        self._harvest_guided(pending[2])
         changed = result != self.melds
         self.melds = result
         return changed
+
+    def _harvest_guided(self, guided: list[tuple[str, list[MeldTile]]]) -> None:
+        """引導搜尋找到的吃（標註是確定的：包含被吃的那張、三張連號）：三張切圖存成專用模板。"""
+        if self.template_dir is None:
+            return
+        for seat, hits in guided:
+            for number, hit in enumerate(hits):
+                folder = self.template_dir / seat / tile_code(hit.tile)
+                existing = len(list(folder.glob("*.png"))) if folder.exists() else 0
+                if hit.crop is None or existing >= MAX_TEMPLATES:
+                    continue
+                self.save(folder / f"{time.strftime('%Y%m%d_%H%M%S')}_c{number}.png", hit.crop)
+                self.saved_templates += 1
 
     def _harvest(self, seat: str, hits: list[MeldTile], tiles: list[int], known: list[int]) -> None:
         """讀到（校正後）的碰和牌河推算的對得上：那幾張切圖存成專用模板（標註用校正後的牌）。"""
@@ -141,6 +171,18 @@ class MeldWatch:
                 self.save(folder / f"{time.strftime('%Y%m%d_%H%M%S')}_{number}.png", hit.crop)
                 existing += 1
                 self.saved_templates += 1
+
+
+def _grouped_hits(hits: list[MeldTile]) -> list[MeldTile]:
+    """能成組（碰、吃、槓）的那些牌（依位置排序後分組）。"""
+    ordered = sorted(hits, key=lambda hit: hit.position)
+    spans = meld_spans([hit.tile for hit in ordered])
+    return [hit for _, start, length in spans for hit in ordered[start:start + length]]
+
+
+def _overlaps(found: list[MeldTile], hits: list[MeldTile], gap: int = 15) -> bool:
+    """引導搜尋找到的位置和已經讀到的牌重疊（那裡已經是別的副露）。"""
+    return any(abs(a.position - b.position) < gap for a in found for b in hits)
 
 
 SUIT_NAMES = "萬筒條"

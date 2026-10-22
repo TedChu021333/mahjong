@@ -364,3 +364,20 @@ def test_own_discard_claimed_before_the_river_saw_it_is_credited_to_the_claimer(
     assert watch.overdue_own_discard() == (False, None)  # 已經知道去哪了，不必存「沒進牌河」截圖
     watch.new_hand()
     assert watch.discards()[0] == ()
+
+
+def test_chow_hints_list_claimed_tiles_not_yet_read():
+    from types import SimpleNamespace
+
+    from game.rules import Meld
+
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    watch._credit("right", "top", (), P("4p"), None)       # 下家的四筒被對家拿走：可能是吃
+    watch._credit("me", "left", (P("7z"), P("7z")), P("7z"), "pung")  # 碰不用引導
+    assert watch.chow_hints() == {"top": [P("4p")]}
+    watch.meld_watch = SimpleNamespace(melds={"top": (Meld("chow", tuple(parse("456p")), -1),)})
+    assert watch.chow_hints() == {}
+    watch.meld_watch = None
+    watch.new_hand()
+    assert watch.chow_hints() == {}

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, field
+from itertools import permutations
 from pathlib import Path
 
 import cv2
@@ -44,6 +45,12 @@ SEARCH_TILES = 8
 """先只掃副露那一端這麼多張的範圍；讀到最後一格附近才掃整排。"""
 SIDE_PITCH = 32
 TOP_PITCH = 54
+GUIDED_PITCHES = {"side": range(24, 39, 2), "top": range(48, 63, 2)}
+"""引導搜尋吃時，三張牌之間可能的間距。"""
+GUIDED_MIN_SCORE = 0.42
+"""引導搜尋：三張平均分數到這個以上才採用（單張讀不到的對家倒著的吃，19:34 四五六筒單張約 0.5）。"""
+GUIDED_MARGIN = 0.02
+"""最好的吃要比其他可能的吃（不同的三連號）平均高這麼多，分不出來就不採用。"""
 
 
 @dataclass(frozen=True)
@@ -226,6 +233,48 @@ class MeldReader:
             scan = Scan(image[top:bottom, left:right], self.top, axis=0)
             hits = _peaks(scan.best, scan.label, TOP_MIN_SCORE, TOP_SPACING, left)
         return _refine_manzu(scan, hits, start, "top")[::-1]
+
+    def guided_chow(self, image: np.ndarray, seat: str, tile: int) -> list[MeldTile] | None:
+        """已知這家吃了 tile（牌河看到被拿走的那張）：包含 tile 的三連號、三張任意順序、不同間距都比，
+        整組最像的位置與牌（分數不夠或分不出是哪一組吃時 None）。位置的單位同 read()（直條的列、那一列的欄）。"""
+        suit, rank = divmod(tile, 9)
+        if tile >= 27:
+            return None
+        runs = [tuple(suit * 9 + r for r in range(start, start + 3))
+                for start in range(rank - 2, rank + 1) if 0 <= start and start + 2 <= 8]
+        if seat == "top":
+            left, top, right, bottom = TOP_MELD_ROW
+            area, templates, axis, offset = image[top:bottom, left:right], self.top, 0, left
+            pitches = GUIDED_PITCHES["top"]
+        else:
+            area, templates, axis, offset = straighten(image, seat), self.side[seat], 1, 0
+            pitches = GUIDED_PITCHES["side"]
+        scans = {t: Scan(area, [item for item in templates if item[0] == t], axis)
+                 for t in {t for run in runs for t in run}}
+        per_run: dict[tuple[int, ...], tuple[float, list[MeldTile]]] = {}
+        for run in runs:
+            for order in permutations(run):
+                profiles = [scans[t].best for t in order]
+                length = min(len(profile) for profile in profiles)
+                for pitch in pitches:
+                    span = length - 2 * pitch
+                    if span <= 0:
+                        continue
+                    total = profiles[0][:span] + profiles[1][pitch:pitch + span] + profiles[2][2 * pitch:2 * pitch + span]
+                    start = int(np.argmax(total))
+                    average = float(total[start]) / 3
+                    if average > per_run.get(run, (-1.0, []))[0]:
+                        hits = [MeldTile(t, float(scans[t].best[start + i * pitch]), start + i * pitch + offset,
+                                         scans[t].crop(start + i * pitch)) for i, t in enumerate(order)]
+                        per_run[run] = (average, hits)
+        if not per_run:
+            return None
+        ranked = sorted(per_run.values(), key=lambda item: -item[0])
+        best_average, hits = ranked[0]
+        runner_up = ranked[1][0] if len(ranked) > 1 else -1.0
+        if best_average < GUIDED_MIN_SCORE or best_average - runner_up < GUIDED_MARGIN:
+            return None
+        return hits
 
     def read(self, image: np.ndarray) -> dict[str, list[MeldTile]]:
         """三家正面朝上的牌，依擺放順序（從副露起點那端開始）。"""
