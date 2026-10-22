@@ -76,6 +76,43 @@ def fix_confusable_manzu(tiles: list[int]) -> list[int]:
     return result
 
 
+def fix_odd_middle(tiles: list[int]) -> list[int]:
+    """連續三張同花色的數牌、兩張一樣、另一張只差 1～2（「九七九條」）：吃不可能有重複的牌，當成三張一樣的碰。
+    槓的第四張疊在中間那張上，那張最常讀錯（21:04 對家九條槓讀成九條七條九條、整組被丟掉）；
+    倒著、側躺的七八九條、一六八萬也常互相讀錯。"""
+    result = list(tiles)
+    index = 0
+    while index + 3 <= len(result):
+        window = result[index:index + 3]
+        counts = Counter(window)
+        if len(counts) == 2 and all(tile < 27 for tile in window):
+            (major, major_count), (minor, _) = counts.most_common()
+            if major_count == 2 and major // 9 == minor // 9 and abs(major - minor) <= 2 and not _is_run(window):
+                result[index:index + 3] = [major] * 3
+                index += 3
+                continue
+        index += 1
+    return result
+
+
+def fill_gaps(hits: list[MeldTile]) -> list[MeldTile]:
+    """兩張一樣的牌中間剛好空出一張牌的位置（另一張分數不夠沒讀到），補上中間那張（21:04 下家條子碰只讀到兩張）。
+    一張牌的間距用相鄰讀到的牌估。"""
+    if len(hits) < 2:
+        return list(hits)
+    ordered = sorted(hits, key=lambda hit: hit.position)
+    gaps = [b.position - a.position for a, b in zip(ordered, ordered[1:])]
+    pitch = sorted(gaps)[len(gaps) // 2]
+    if len(gaps) < 3:  # 讀到的太少，間距估不準：用比較小的那個
+        pitch = min(gaps)
+    filled = [ordered[0]]
+    for a, b in zip(ordered, ordered[1:]):
+        if a.tile == b.tile and 1.6 * pitch <= b.position - a.position <= 2.4 * pitch:
+            filled.append(MeldTile(a.tile, 0.0, (a.position + b.position) // 2))
+        filled.append(b)
+    return filled
+
+
 def describe(melds: dict[str, tuple[Meld, ...]]) -> str:
     parts = [f"{SEAT_NAMES[seat]} " + " ".join("".join(tile_name(t) for t in meld.tiles) for meld in group)
              for seat in SEATS if (group := melds.get(seat))]
@@ -156,8 +193,9 @@ class MeldWatch:
         read = pending[1]
         result: dict[str, tuple[Meld, ...]] = {}
         for seat in SEATS:
-            hits = sorted(read.get(seat, []), key=lambda hit: hit.position, reverse=seat != "left")
-            tiles = fix_confusable_manzu(correct_manzu([hit.tile for hit in hits], known.get(seat, [])))
+            hits = sorted(fill_gaps(read.get(seat, [])), key=lambda hit: hit.position, reverse=seat != "left")
+            tiles = correct_manzu([hit.tile for hit in hits], known.get(seat, []))
+            tiles = fix_odd_middle(fix_confusable_manzu(tiles))
             melds, _ = group_melds(tiles)
             previous = self.melds.get(seat, ())
             if len(melds) < len(previous):
@@ -208,8 +246,10 @@ class MeldWatch:
             folder = self.template_dir / seat / tile_code(tile)
             existing = len(list(folder.glob("*.png"))) if folder.exists() else 0
             for number, hit in enumerate(hits[start:start + length]):
-                if hit.crop is None or existing >= MAX_TEMPLATES:
+                if existing >= MAX_TEMPLATES:
                     break
+                if hit.crop is None:  # fill_gaps 補上的那張沒有切圖
+                    continue
                 self.save(folder / f"{time.strftime('%Y%m%d_%H%M%S')}_{number}.png", hit.crop)
                 existing += 1
                 self.saved_templates += 1

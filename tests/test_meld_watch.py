@@ -170,3 +170,26 @@ def test_same_count_with_different_content_keeps_both_up_to_the_inferred_count()
     reader.result = {"left": [], "top": hits("666m"), "right": []}
     watch.request(frame); watch.collect({}, {"top": 1})
     assert watch.melds["top"] == (Meld("pung", (P("6m"),) * 3, -1),)
+
+
+def test_odd_middle_tile_of_a_pung_or_kong_is_fixed():
+    from hint.meld_watch import fix_odd_middle
+
+    assert fix_odd_middle(parse("979s")) == parse("999s")      # 21:04 對家九條槓
+    assert fix_odd_middle(parse("998s")) == parse("999s")
+    assert fix_odd_middle(parse("789s")) == parse("789s")      # 吃不動
+    assert fix_odd_middle(parse("959s")) == parse("959s")      # 差太多
+    assert fix_odd_middle(parse("9s99m")) == parse("9s99m")    # 不同花色
+    assert fix_odd_middle(parse("776z")) == parse("776z")      # 字牌不猜
+
+
+def test_gap_between_two_same_tiles_is_filled():
+    from hint.meld_watch import fill_gaps
+
+    # 21:04 下家：五四六萬、七條、（沒讀到）、七條、九萬九萬九萬
+    found = [MeldTile(t, 0.8, y) for t, y in zip(parse("546m77s999m"), (544, 516, 488, 459, 406, 370, 338, 307))]
+    filled = fill_gaps(found)
+    assert sorted(h.tile for h in filled) == sorted(parse("546m777s999m"))
+    middle = [h for h in filled if h.score == 0.0]
+    assert len(middle) == 1 and middle[0].position == (459 + 406) // 2
+    assert fill_gaps(found[:3]) == sorted(found[:3], key=lambda h: h.position)  # 沒有空隙不補
