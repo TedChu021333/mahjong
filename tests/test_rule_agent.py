@@ -437,12 +437,10 @@ def test_declare_only_on_the_first_discard_by_default():
     state = GameState([0], players, phase=Phase.DISCARD)
     assert declare_is_worth(state, 0, P("2z"))                 # 第一次打牌：地聽 4 台
     players[0].discards = parse("9s")
-    players[1].discards = parse("1z1z")                         # 單吊東只剩 1 張：不按
     assert not declare_is_worth(state, 0, P("2z"))
     assert declare_is_worth(state, 0, P("2z"), min_live=0)     # 0 = 一律宣告（舊做法）
     action = choose_rule_action_for_player(state, 0, Random(1))
-    # 改打東、單吊南（還剩 3 張）：10/22 起聽一種剩 3 張以上就按
-    assert action.kind in (ActionType.DISCARD, ActionType.DECLARE) and action.tile in parse("12z")
+    assert action.kind == ActionType.DISCARD and action.tile in parse("12z")
 
 
 def test_live_swap_uses_enough_samples_to_find_the_best_three():

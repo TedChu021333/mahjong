@@ -456,10 +456,10 @@ def declare_is_worth(state: GameState, player: int, tile: int,
 
 
 def waits_worth_declaring(state: GameState, player: int, tile: int) -> bool:
-    """打出 tile 後聽牌時，照聽牌型態決定要不要宣告（使用者 10/20 的規則，10/22 改）：聽 DECLARE_WIDE_KINDS 種以上一定按；
-    聽兩種、看不到的還剩 DECLARE_TWO_KINDS_LIVE 張以上就按；只聽一種、剩 DECLARE_SINGLE_LIVE 張以上就按。
-    10/22 以前只聽一種時「摸某張能改成聽更多種就先不按」：10/20～10/22 沒按聽的聽牌局 163 局，之後只有 4% 真的改成
-    聽更多種、3% 拆聽防守，其他都聽同一張打到底、白少 1 台；按聽後放槍也沒有比較多（11～13% 對 15%）。使用者選 A。"""
+    """打出 tile 後聽牌時，照聽牌型態決定要不要宣告（使用者 10/20 的規則）：聽 DECLARE_WIDE_KINDS 種以上一定按；
+    聽兩種、看不到的還剩 DECLARE_TWO_KINDS_LIVE 張以上就按；只聽一種時，若摸某張牌能改成聽更多種就先不按
+    （保留換聽的機會），變不了的話剩 DECLARE_SINGLE_LIVE 張以上才按。
+    10/22 曾改成「只聽一種剩 3 張以上就按」（沒按聽的局之後只有 4% 真的改成聽更多種），同日使用者要求改回。"""
     me = state.players[player]
     after = list(me.hand)
     after[tile] -= 1
@@ -472,7 +472,26 @@ def waits_worth_declaring(state: GameState, player: int, tile: int) -> bool:
         return True
     if len(waits) == 2:
         return live >= DECLARE_TWO_KINDS_LIVE
-    return live >= DECLARE_SINGLE_LIVE
+    return live >= DECLARE_SINGLE_LIVE and not wait_can_widen(after, me.open_melds, visible)
+
+
+def wait_can_widen(hand: list[int], open_melds: int, visible: list[int]) -> bool:
+    """聽牌的手（16 張那種）摸進某張還看得到的牌、再打一張後，能不能聽更多種牌。約 0.1 秒。"""
+    kinds = len(winning_tiles(hand, open_melds))
+    for draw in range(len(hand)):
+        if visible[draw] >= 4 or hand[draw] >= 4:
+            continue
+        drawn = list(hand)
+        drawn[draw] += 1
+        for discard, count in enumerate(drawn):
+            if not count or discard == draw:
+                continue
+            drawn[discard] -= 1
+            wider = len(winning_tiles(drawn, open_melds)) > kinds
+            drawn[discard] += 1
+            if wider:
+                return True
+    return False
 
 
 CLAIM_MODE = "improve"
