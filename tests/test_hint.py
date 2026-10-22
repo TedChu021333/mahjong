@@ -777,3 +777,56 @@ def test_esc_stops_at_the_end_of_the_round():
     # 小結算照常按繼續；看到大結算（整圈結束）就停，不按
     assert clicks == [small.center]
     assert seen == [0, 1, 2, 3, 4] and "這圈打完了" in lines[-1]
+
+
+def test_meld_screenshots_after_claims_and_while_melds_are_on_the_table(monkeypatch):
+    import hint.__main__ as hint_main
+    from perception.river_tracker import RiverEvent
+
+    now = [0.0]
+    hands = [Observation(T("11223789m99m4p56779s"), None, None, ()) for _ in range(40)]
+
+    def frames():
+        for i, observation in enumerate(hands):
+            now[0] = i * 0.35
+            yield str(i), observation
+
+    class FakeRivers:
+        my_discards = 0
+        my_pungs = []
+        claimed = False
+
+        def update(self, frame, observation):
+            if frame is hands[3]:
+                self.claimed = True
+                return [RiverEvent("claimed", "left", parse("7s")[0], (0, 0, 1, 1))]
+            return []
+
+        def discards(self):
+            return ((), (), (), ())
+
+        def meld_counts(self):
+            return (0, 0, 0, 1) if self.claimed else (0, 0, 0, 0)
+
+        def exposed_tiles(self):
+            return ((), (), (), ())
+
+        def declared_safe(self):
+            return ((), (), (), ())
+
+        def has_discards(self):
+            return False
+
+        def total_discards(self):
+            return 0
+
+    monkeypatch.setattr(hint_main, "decide", lambda observation: None)
+    saved = []
+    hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: frame,
+                  clock=lambda: now[0], rivers=FakeRivers(), show=lambda advice: None,
+                  save_result=lambda frame, prefix="": saved.append((now[0], prefix)) or prefix,
+                  log=lambda *args, **kwargs: None)
+    shots = [t for t, prefix in saved if prefix == "副露_"]
+    # 1.05 秒被吃碰：1.5 秒後（2.55 起第一幀）存一張；之後場上有副露，每 8 秒一張
+    assert shots[0] >= 1.05 + hint_main.MELD_SHOT_DELAY and len(shots) == 2
+    assert shots[1] - shots[0] >= hint_main.MELD_SHOT_INTERVAL

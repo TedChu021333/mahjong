@@ -51,8 +51,8 @@ def test_guard_declares_by_wait_shape():
 
     policy = NetworkPolicy.__new__(NetworkPolicy)
     policy.last_note = None
-    # 嵌張只聽二條、摸四條就能改成聽兩種：網路想按也先不按
-    state = state_with("123456789m12399p13s1z", p0="9s")
+    # 嵌張只聽二條、看不到的只剩 2 張：網路想按也先不按（10/22 起能不能改聽不再考慮，只看剩幾張）
+    state = state_with("123456789m12399p13s1z", p0="9s", p1="2s2s")
     declare = Action(ActionType.DECLARE, tile=P("1z"))
     action = policy._guarded(state, 0, declare, [declare], Random(0))
     assert action == Action(ActionType.DISCARD, tile=P("1z"))
@@ -77,13 +77,14 @@ def test_declare_rule_follows_the_wait_shape():
     assert worth("123456789m2345678s1z")           # 聽二五八條三種
     assert worth("123456789m12345p55s1z")          # 聽三六筒兩種、剩 8 張
     assert not worth("123456789m12345p55s1z", p1="3p3p6p6p")  # 只剩 4 張
-    assert not worth("123456789m12399p13s1z")      # 嵌張、摸四條能改成兩面
+    assert worth("123456789m12399p13s1z")          # 嵌張只聽二條、剩 4 張：按（10/22 起不管能不能改聽）
+    assert not worth("123456789m12399p13s1z", p1="2s2s")  # 只剩 2 張：不按
 
 
 def test_first_discard_needs_no_counted_discards_either():
     from agent.rule_agent import declare_is_worth
 
-    state = state_with("123456789m12399p13s1z")   # 嵌張、還能改善：平常不按
+    state = state_with("123456789m12399p13s1z", p1="2s2s")   # 嵌張只剩 2 張：平常不按
     assert declare_is_worth(state, 0, P("1z"))      # 但第一次打牌就聽（地聽）照按
     state.min_discards = 3  # 牌河漏記，但提示迴圈數到自己已經打過
     assert not declare_is_worth(state, 0, P("1z"))

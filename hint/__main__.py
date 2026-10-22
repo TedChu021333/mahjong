@@ -62,9 +62,15 @@ RIVER_INTERVAL = 0.3
 """牌河追蹤的門檻以幀數計、依約 0.3 秒一幀調校；擷取變快後牌河仍照這個間隔更新。"""
 UNREADABLE_AFTER = 6.0
 OWN_TAKEN_LIMIT = 20
+"""自己的牌被判定吃碰拿走時存畫面，每次執行最多幾張（查是不是誤判）。"""
 OWN_MISSING_LIMIT = 20
 """自己打出的牌約 5 秒牌河都沒看到時存畫面，每次執行最多幾張（10/21 約 5.5% 原因不明）。"""
-"""自己的牌被判定吃碰拿走時存畫面，每次執行最多幾張（查是不是誤判）。"""
+MELD_SHOT_LIMIT = 150
+"""收集對手副露的截圖（10/22 起，改善 perception.meld_reader 的槓與側躺的萬子）：每次執行最多幾張。"""
+MELD_SHOT_DELAY = 1.5
+"""有人吃碰後等副露擺好再存。"""
+MELD_SHOT_INTERVAL = 8.0
+"""場上有人有副露時，每隔幾秒存一張（加槓、暗槓不一定有吃碰事件）。"""
 TABLE_INTERVAL = 1.0
 """別人的回合時放槍表最多幾秒重算一次（每次約 0.1 秒）。"""
 END_SHOT_DELAYS = (1.0, 2.0, 4.0)
@@ -217,6 +223,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     stuck_shots_left, stuck_shot_at = 0, float("-inf")
     hands = HandBook()
     own_taken_saved = 0
+    meld_shots, meld_shot_due, meld_shot_at = 0, None, clock()
     own_missing_saved = 0
     meld_check = MeldCheck()
     meld_rejected = None
@@ -325,6 +332,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 for event in events:
                     name = tile_name(event.tile) if event.tile is not None else "?"
                     log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
+                    if event.kind in ("claimed", "claimed_unseen"):
+                        meld_shot_due = clock() + MELD_SHOT_DELAY
                     if event.seat == "me" and event.kind == "claimed" and own_taken_saved < OWN_TAKEN_LIMIT:
                         # 10/20 18:36～19:34 自己的牌被判定拿走 32 次、只還原 6 次，太多：存畫面查是真的吃碰還是被蓋住
                         own_taken_saved += 1
@@ -345,6 +354,13 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     name = tile_name(tile) if tile is not None else "?"
                     log(f"[{stamp}] 自己打的 {name} 約 5 秒牌河都沒看到，畫面存到 "
                         f"{save_result(frame, '自己的牌沒進牌河_')}", echo=False)
+                counts = getattr(rivers, "meld_counts", None)
+                has_melds = counts is not None and any(counts())
+                due = meld_shot_due is not None and clock() >= meld_shot_due
+                if meld_shots < MELD_SHOT_LIMIT and (due or (has_melds and clock() - meld_shot_at >= MELD_SHOT_INTERVAL)):
+                    meld_shots += 1
+                    meld_shot_due, meld_shot_at = None, clock()
+                    log(f"[{stamp}] 副露截圖存到 {save_result(frame, '副露_')}", echo=False)
             if rivers is not None and observation is not None:
                 observation = replace(observation, discards=rivers.discards(),
                                       melds=rivers.meld_counts(),
