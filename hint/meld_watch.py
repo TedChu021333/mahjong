@@ -25,6 +25,8 @@ from perception.meld_reader import MELD_TEMPLATE_DIR, MeldReader, MeldTile, _is_
 SEATS = ("left", "top", "right")
 SEAT_NAMES = {"left": "上家", "top": "對家", "right": "下家"}
 MAX_TEMPLATES = 20
+HARVEST_MIN_SCORE = 0.5
+"""引導搜尋找到的牌，單張分數到這個以上才收成模板。"""
 """每座位每種牌最多收集幾張專用模板。"""
 
 
@@ -144,7 +146,7 @@ class MeldWatch:
             work()
         return True
 
-    def collect(self, known: dict[str, list[int]]) -> bool:
+    def collect(self, known: dict[str, list[int]], counts: dict[str, int] | None = None) -> bool:
         """讀完的結果套用進 self.melds（known：牌河推算的各家副露裡的牌）；有變化回傳 True。"""
         with self._lock:
             pending, self._pending = self._pending, None
@@ -162,6 +164,11 @@ class MeldWatch:
                 # 副露在一局中不會變少：這次讀少了（被動畫、按鈕擋住，或碰變成槓、疊起來那張讀不到），
                 # 沿用之前的，只補上之前沒有的（10/22 19:34 上家加槓一筒後「碰一筒」就從紀錄消失）
                 melds = list(previous) + [meld for meld in melds if meld not in previous]
+            elif melds != list(previous) and previous:
+                # 組數一樣、內容不同：可能是校正了之前讀錯的，也可能是之前那組這次被擋住、又多讀到一組新的
+                # （20:35 對家「一二三萬」被下一次的「一條×3」換掉）。新的優先、再補上之前的，組數不超過牌河推算的
+                limit = max(len(melds), (counts or {}).get(seat, len(melds)))
+                melds = (melds + [meld for meld in previous if meld not in melds])[:limit]
             if melds:
                 result[seat] = tuple(melds[:5])
             self._harvest(seat, hits, tiles, known.get(seat, []))
@@ -171,11 +178,17 @@ class MeldWatch:
         return changed
 
     def _harvest_guided(self, guided: list[tuple[str, list[MeldTile]]]) -> None:
-        """引導搜尋找到的吃（標註是確定的：包含被吃的那張、三張連號）：三張切圖存成專用模板。"""
+        """引導搜尋找到的副露：切圖存成專用模板。哪三張是確定的（包含被吃的那張、三張連號），但吃的三張「誰是誰」
+        靠三種排列的分數比，萬子數字倒著或側躺時很小、分數很接近，10/22 對家一二三萬就把一萬存成二萬、二萬存成三萬
+        （錯的模板會讓對家越讀越錯）——吃的萬子不收；碰三張一樣、筒條的形狀差很多，照收。"""
         if self.template_dir is None:
             return
         for seat, hits in guided:
+            chow = len({hit.tile for hit in hits}) > 1
             for number, hit in enumerate(hits):
+                # 整組平均夠高、個別一張卻可能被立著的手牌或動畫蓋住（10/22 上家六條、七條存成半張藍色）
+                if (chow and hit.tile < 9) or hit.score < HARVEST_MIN_SCORE:
+                    continue
                 folder = self.template_dir / seat / tile_code(hit.tile)
                 existing = len(list(folder.glob("*.png"))) if folder.exists() else 0
                 if hit.crop is None or existing >= MAX_TEMPLATES:

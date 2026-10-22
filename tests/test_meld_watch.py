@@ -101,15 +101,16 @@ def test_chow_hint_guides_the_search_and_harvests_its_tiles(tmp_path):
     class GuidedReader(FakeReader):
         def guided_meld(self, image, seat, tile, kinds):
             assert (seat, tile, kinds) == ("top", P("4p"), ("chow",))
-            return [MeldTile(t, 0.5, 1300 + 50 * i, np.zeros((45, 52, 3), np.uint8))
-                    for i, t in enumerate(parse("645p"))]
+            return [MeldTile(t, score, 1300 + 50 * i, np.zeros((45, 52, 3), np.uint8))
+                    for i, (t, score) in enumerate(zip(parse("645p"), (0.6, 0.55, 0.3)))]
 
     watch = MeldWatch(GuidedReader({"left": [], "top": [], "right": []}), template_dir=tmp_path,
                       save=lambda path, image: saved.append(path), background=False)
     watch.request(np.zeros((10, 10, 3), np.uint8), {"top": [P("4p")]})
     assert watch.collect({})
     assert watch.melds["top"] == (Meld("chow", tuple(parse("456p")), -1),)
-    assert len(saved) == 3 and {path.parent.name for path in saved} == {"4p", "5p", "6p"}
+    # 分數太低的那張（可能被擋住）不存
+    assert len(saved) == 2 and {path.parent.name for path in saved} == {"6p", "4p"}
 
 
 def test_guided_chow_is_ignored_where_a_meld_was_already_read():
@@ -133,3 +134,39 @@ def test_confusable_manzu_are_fixed_when_only_one_change_makes_a_meld():
     assert fix_confusable_manzu(parse("345m")) == parse("345m")          # 本來就成組
     assert fix_confusable_manzu(parse("166m")) == parse("666m")          # 一萬→六萬才湊得成碰
     assert fix_confusable_manzu(parse("249m")) == parse("249m")          # 沒有可疑的牌
+
+
+def test_manzu_from_guided_chows_are_not_harvested(tmp_path):
+    saved = []
+
+    class GuidedReader(FakeReader):
+        def guided_meld(self, image, seat, tile, kinds):
+            return [MeldTile(t, 0.5, 1300 + 50 * i, np.zeros((45, 52, 3), np.uint8))
+                    for i, t in enumerate(parse("213m"))]
+
+    watch = MeldWatch(GuidedReader({"left": [], "top": [], "right": []}), template_dir=tmp_path,
+                      save=lambda path, image: saved.append(path), background=False)
+    watch.request(np.zeros((10, 10, 3), np.uint8), {"top": [(P("1m"), None)]})
+    watch.collect({})
+    assert watch.melds["top"] == (Meld("chow", tuple(parse("123m")), -1),)
+    assert saved == []  # 一二三萬的排列可能錯，不存
+
+
+def test_same_count_with_different_content_keeps_both_up_to_the_inferred_count():
+    reader = FakeReader({"left": [], "top": hits("123m"), "right": []})
+    watch = MeldWatch(reader, template_dir=None, background=False)
+    frame = np.zeros((10, 10, 3), np.uint8)
+    watch.request(frame)
+    watch.collect({}, {"top": 1})
+    # 20:35 下一次只讀到新的一條×3（一二三萬被擋住）：牌河推算對家 2 組 → 兩組都留
+    reader.result = {"left": [], "top": hits("111s"), "right": []}
+    watch.request(frame)
+    watch.collect({}, {"top": 2})
+    assert set(watch.melds["top"]) == {Meld("chow", tuple(parse("123m")), -1), Meld("pung", (P("1s"),) * 3, -1)}
+    # 只推算 1 組：新讀到的取代舊的（例如萬子校正）
+    watch.new_hand()
+    reader.result = {"left": [], "top": hits("111m"), "right": []}
+    watch.request(frame); watch.collect({}, {"top": 1})
+    reader.result = {"left": [], "top": hits("666m"), "right": []}
+    watch.request(frame); watch.collect({}, {"top": 1})
+    assert watch.melds["top"] == (Meld("pung", (P("6m"),) * 3, -1),)

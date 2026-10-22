@@ -31,6 +31,9 @@ SIDE_ROTATION = {"left": cv2.ROTATE_90_CLOCKWISE, "right": cv2.ROTATE_90_COUNTER
 SIDE_HEIGHTS = (27, 31)
 """直條上一張牌可能的高度（透視拉直後近似，不同截圖差幾像素）。"""
 TOP_WIDTHS = (50, 55)
+TOP_ASPECT = 0.75
+"""對家牌面的高／寬：倒著、從遠處斜看，比正面扁。10/22 已知答案的 8 張截圖（33 張牌）：0.9 時對 22、漏 11、錯 8，
+0.75 時對 31、漏 2、錯 2（0.7 以下又變差）。"""
 SIDE_MIN_SCORE = 0.45
 TOP_MIN_SCORE = 0.55
 SIDE_SPACING = 20
@@ -184,9 +187,9 @@ class MeldReader:
                      + [(tile, sized(cv2.rotate(image, rotation), (width - 6, height)))
                         for tile, image in templates for height in SIDE_HEIGHTS]
                      for seat, rotation in SIDE_ROTATION.items()}
-        self.top = [(tile, sized(image, (width_, round(width_ * 0.9))))
+        self.top = [(tile, sized(image, (width_, round(width_ * TOP_ASPECT))))
                     for tile, image in seat_templates.get("top", []) for width_ in TOP_WIDTHS] \
-            + [(tile, sized(cv2.rotate(image, cv2.ROTATE_180), (width_, round(width_ * 0.9))))
+            + [(tile, sized(cv2.rotate(image, cv2.ROTATE_180), (width_, round(width_ * TOP_ASPECT))))
                for tile, image in templates for width_ in TOP_WIDTHS]
 
     @classmethod

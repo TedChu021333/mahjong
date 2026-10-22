@@ -273,7 +273,7 @@ class RiverWatch:
         if self.meld_watch is None:
             return False
         known = {seat: list(tiles) for seat, tiles in self.exposed.items() if seat != "me"}
-        return self.meld_watch.collect(known)
+        return self.meld_watch.collect(known, {seat: count for seat, count in self.melds.items() if seat != "me"})
 
     def read_melds(self) -> tuple[tuple, ...]:
         """讀到的對手副露（Meld），依 advisor 的座位編號排列；自己的欄位是空的。"""
