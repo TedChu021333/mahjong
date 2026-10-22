@@ -62,3 +62,14 @@ def test_read_melds_reach_the_game_state_as_known_melds():
     melds = state.players[3].melds
     assert len(melds) == 1 and melds[0].kind == "pung" and melds[0].tiles == (P("5z"),) * 3
     assert melds[0].from_player is not None and melds[0].from_player >= 0
+
+
+def test_seat_labels_list_claims_and_unread_melds():
+    from hint.meld_watch import seat_labels
+
+    melds = {"left": (Meld("pung", (P("7z"),) * 3, -1), Meld("chow", tuple(parse("978p")), -1),
+                      Meld("kong", (P("2p"),) * 4, -1))}
+    labels = seat_labels(melds, {"left": 3, "top": 1, "right": 0})
+    assert labels["left"] == "上家　碰 白　吃 七八九筒　槓 二筒"
+    assert labels["top"] == "對家　另有 1 組沒讀到"
+    assert labels["right"] is None

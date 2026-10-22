@@ -186,7 +186,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         actuator=None, observe_fn=observe, clock=time.monotonic, show=None,
         find_continue=None, save_result=save_result, log=print_log, rivers=None,
         find_win=None, find_buttons=None, find_popup=None, find_autoplay=None,
-        window=None, show_danger=None, stop_requested=None) -> None:
+        window=None, show_danger=None, stop_requested=None, show_melds=None) -> None:
     """show_danger(text) 更新放槍表小視窗（輪到自己時手上放槍機率最高的幾張）。
     find_win(frame) 為「胡」按鈕是否亮著、find_buttons(frame) 讀按鈕列（都不依賴手牌辨識）；
     find_popup(frame) 找會蓋住牌桌的彈出面板（自動模式按關閉）。window（control.window.GameWindow）
@@ -224,6 +224,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     hands = HandBook()
     own_taken_saved = 0
     meld_shots, meld_shot_due, meld_shot_at = 0, None, clock()
+    meld_labels = None
+    """三家副露小標籤上一次顯示的文字。"""
     own_missing_saved = 0
     meld_check = MeldCheck()
     meld_rejected = None
@@ -369,6 +371,13 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 if collect is not None and collect():
                     from hint.meld_watch import describe as describe_melds
                     log(f"[{stamp}] 對手副露：{describe_melds(rivers.meld_watch.melds)}", echo=False)
+                watch = getattr(rivers, "meld_watch", None)
+                if show_melds is not None and watch is not None:
+                    from hint.meld_watch import seat_labels
+                    labels = seat_labels(watch.melds, {seat: count for seat, count in rivers.melds.items()})
+                    if labels != meld_labels:
+                        meld_labels = labels
+                        show_melds(labels)
             if rivers is not None and observation is not None:
                 observation = replace(observation, discards=rivers.discards(),
                                       melds=rivers.meld_counts(),
@@ -681,7 +690,7 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
                            rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
                            find_popup=popups.find, find_autoplay=autoplay_active,
                            window=game_window, show_danger=window.show_table,
-                           stop_requested=esc_pressed))
+                           stop_requested=esc_pressed, show_melds=window.show_melds))
 
 
 ROUND_END_SCREENS = frozenset({"大結算", "繼續戰鬥", "破產再玩一局", "再拚一局", "再玩一局"})

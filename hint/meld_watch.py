@@ -136,3 +136,30 @@ class MeldWatch:
                 self.save(folder / f"{time.strftime('%Y%m%d_%H%M%S')}_{number}.png", hit.crop)
                 existing += 1
                 self.saved_templates += 1
+
+
+SUIT_NAMES = "萬筒條"
+RANKS = "一二三四五六七八九"
+
+
+def _short(meld: Meld) -> str:
+    """碰／槓寫一張（「白」「五萬」），吃寫三個數字加花色（「七八九筒」）。"""
+    if meld.kind == "chow":
+        tiles = sorted(meld.tiles)
+        return "".join(RANKS[tile % 9] for tile in tiles) + SUIT_NAMES[tiles[0] // 9]
+    return tile_name(meld.tiles[0])
+
+
+def seat_labels(melds: dict[str, tuple[Meld, ...]], counts: dict[str, int]) -> dict[str, str | None]:
+    """三家旁邊小標籤的文字（沒有副露時 None）：「碰 白　吃 七八九筒　槓 二筒」；counts 是推算的副露組數，
+    比讀到的多時補「另有 N 組沒讀到」。"""
+    labels: dict[str, str | None] = {}
+    words = {"chow": "吃", "pung": "碰", "kong": "槓"}
+    for seat in SEATS:
+        group = melds.get(seat, ())
+        parts = [f"{words[meld.kind]} {_short(meld)}" for meld in group]
+        missing = counts.get(seat, 0) - len(group)
+        if missing > 0:
+            parts.append(f"另有 {missing} 組沒讀到")
+        labels[seat] = f"{SEAT_NAMES[seat]}　" + "　".join(parts) if parts else None
+    return labels
