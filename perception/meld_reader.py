@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
@@ -37,6 +37,9 @@ SIDE_SPACING = 20
 TOP_SPACING = 45
 """對家那列兩張牌至少相隔幾像素（一張約 54；亮牌時四萬和北之間的空隙曾在 34 像素處多抓一張）。"""
 TEMPLATES_PER_TILE = 3
+MELD_TEMPLATE_DIR = Path("train/meld_templates")
+"""實戰收集的副露專用模板：<座位 left/right/top>/<牌代碼>/*.png，已經是直條／那一列上的方向（hint.meld_watch 收集）。"""
+SEAT_TEMPLATES_PER_TILE = 4
 SEARCH_TILES = 8
 """先只掃副露那一端這麼多張的範圍；讀到最後一格附近才掃整排。"""
 SIDE_PITCH = 32
@@ -49,6 +52,8 @@ class MeldTile:
     score: float
     position: int
     """在直條（上家、下家）或那一列（對家）上的位置，用來排順序。"""
+    crop: np.ndarray | None = field(default=None, compare=False, repr=False)
+    """這張牌在直條／那一列上的切圖（轉向後、和模板同方向），收集專用模板用。"""
 
 
 def _strip_transform(seat: str) -> np.ndarray:
@@ -64,6 +69,21 @@ def straighten(image: np.ndarray, seat: str) -> np.ndarray:
     """上家或下家那一排拉直成直條（上 = 離自己遠的那端）。"""
     width, height = MELD_STRIP_SIZE
     return cv2.warpPerspective(image, _strip_transform(seat), (width, height + 2 * MELD_STRIP_MARGIN))
+
+
+def load_seat_templates(directory: Path = MELD_TEMPLATE_DIR,
+                        per_tile: int = SEAT_TEMPLATES_PER_TILE) -> dict[str, list[tuple[int, np.ndarray]]]:
+    """實戰收集的副露模板（每座位每種牌取最新的幾張）。"""
+    result: dict[str, list[tuple[int, np.ndarray]]] = {}
+    if not directory.exists():
+        return result
+    for seat_dir in sorted(path for path in directory.iterdir() if path.is_dir()):
+        for folder in sorted(path for path in seat_dir.iterdir() if path.is_dir()):
+            for path in sorted(folder.glob("*.png"))[-per_tile:]:
+                image = read_image(path)
+                if image is not None:
+                    result.setdefault(seat_dir.name, []).append((parse(folder.name)[0], image))
+    return result
 
 
 def _peaks(best: np.ndarray, label: np.ndarray, min_score: float, spacing: int,
@@ -125,10 +145,10 @@ def _refine_manzu(scan: Scan, hits: list[MeldTile], offset: int, seat: str) -> l
     refined = []
     for hit in hits:
         position = hit.position - offset
-        if hit.tile >= 9:
-            refined.append(hit)
-            continue
         crop = scan.crop(position)
+        if hit.tile >= 9:
+            refined.append(MeldTile(hit.tile, hit.score, hit.position, crop))
+            continue
         shape = crop.shape
         number = _half(crop, NUMBER_HALF[seat])
         best_tile, best_score = hit.tile, -1.0
@@ -138,24 +158,33 @@ def _refine_manzu(scan: Scan, hits: list[MeldTile], offset: int, seat: str) -> l
             score = float(cv2.matchTemplate(number, _half(template, NUMBER_HALF[seat]), cv2.TM_CCOEFF_NORMED).max())
             if score > best_score:
                 best_tile, best_score = tile, score
-        refined.append(MeldTile(best_tile, hit.score, hit.position))
+        refined.append(MeldTile(best_tile, hit.score, hit.position, crop))
     return refined
 
 
 class MeldReader:
-    def __init__(self, templates: list[tuple[int, np.ndarray]]) -> None:
+    def __init__(self, templates: list[tuple[int, np.ndarray]],
+                 seat_templates: dict[str, list[tuple[int, np.ndarray]]] | None = None) -> None:
+        """templates：正立的牌河模板（轉向後用）；seat_templates：實戰收集、已經同方向的副露模板（優先）。"""
         width, _ = MELD_STRIP_SIZE
-        self.side = {seat: [(tile, cv2.resize(cv2.rotate(image, rotation), (width - 6, height),
-                                              interpolation=cv2.INTER_AREA))
-                            for tile, image in templates for height in SIDE_HEIGHTS]
+        seat_templates = seat_templates or {}
+
+        def sized(image: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+            return cv2.resize(image, size, interpolation=cv2.INTER_AREA)
+
+        self.side = {seat: [(tile, sized(image, (width - 6, height)))
+                            for tile, image in seat_templates.get(seat, []) for height in SIDE_HEIGHTS]
+                     + [(tile, sized(cv2.rotate(image, rotation), (width - 6, height)))
+                        for tile, image in templates for height in SIDE_HEIGHTS]
                      for seat, rotation in SIDE_ROTATION.items()}
-        self.top = [(tile, cv2.resize(cv2.rotate(image, cv2.ROTATE_180), (width_, round(width_ * 0.9)),
-                                      interpolation=cv2.INTER_AREA))
-                    for tile, image in templates for width_ in TOP_WIDTHS]
+        self.top = [(tile, sized(image, (width_, round(width_ * 0.9))))
+                    for tile, image in seat_templates.get("top", []) for width_ in TOP_WIDTHS] \
+            + [(tile, sized(cv2.rotate(image, cv2.ROTATE_180), (width_, round(width_ * 0.9))))
+               for tile, image in templates for width_ in TOP_WIDTHS]
 
     @classmethod
-    def from_directory(cls, directory: Path = RIVER_TEMPLATE_DIR,
-                       per_tile: int = TEMPLATES_PER_TILE) -> "MeldReader | None":
+    def from_directory(cls, directory: Path = RIVER_TEMPLATE_DIR, per_tile: int = TEMPLATES_PER_TILE,
+                       seat_dir: Path = MELD_TEMPLATE_DIR) -> "MeldReader | None":
         """每種牌取幾張牌河模板（人工標註的優先）；沒有模板時回傳 None。"""
         if not directory.exists():
             return None
@@ -167,7 +196,9 @@ class MeldReader:
                 image = read_image(path)
                 if image is not None:
                     templates.append((parse(folder.name)[0], image))
-        return cls(templates) if templates else None
+        if not templates:
+            return None
+        return cls(templates, load_seat_templates(seat_dir))
 
     def _side(self, image: np.ndarray, seat: str) -> list[MeldTile]:
         strip = straighten(image, seat)
@@ -201,26 +232,34 @@ class MeldReader:
         return {"left": self._side(image, "left"), "right": self._side(image, "right"), "top": self._top(image)}
 
 
-def group_melds(tiles: list[int]) -> tuple[list[Meld], list[int]]:
-    """依擺放順序分組：四張一樣＝槓、三張一樣＝碰、同花色連續三張＝吃；分不出的牌另外回傳。"""
-    melds: list[Meld] = []
-    leftover: list[int] = []
+def meld_spans(tiles: list[int]) -> list[tuple[str, int, int]]:
+    """依擺放順序分組：四張一樣＝槓、三張一樣＝碰、同花色連續三張＝吃；回傳每組 (種類, 起點, 張數)，分不出的牌跳過。"""
+    spans = []
     index = 0
     while index < len(tiles):
         rest = tiles[index:]
         if len(rest) >= 4 and len(set(rest[:4])) == 1:
-            melds.append(Meld("kong", tuple(rest[:4]), from_player=-1))
+            spans.append(("kong", index, 4))
             index += 4
         elif len(rest) >= 3 and len(set(rest[:3])) == 1:
-            melds.append(Meld("pung", tuple(rest[:3]), from_player=-1))
+            spans.append(("pung", index, 3))
             index += 3
         elif len(rest) >= 3 and _is_run(rest[:3]):
-            melds.append(Meld("chow", tuple(sorted(rest[:3])), from_player=-1))
+            spans.append(("chow", index, 3))
             index += 3
         else:
-            leftover.append(rest[0])
             index += 1
-    return melds, leftover
+    return spans
+
+
+def group_melds(tiles: list[int]) -> tuple[list[Meld], list[int]]:
+    """meld_spans 分好的組（Meld）與分不出的牌。"""
+    melds, used = [], set()
+    for kind, start, length in meld_spans(tiles):
+        group = tiles[start:start + length]
+        melds.append(Meld(kind, tuple(sorted(group)) if kind == "chow" else tuple(group), from_player=-1))
+        used.update(range(start, start + length))
+    return melds, [tile for index, tile in enumerate(tiles) if index not in used]
 
 
 def _is_run(tiles: list[int]) -> bool:

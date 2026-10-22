@@ -56,8 +56,11 @@ def _read_banner(frame):
 
 class RiverWatch:
     def __init__(self, reader: RiverReader, template_dir: Path = RIVER_TEMPLATE_DIR,
-                 save=write_image, read_banner=None, unknown_dir: Path | None = UNKNOWN_DIR) -> None:
+                 save=write_image, read_banner=None, unknown_dir: Path | None = UNKNOWN_DIR,
+                 meld_watch=None) -> None:
         self.reader = reader
+        self.meld_watch = meld_watch
+        """讀對手副露（hint.meld_watch.MeldWatch，可為 None）。"""
         self.unknown_dir = unknown_dir
         self.unknown_saved = 0
         self.read_banner = read_banner or _read_banner
@@ -120,6 +123,8 @@ class RiverWatch:
         self.my_pungs = []
         self._own_pending = None
         self.unseen_claimed = []
+        if getattr(self, "meld_watch", None) is not None:
+            self.meld_watch.new_hand()
 
     def update(self, frame: np.ndarray, observation: Observation) -> list[RiverEvent]:
         self._frame += 1
@@ -226,11 +231,31 @@ class RiverWatch:
         return tuple(result)
 
     def meld_counts(self) -> tuple[int, int, int, int]:
-        """依 advisor 的座位編號排列；自己的欄位為 0。"""
+        """依 advisor 的座位編號排列；自己的欄位為 0。讀到的副露組數比推算的多就用讀到的。"""
         result = [0] * 4
+        read = self.meld_watch.melds if self.meld_watch is not None else {}
         for seat, count in self.melds.items():
             if seat != "me":
-                result[RIVER_SEAT[seat]] = min(count, 5)
+                result[RIVER_SEAT[seat]] = min(max(count, len(read.get(seat, ()))), 5)
+        return tuple(result)
+
+    def request_melds(self, frame: np.ndarray) -> bool:
+        """在背景讀對手副露（沒有 meld_watch 或上一次還沒讀完就不讀）。"""
+        return self.meld_watch is not None and self.meld_watch.request(frame)
+
+    def collect_melds(self) -> bool:
+        """背景讀完的副露套用進來（用牌河推算的碰校正萬子）；有變化回傳 True。"""
+        if self.meld_watch is None:
+            return False
+        known = {seat: list(tiles) for seat, tiles in self.exposed.items() if seat != "me"}
+        return self.meld_watch.collect(known)
+
+    def read_melds(self) -> tuple[tuple, ...]:
+        """讀到的對手副露（Meld），依 advisor 的座位編號排列；自己的欄位是空的。"""
+        result = [()] * 4
+        if self.meld_watch is not None:
+            for seat, melds in self.meld_watch.melds.items():
+                result[RIVER_SEAT[seat]] = tuple(melds)
         return tuple(result)
 
     def has_discards(self) -> bool:

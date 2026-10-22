@@ -357,17 +357,26 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 counts = getattr(rivers, "meld_counts", None)
                 has_melds = counts is not None and any(counts())
                 due = meld_shot_due is not None and clock() >= meld_shot_due
-                if meld_shots < MELD_SHOT_LIMIT and (due or (has_melds and clock() - meld_shot_at >= MELD_SHOT_INTERVAL)):
-                    meld_shots += 1
+                if due or (has_melds and clock() - meld_shot_at >= MELD_SHOT_INTERVAL):
                     meld_shot_due, meld_shot_at = None, clock()
-                    log(f"[{stamp}] 副露截圖存到 {save_result(frame, '副露_')}", echo=False)
+                    request = getattr(rivers, "request_melds", None)
+                    if request is not None:
+                        request(frame)  # 背景讀對手副露
+                    if meld_shots < MELD_SHOT_LIMIT:
+                        meld_shots += 1
+                        log(f"[{stamp}] 副露截圖存到 {save_result(frame, '副露_')}", echo=False)
+                collect = getattr(rivers, "collect_melds", None)
+                if collect is not None and collect():
+                    from hint.meld_watch import describe as describe_melds
+                    log(f"[{stamp}] 對手副露：{describe_melds(rivers.meld_watch.melds)}", echo=False)
             if rivers is not None and observation is not None:
                 observation = replace(observation, discards=rivers.discards(),
                                       melds=rivers.meld_counts(),
                                       exposed=rivers.exposed_tiles(),
                                       my_discards=rivers.my_discards,
                                       declared_safe=rivers.declared_safe(),
-                                      my_pungs=tuple(rivers.my_pungs))
+                                      my_pungs=tuple(rivers.my_pungs),
+                                      opponent_melds=getattr(rivers, "read_melds", lambda: ())())
             if observation is not None and observation.declared - declared_seen:
                 # 對手什麼時候聽牌：第一次認到「聽」時各家牌河已有幾張（10/20 起，量遊戲電腦的習慣用）
                 sizes = "、".join(f"{name} {len(river)}" for name, river in
@@ -644,7 +653,12 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
 
     log(f"[{time.strftime('%H:%M:%S')}] {mode}啟動，AI {advisor._policy}，{program_version()}"
         f"{network_options(advisor._network)}", echo=False)
-    rivers = RiverWatch(RiverReader.from_directory())
+    from hint.meld_watch import MeldWatch
+    from perception.meld_reader import MeldReader
+
+    meld_reader = MeldReader.from_directory()
+    rivers = RiverWatch(RiverReader.from_directory(),
+                        meld_watch=MeldWatch(meld_reader) if meld_reader is not None else None)
     esc_pressed()  # 清掉啟動前按過 Esc 的紀錄，免得一開始就停
     game_window = None
     if auto:

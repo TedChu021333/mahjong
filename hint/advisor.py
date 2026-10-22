@@ -14,7 +14,7 @@ import numpy as np
 
 from agent.rule_agent import (LIVE_SWAP_SAMPLES, choose_rule_action_for_player, choose_swap_tiles,
                               kong_is_worth)
-from game.rules import Action, ActionType, GameState, Phase, legal_actions, seat_winds_for_dealer
+from game.rules import Action, ActionType, GameState, Meld, Phase, legal_actions, seat_winds_for_dealer
 from game.tiles import NUM_TILE_TYPES, tile_name
 from perception.config import CLAIM_TEMPLATE_BOX, GOLD_MIN_SCORE, GOLD_TEMPLATE_BOX, TEMPLATE_DIR
 from perception.config import MAX_HAND_TILES
@@ -84,6 +84,8 @@ class Observation:
     """這局自己碰過的牌（RiverWatch.my_pungs）；None＝沒有追蹤（離線測試）。"""
     declared_safe: tuple[tuple[int, ...], ...] = field(default=(), compare=False)
     """各家宣告後別家打出、他沒胡的牌（座位同 discards；RiverWatch.declared_safe）：一定不是他要胡的。"""
+    opponent_melds: tuple[tuple[Meld, ...], ...] = field(default=(), compare=False)
+    """畫面上讀到的對手副露（座位同 discards；RiverWatch.read_melds，10/22 起）：內容已知，對手模型會算進他的台數。"""
     my_discards: int = field(default=0, compare=False)
     """這局自己已打出幾張（提示迴圈由手牌變化數出）。牌河追蹤只記到約八成的出牌（10/5 分析 1436 局），
     每位對手打過的張數至少算這麼多，聽牌率與牌牆剩餘才不會低估。"""
@@ -171,6 +173,31 @@ def _rivers(observation: Observation, claim_seat: int | None = None,
     return capped
 
 
+def _known_melds(observation: Observation, rivers: list[list[int]]) -> list[tuple[Meld, ...]]:
+    """讀到的對手副露；加上手牌、牌河、前面的副露會超過 4 張的那組丟掉（讀錯）。來源座位不明，記成他的上家
+    （Meld.from_player 不能是 None，那是暗槓）。"""
+    seen = [0] * NUM_TILE_TYPES
+    for tile in observation.hand:
+        seen[tile] += 1
+    for tiles in rivers:
+        for tile in tiles:
+            seen[tile] += 1
+    result: list[tuple[Meld, ...]] = [()] * 4
+    for seat in range(1, 4):
+        read = observation.opponent_melds[seat] if seat < len(observation.opponent_melds) else ()
+        kept = []
+        for meld in read:
+            need = [0] * NUM_TILE_TYPES
+            for tile in meld.tiles:
+                need[tile] += 1
+            if all(seen[tile] + need[tile] <= 4 for tile in set(meld.tiles)):
+                for tile in meld.tiles:
+                    seen[tile] += 1
+                kept.append(Meld(meld.kind, meld.tiles, (seat + 3) % 4))
+        result[seat] = tuple(kept[:5])
+    return result
+
+
 def _exposed(observation: Observation, rivers: list[list[int]],
              melds: list[int]) -> list[tuple[int, ...]]:
     """副露裡已知的牌；沒有副露組數可放、或加上手牌與牌河會超過 4 張的丟掉（推算可能有誤）。"""
@@ -217,9 +244,19 @@ def build_state(observation: Observation, waiting: bool = False) -> GameState | 
     melds = list(observation.melds) + [0] * (4 - len(observation.melds))
     melds[ME] = observation.meld_count
     exposed = _exposed(observation, rivers, melds)
-    players = [ObservedPlayer(discards=tuple(rivers[seat]), unknown_melds=melds[seat],
-                              exposed=exposed[seat])
-               for seat in range(4)]
+    known = _known_melds(observation, rivers)
+    players = []
+    for seat in range(4):
+        read = known[seat]
+        unknown = max(0, melds[seat] - len(read))
+        # 讀到的副露裡已經有的牌，不再當成內容未知那組的已知牌
+        left_over = list(exposed[seat])
+        for meld in read:
+            for tile in meld.tiles:
+                if tile in left_over:
+                    left_over.remove(tile)
+        players.append(ObservedPlayer(discards=tuple(rivers[seat]), melds=read, unknown_melds=unknown,
+                                      exposed=tuple(left_over) if unknown else ()))
     players[ME] = ObservedPlayer(hand=observation.hand, unknown_melds=observation.meld_count,
                                  discards=tuple(rivers[ME]), exposed=exposed[ME])
     declared = [False] * 4
