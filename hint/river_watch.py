@@ -97,6 +97,8 @@ class RiverWatch:
         """自己剛打出、牌河還沒看到的牌：(牌, 打出時的更新次數)。"""
         self._own_seen_at = -LABEL_FRAMES - 1
         """牌河最近一次出現自己出牌（或被拿走）時的更新次數。"""
+        self.unseen_claimed: list[int] = []
+        """自己打出、牌河還沒確認就被吃碰拿走的牌（由手牌變化＋吃碰大字得知），算進自己打過的牌。"""
         self._declare_marks: dict[str, dict[str, int]] = {}
         """第一次認到某家宣告時，各家牌河（含被吃碰的）已有幾張；之後別家打出的牌他一定不聽
         （遊戲代打、自動胡），見 declared_safe。"""
@@ -117,6 +119,7 @@ class RiverWatch:
         self._empty_frames = 0
         self.my_pungs = []
         self._own_pending = None
+        self.unseen_claimed = []
 
     def update(self, frame: np.ndarray, observation: Observation) -> list[RiverEvent]:
         self._frame += 1
@@ -167,7 +170,28 @@ class RiverWatch:
                     for tile in tiles:
                         self.exposed[claimer].remove(tile)
                     self._credited = None
+        unseen = self._claimed_before_seen()
+        if unseen is not None:
+            events.append(unseen)
         return events
+
+    def _claimed_before_seen(self) -> RiverEvent | None:
+        """自己剛打出（手牌少一張）、牌河還沒確認，就有別家出現吃碰大字：那張牌被他吃碰走了。
+        10/22 「自己的牌沒進牌河」截圖看了 3 張都是這樣（對家碰發、上家碰白、下家吃筒）——牌停不到 3 幀就被拿走，
+        牌河追蹤沒有事件，那家的副露數、碰走的另外兩張、自己打過的牌都漏記。"""
+        pending, banner = self._own_pending, self._banner
+        # 大字可能比手牌變化早一兩次更新被看到；早更多的是前一次別人的吃碰
+        if pending is None or banner is None or banner[0] == "me" \
+                or not -2 <= banner[2] - pending[1] <= BANNER_FRAMES:
+            return None
+        tile = pending[0]
+        claimer, kind, _ = banner
+        self._own_pending = self._banner = None
+        self._own_seen_at = self._frame
+        self._credit("me", claimer, (tile, tile) if kind == "pung" and tile is not None else ())
+        if tile is not None:
+            self.unseen_claimed.append(tile)
+        return RiverEvent("claimed_unseen", "me", tile, (0, 0, 0, 0))
 
     def _someone_discarded(self, seat: str) -> None:
         taken, self._taken_from = self._taken_from, None
@@ -229,7 +253,10 @@ class RiverWatch:
         """依 advisor 的座位編號排列，未知的牌略過。"""
         result = [()] * 4
         for seat, tiles in self.tracker.discards.items():
-            result[RIVER_SEAT[seat]] = tuple(tile for tile in tiles if tile is not None)
+            known = [tile for tile in tiles if tile is not None]
+            if seat == "me":
+                known += self.unseen_claimed
+            result[RIVER_SEAT[seat]] = tuple(known)
         return tuple(result)
 
     def _collect_labels(self, observation: Observation) -> None:

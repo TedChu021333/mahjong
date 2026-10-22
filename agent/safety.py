@@ -25,8 +25,8 @@ from game.simulator import RAKE
 from game.tiles import tile_name
 from game.win import winning_tiles
 
-DANGER_SCALE = 1.0
-"""放槍損失的權重。原本 1.3（10/5 校準估計 27 次、實際 35 次）；牌河清理、宣告後的現物、湊滿有效手牌之後，
+DANGER_SCALE = 0.9
+"""放槍損失的權重（10/21 使用者覺得仍太保守，1.0 → 0.9；用 10/21 的 101 次改牌估計只少 3 次，都是進攻幾乎不損失的換牌）。原本 1.3（10/5 校準估計 27 次、實際 35 次）；牌河清理、宣告後的現物、湊滿有效手牌之後，
 10/19 晚～10/20 2207 手出牌重新校準：對已宣告者估計 17.4 次、實際 19（1.09），對沒宣告的估計 24.9、實際 25（1.00），
 已經不低估，1.3 反而高估三成（使用者：打得太保守）。"""
 OVERRIDE_MARGIN = 0.2
@@ -129,6 +129,52 @@ def safer_discard(state: GameState, player: int, tile: int, rng: Random,
         return tile, None
     best = max(worth, key=lambda c: _gain(current, c))
     return best.tile, _describe(current, best)
+
+
+ATTACK_MAX_DANGER = 0.25
+"""極致進攻（--attack）：有人宣告時只擋放槍機率超過這個的牌（使用者 10/22 選「只擋極危險的牌」）。
+10/22 一整晚 268 局一次都沒觸發（估計值很少超過 25%）。"""
+ATTACK_SAME_MARGIN = 0.005
+"""向聽、進張一樣的牌，放槍機率至少低這麼多才換（估計值有抽樣誤差，差一點點不必換）。"""
+
+
+def attack_discard(state: GameState, player: int, tile: int, rng: Random,
+                   calibration: Calibration | None = None) -> tuple[int, str | None]:
+    """極致進攻的放槍檢查：tile 放槍機率超過 ATTACK_MAX_DANGER 才換，換成門檻內向聽最好、進張最多的牌
+    （都超過時打最安全的）。回傳 (要打的牌, 說明或 None)。"""
+    if not anyone_declared(state, player):
+        return tile, None
+    calibration = calibration or default_calibration()
+    me = state.players[player]
+    candidates = allowed_discards(me.hand, state.forbidden_discards if state.claimed else ())
+    if tile not in candidates or len(candidates) < 2:
+        return tile, None
+    danger = estimate_danger(state, player, candidates, rng, calibration, SAMPLES, min_valid=MIN_VALID)
+    risk = danger.probability
+    visible = visible_tile_counts(state, player)
+
+    def value(t: int) -> tuple[int, int, float]:
+        hand = list(me.hand)
+        hand[t] -= 1
+        outs = sum(max(0, 4 - visible[x]) for x in effective_tiles(hand, len(me.melds)))
+        return shanten(hand, len(me.melds)), -outs, risk[t]
+
+    if risk[tile] <= ATTACK_MAX_DANGER:
+        # 向聽、進張一樣的牌裡挑最安全的：進攻完全不吃虧（10/22 極致進攻放槍 21 次中好幾次有這種牌）
+        mine = value(tile)
+        same = [t for t in candidates if value(t)[:2] == mine[:2]]
+        safest = min(same, key=lambda t: risk[t])
+        if risk[safest] < risk[tile] - ATTACK_SAME_MARGIN:
+            return safest, (f"極致進攻：{tile_name(safest)}進攻一樣、比較安全"
+                            f"（{risk[tile]:.1%} → {risk[safest]:.1%}）")
+        return tile, None
+    allowed = [t for t in candidates if risk[t] <= ATTACK_MAX_DANGER]
+    if allowed:
+        pick = min(allowed, key=value)
+    else:
+        pick = min(candidates, key=lambda t: risk[t])
+    return pick, (f"極致進攻：{tile_name(tile)}放槍 {risk[tile]:.1%} 太危險 → 改打 {tile_name(pick)} "
+                  f"{risk[pick]:.1%}")
 
 
 def _margin(current: Choice, other: Choice) -> float:

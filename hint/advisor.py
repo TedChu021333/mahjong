@@ -12,7 +12,8 @@ from random import Random
 import cv2
 import numpy as np
 
-from agent.rule_agent import choose_rule_action_for_player, choose_swap_tiles, kong_is_worth
+from agent.rule_agent import (LIVE_SWAP_SAMPLES, choose_rule_action_for_player, choose_swap_tiles,
+                              kong_is_worth)
 from game.rules import Action, ActionType, GameState, Phase, legal_actions, seat_winds_for_dealer
 from game.tiles import NUM_TILE_TYPES, tile_name
 from perception.config import CLAIM_TEMPLATE_BOX, GOLD_MIN_SCORE, GOLD_TEMPLATE_BOX, TEMPLATE_DIR
@@ -306,13 +307,14 @@ def use_worker_pool(pool, workers: int) -> None:
 _network = None
 
 
-def use_network(path: str, efficiency_turns: int = 0, guard: bool = True) -> None:
+def use_network(path: str, efficiency_turns: int = 0, guard: bool = True, attack: bool = False) -> None:
     """學習型 AI 的權重（--ai nn；需要 PyTorch）；efficiency_turns 見 agent.nn_agent.efficient_discard，
     guard 見 NetworkPolicy.guard（按聽照規則式、有人宣告時檢查放槍）。"""
     from agent.nn_agent import NetworkPolicy
 
     global _network
-    _network = NetworkPolicy.from_file(path, efficiency_turns=efficiency_turns, guard=guard)
+    _network = NetworkPolicy.from_file(path, efficiency_turns=efficiency_turns, guard=guard or attack,
+                                       attack=attack)
 
 
 def last_note() -> str | None:
@@ -364,7 +366,8 @@ def decide(observation: Observation, rng: Random | None = None) -> Action | None
             valued.append(seat_winds_for_dealer(dealer)[ME])
         return Action(ActionType.SWAP, tiles=choose_swap_tiles(counts,
                                                                gold_tiles=observation.gold_tiles,
-                                                               valued_honors=valued))
+                                                               valued_honors=valued,
+                                                               samples=LIVE_SWAP_SAMPLES))
     state = build_state(observation)
     if state is None:
         return None

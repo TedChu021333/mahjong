@@ -20,6 +20,8 @@ MODEL = "models/rl3_0960.pt"
 MENU = [
     ("麻將：自動模式（訓練場）", ["-m", "hint", "--auto", "--ai", "nn", "--model", MODEL,
                                      "--efficiency-turns", "6"]),
+    ("麻將：自動模式＋極致進攻（訓練場）", ["-m", "hint", "--auto", "--ai", "nn", "--model", MODEL,
+                                   "--attack"]),
     ("麻將：提示模式（真人場，不自動點擊）", ["-m", "hint", "--ai", "nn", "--model", MODEL]),
     ("大老二：自動模式（只限對手全是電腦的場）", ["-m", "bigtwo.live", "--auto"]),
     ("大老二：提示模式（不自動點擊）", ["-m", "bigtwo.live"]),

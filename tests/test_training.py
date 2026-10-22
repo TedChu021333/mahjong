@@ -192,3 +192,159 @@ def test_efficiency_override_prefers_outs_early_and_keeps_network_choice_later()
     players[0].discards = []
     state.declared[2] = True                                   # 有人宣告：照網路
     assert efficient_discard(state, 0, choice, lookup, logits, turns=6) == choice
+
+
+def test_efficiency_override_does_not_let_the_network_go_back_a_shanten():
+    pytest.importorskip("torch")
+    from agent.nn_agent import efficient_discard
+    from game.rules import GameState, Phase, PlayerState, legal_actions
+    from game.tiles import to_counts
+    from training.actions import legal_mask
+
+    # 10/21 21:34：五六萬 二三三四筒 一二二四五六八九條 發發 南，網路打六萬（3 向聽），打南是 2 向聽
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("56m2334p12245689s66z2z"))
+    players[0].discards = parse("7z")
+    state = GameState([0] * 60, players, phase=Phase.DISCARD, last_drawn=parse("2z")[0])
+    _, lookup = legal_mask(legal_actions(state, 0))
+    choice = Action(ActionType.DISCARD, tile=parse("6m")[0])
+    picked = efficient_discard(state, 0, choice, lookup, np.zeros(108, dtype=np.float32), turns=6)
+    assert picked.tile in (parse("2z")[0], parse("3p")[0])  # 都還是 2 向聽、進張 20；孤張南最孤立
+    assert picked.tile == parse("2z")[0]
+
+
+def test_guard_takes_a_claim_the_network_passed_when_it_widens_the_hand():
+    pytest.importorskip("torch")
+    from agent.nn_agent import widening_claim
+    from game.rules import GameState, Phase, PlayerState, legal_actions
+
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("2666m345789p122455s"))
+    players[2].discards = parse("2s")
+    state = GameState([0] * 60, players, phase=Phase.RESPONSE, last_discard=parse("2s")[0],
+                      discard_player=2, response_players=[0])
+    action, note = widening_claim(state, 0, legal_actions(state, 0))
+    assert action.kind == ActionType.PUNG and "4 →" in note
+    state.declared[0] = True  # 自己聽牌鎖手時不會
+    assert widening_claim(state, 0, legal_actions(state, 0)) is None
+
+
+def test_paired_games_share_the_deal_and_use_each_other_as_baseline():
+    torch = pytest.importorskip("torch")
+    from training.model import MahjongNet
+    from training.selfplay import Batcher, collect, play_one, play_pair, ppo_update
+
+    model = MahjongNet(width=16, blocks=1).eval()
+    batcher = Batcher(model, "cpu", max_batch=4)
+    try:
+        # 同一副牌、同一個 copy：完全重現（牌牆、對手、網路抽樣都一樣）
+        a = play_one(7, batcher, 0.5, Noise(), copy=0)
+        b = play_one(7, batcher, 0.5, Noise(), copy=0)
+        assert a.reward == b.reward and a.learners == b.learners
+        assert [s.action for s in a.steps[a.learners[0]]] == [s.action for s in b.steps[b.learners[0]]]
+        first, second = play_pair(7, batcher, 0.5, Noise())
+        assert first.learners == second.learners and first.rule_seats == second.rule_seats
+        assert first.baseline == second.reward and second.baseline == first.reward
+        records = collect(batcher, 4, 0, 0.5, Noise(), paired=True)
+    finally:
+        batcher.close()
+    assert len(records) == 4 and all(record.baseline is not None for record in records)
+    stats = ppo_update(model, torch.optim.Adam(model.parameters(), 1e-3), records, "cpu", epochs=1)
+    assert set(stats) == {"policy", "value", "entropy", "kl"}
+
+
+def test_parallel_actors_collect_paired_games():
+    pytest.importorskip("torch")
+    import multiprocessing
+
+    from training.model import MahjongNet
+    from training.selfplay import _actor_init, collect_parallel
+
+    model = MahjongNet(width=16, blocks=1)
+    with multiprocessing.get_context("spawn").Pool(2, _actor_init, (model.config, "cpu")) as pool:
+        records = collect_parallel(pool, model, 2, 6, 0, 0.5, paired=True)
+    assert len(records) == 6 and all(record.baseline is not None for record in records)
+
+
+def test_oracle_planes_show_hidden_hands_and_next_draws():
+    from random import Random
+
+    from game.rules import initial_state
+    from training.encoding import CHANNELS
+    from training.oracle_value import HIDDEN_CHANNELS, hidden_planes, play_and_record
+
+    state = initial_state(Random(3))
+    planes = hidden_planes(state, 0)
+    assert planes.shape == (HIDDEN_CHANNELS, 34)
+    # 下家（相對座位 1）的暗手：張數 ≥1 的平面和他的手牌一致
+    assert (planes[0] == (np.asarray(state.players[1].hand) >= 1)).all()
+    next_tile = state.wall[-1]
+    if next_tile < 34:
+        assert planes[16, next_tile] == 1
+    public, hidden, target = play_and_record(11)
+    assert public.shape[1:] == (CHANNELS, 34) and hidden.shape[1:] == (HIDDEN_CHANNELS, 34)
+    assert len(public) == len(hidden) == len(target)
+
+
+def test_attack_mode_claims_when_outs_grow_and_only_blocks_very_dangerous_tiles(monkeypatch):
+    pytest.importorskip("torch")
+    import agent.safety as safety
+    from agent.nn_agent import NetworkPolicy
+    from agent.opponent_model import Danger
+    from training.model import MahjongNet
+
+    policy = NetworkPolicy(MahjongNet(width=16, blocks=1), guard=True, attack=True)
+    # 一二二條 四五五條（一向聽 4 張），對家打二條：碰了向聽不變、進張變多 → 極致進攻要碰
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("2666m345789p122455s"))
+    players[2].discards = parse("2s")
+    state = GameState([0] * 60, players, phase=Phase.RESPONSE, last_discard=parse("2s")[0],
+                      discard_player=2, response_players=[0])
+    actions = legal_actions(state, 0)
+    passing = next(a for a in actions if a.kind == ActionType.PASS)
+    assert policy._attack_claim(state, 0, passing, actions).kind == ActionType.PUNG
+    assert "極致進攻" in policy.last_note
+
+    # 有人宣告：放槍 20% 的照打，40% 的換成門檻內進攻最好的
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("12399m456p789s111z22z5s"))
+    state = GameState([0] * 60, players, phase=Phase.DISCARD, last_drawn=parse("5s")[0])
+    state.declared[2] = True
+    risk = {t: 0.01 for t in range(34)}
+    risk[parse("5s")[0]] = 0.2
+    monkeypatch.setattr(safety, "estimate_danger",
+                        lambda *args, **kwargs: Danger(dict(risk), {t: 0.0 for t in risk}))
+    assert safety.attack_discard(state, 0, parse("5s")[0], Random(0)) == (parse("5s")[0], None)
+    risk[parse("5s")[0]] = 0.4
+    tile, note = safety.attack_discard(state, 0, parse("5s")[0], Random(0))
+    assert tile != parse("5s")[0] and "太危險" in note
+
+
+def test_attack_pauses_for_far_hands_and_prefers_safer_equal_tiles(monkeypatch):
+    pytest.importorskip("torch")
+    import agent.safety as safety
+    from agent.nn_agent import NetworkPolicy
+    from agent.opponent_model import Danger
+    from training.model import MahjongNet
+
+    policy = NetworkPolicy(MahjongNet(width=16, blocks=1), guard=True, attack=True)
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("12399m456p789s111z22z5s"))   # 聽牌
+    state = GameState([0] * 60, players, phase=Phase.DISCARD, last_drawn=parse("5s")[0])
+    assert policy._attacking(state, 0)
+    state.declared[2] = True
+    assert policy._attacking(state, 0)                               # 聽牌：照樣進攻
+    players[0].hand = to_counts(parse("1479m258p369s1234567z"))      # 很遠的手
+    assert not policy._attacking(state, 0)                           # 有人宣告又很遠：暫停
+    state.declared[2] = False
+    assert policy._attacking(state, 0)
+
+    # 進攻一樣（向聽、進張相同）的兩張孤張字牌：改打比較安全的
+    players[0].hand = to_counts(parse("123m456p789s11z22z56s67z"))
+    state.declared[2] = True
+    risk = {t: 0.01 for t in range(34)}
+    risk[parse("7z")[0]] = 0.08
+    monkeypatch.setattr(safety, "estimate_danger",
+                        lambda *args, **kwargs: Danger(dict(risk), {t: 0.0 for t in risk}))
+    tile, note = safety.attack_discard(state, 0, parse("7z")[0], Random(0))
+    assert tile != parse("7z")[0] and "進攻一樣" in note

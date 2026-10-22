@@ -345,3 +345,22 @@ def test_own_discard_seen_in_the_river_is_not_reported():
     reader.current["me"] = [RiverTile(P("9p"), 0.9, (580, 651, 650, 717))]
     frames(watch, waiting(), OWN_MISSING_FRAMES + 2)
     assert watch.overdue_own_discard() == (False, None)
+
+
+def test_own_discard_claimed_before_the_river_saw_it_is_credited_to_the_claimer():
+    from hint.river_watch import OWN_MISSING_FRAMES
+
+    # 10/22 00:06：打發，對家馬上碰，牌河從來沒確認到這張
+    reader = FakeReader()
+    watch = watch_with_banner(reader, [None, None, ("top", "pung")] + [None] * OWN_MISSING_FRAMES)
+    watch.update(None, Observation(tuple(parse("11223789m99m4p56779s6z")), None, None, ()))
+    events = []
+    for _ in range(3):
+        events += watch.update(None, waiting())
+    assert [e.kind for e in events] == ["claimed_unseen"] and events[0].tile == P("6z")
+    assert watch.melds["top"] == 1 and watch.exposed["top"] == [P("6z"), P("6z")]
+    assert P("6z") in watch.discards()[0]
+    frames(watch, waiting(), OWN_MISSING_FRAMES)
+    assert watch.overdue_own_discard() == (False, None)  # 已經知道去哪了，不必存「沒進牌河」截圖
+    watch.new_hand()
+    assert watch.discards()[0] == ()

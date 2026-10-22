@@ -551,6 +551,8 @@ def main() -> None:
     parser.add_argument("--model", default="models/rl3_0960.pt", help="--ai nn 用的網路權重")
     parser.add_argument("--efficiency-turns", type=int, default=0,
                         help="--ai nn 前幾手湊牌優先（同向聽時改打進張最多的牌）；0 = 照網路")
+    parser.add_argument("--attack", action="store_true",
+                        help="--ai nn 極致進攻：整局湊牌優先、有人宣告時只擋放槍超過 25% 的牌、進張變多就吃碰")
     parser.add_argument("--raw-network", action="store_true",
                         help="--ai nn 完全照網路（不限制按聽、有人宣告時不檢查放槍）")
     parser.add_argument("--workers", type=int, default=4,
@@ -563,7 +565,7 @@ def main() -> None:
     args = parser.parse_args()
     use_policy(args.ai)
     if args.ai == "nn":
-        use_network(args.model, args.efficiency_turns, guard=not args.raw_network)
+        use_network(args.model, args.efficiency_turns, guard=not args.raw_network, attack=args.attack)
     if args.ai == "mc":
         import os
         from multiprocessing import Pool
@@ -692,7 +694,8 @@ def network_options(network) -> str:
     if network is None:
         return ""
     return (f"，湊牌優先 {network.efficiency_turns} 手"
-            f"，護欄{'開' if getattr(network, 'guard', False) else '關'}")
+            f"，護欄{'開' if getattr(network, 'guard', False) else '關'}"
+            f"{'，極致進攻' if getattr(network, 'attack', False) else ''}")
 
 
 def win_is_lit(frame: np.ndarray) -> bool:

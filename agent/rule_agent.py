@@ -122,12 +122,16 @@ SWAP_MIN_GAIN = 0.02
 SWAP_SAMPLES = 40
 """換三張估計期望向聽數時，隨機抽幾組換回來的牌（每個候選用同一批，比較才公平）。原本 120，模擬一局要 2.5 秒、
 七成時間花在換三張（10/20 自我對打每秒只有 15～20 局），改 40 並去掉重複計算的向聽數。"""
+LIVE_SWAP_SAMPLES = 800
+"""實戰（提示模式）每局只換一次，抽多一點：10/21 23:22 一萬 三三萬 八八萬 九九萬 一一二筒 五五六筒 一條 四條 東，
+40 組時 20 次挑出 7 種結果（實戰換了東、一萬、一筒）；800 組 20 次都是東、一條、一筒＝窮舉 286 種組合的最佳
+（平均向聽 3.57，實戰那組 3.73），一次 0.08 秒。"""
 
 
 def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP,
                       gold_tiles: Sequence[int] = (),
                       valued_honors: Sequence[int] = (),
-                      rng: Random | None = None) -> tuple[int, ...]:
+                      rng: Random | None = None, samples: int | None = None) -> tuple[int, ...]:
     """換三張：一張一張挑。每一步在「前面挑好的牌已經換掉」的手上，找換掉之後（換回來的牌隨機，
     依自己看不到的張數抽樣）期望向聽數最低、又比不換這張低 SWAP_MIN_GAIN 以上的牌；沒有就停。
 
@@ -144,7 +148,7 @@ def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP,
     hand = list(hand)
     unseen = [4 - count for count in hand]
     pool = [tile for tile, copies in enumerate(unseen) for _ in range(max(0, copies))]
-    draws = [rng.sample(pool, limit) for _ in range(SWAP_SAMPLES)]
+    draws = [rng.sample(pool, limit) for _ in range(samples or SWAP_SAMPLES)]
 
     def expected(remaining: list[int], swapped: int) -> float:
         """remaining 換回 swapped 張隨機牌後的平均向聽數。抽的是自己看不到的牌，同種最多 4 張不會超過。
@@ -494,7 +498,22 @@ CLAIM_MODE = "improve"
 - loose：向聽變好，或向聽相同但有效進張變多（原本的做法）
 - improve：向聽一定要變好
 - near：向聽變好且吃碰完不超過一向聽；碰會加台的字牌（三元、圈風、已知門風）只要向聽變好
-實戰 10/1：建議過吃碰的局放槍率 16~21%、平均每局 −23~−106，沒吃碰的局 12%、+165（有選擇偏差）。"""
+實戰 10/1：建議過吃碰的局放槍率 16~21%、平均每局 −23~−106，沒吃碰的局 12%、+165（有選擇偏差）。
+improve 另外允許「一向聽、向聽不變但進張大增」的吃碰（claim_widens，10/21 起）。"""
+
+WIDEN_SHANTEN = 1
+WIDEN_RATIO = 2.0
+WIDEN_EXTRA = 12
+"""claim_widens：吃碰前後都是 WIDEN_SHANTEN 向聽以內，進張至少變 WIDEN_RATIO 倍、而且多 WIDEN_EXTRA 張以上。"""
+
+
+def claim_widens(before: tuple[int, int], after: tuple[int, int]) -> bool:
+    """吃碰後向聽不變，但進張大增（hand_value 的 (向聽, −進張)）。10/21 23:43 六六六萬 三四五筒 七八九筒
+    一二二條 四五五條 二萬，一向聽只等三條 4 張；碰二條打一條還是一向聽、進張 32 張，原本的規則（向聽要變好）擋掉。
+    只多幾張進張的照舊不吃碰（10/1 吃碰太多、放槍偏高；arena improve 比 loose 好 +0.23）。"""
+    outs_before, outs_after = -before[1], -after[1]
+    return (after[0] == before[0] <= WIDEN_SHANTEN
+            and outs_after >= WIDEN_RATIO * outs_before and outs_after - outs_before >= WIDEN_EXTRA)
 
 
 def network_claim_is_worth(state: GameState, player: int, action: Action) -> bool:
@@ -509,7 +528,7 @@ def network_claim_is_worth(state: GameState, player: int, action: Action) -> boo
     after = claim_value(me.hand, me.open_melds, action, state.last_discard)
     if action.kind == ActionType.PUNG and honor_tai(state, player, state.last_discard):
         return after[0] <= before[0]
-    return after[0] < before[0]
+    return after[0] < before[0] or claim_widens(before, after)
 
 
 def claim_is_worth(state: GameState, player: int, action: Action, before: tuple[int, int],
@@ -519,7 +538,7 @@ def claim_is_worth(state: GameState, player: int, action: Action, before: tuple[
     if mode == "loose":
         return after < before
     if after[0] >= before[0]:
-        return False
+        return mode == "improve" and claim_widens(before, after)
     if mode == "improve":
         return True
     if mode == "near":

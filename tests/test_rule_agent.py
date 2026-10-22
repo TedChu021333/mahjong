@@ -441,3 +441,35 @@ def test_declare_only_on_the_first_discard_by_default():
     assert declare_is_worth(state, 0, P("2z"), min_live=0)     # 0 = 一律宣告（舊做法）
     action = choose_rule_action_for_player(state, 0, Random(1))
     assert action.kind == ActionType.DISCARD and action.tile in parse("12z")
+
+
+def test_live_swap_uses_enough_samples_to_find_the_best_three():
+    from agent.rule_agent import LIVE_SWAP_SAMPLES, choose_swap_tiles
+
+    # 10/21 23:22：五個對子（三萬八萬九萬一筒五筒），實戰 40 組抽樣換了東、一萬、一筒；
+    # 窮舉 286 種組合最好是東、一條、一筒（一萬留著和三三萬組嵌張）
+    hand = to_counts(parse("1338899m112556p14s1z"))
+    for seed in range(3):
+        picked = choose_swap_tiles(list(hand), gold_tiles=parse("6m4p8s"), rng=Random(seed),
+                                   samples=LIVE_SWAP_SAMPLES)
+        assert sorted(picked) == sorted(parse("1p1s1z"))
+
+
+def test_claim_that_widens_a_one_shanten_hand_is_taken():
+    from agent.rule_agent import claim_value, claim_widens, hand_value, network_claim_is_worth
+    from game.rules import Action, ActionType, GameState, Phase, PlayerState, legal_actions
+
+    # 10/21 23:43：六六六萬 三四五筒 七八九筒 一二二條 四五五條 二萬，一向聽只等三條（4 張）；對家打二條
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("2666m345789p122455s"))
+    players[2].discards = parse("2s")
+    state = GameState([0] * 60, players, phase=Phase.RESPONSE, last_discard=parse("2s")[0],
+                      discard_player=2, response_players=[0])
+    pung = next(a for a in legal_actions(state, 0) if a.kind == ActionType.PUNG)
+    before = hand_value(players[0].hand, 0)
+    after = claim_value(players[0].hand, 0, pung, state.last_discard)
+    assert before == (1, -4) and after[0] == 1 and -after[1] >= 30
+    assert claim_widens(before, after) and network_claim_is_worth(state, 0, pung)
+    # 向聽不變、只多幾張進張的照舊不吃碰
+    assert not claim_widens((1, -16), (1, -24))
+    assert not claim_widens((2, -4), (2, -40))
