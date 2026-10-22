@@ -47,6 +47,33 @@ def correct_manzu(tiles: list[int], known: list[int]) -> list[int]:
     return result
 
 
+CONFUSABLE_MANZU = {0: (5, 7), 5: (0, 7), 7: (0, 5)}
+"""側躺、倒著時數字容易認錯的萬子：一萬、六萬、八萬（10/22 八萬讀成一萬好幾次、六萬讀成一萬）。"""
+
+
+def fix_confusable_manzu(tiles: list[int]) -> list[int]:
+    """連續三張萬子湊不成吃或碰時，把其中一張一／六／八萬換成另外兩種之一；只有一種換法湊得成才採用
+    （20:08 對家七九八萬讀成七萬九萬一萬）。"""
+    result = list(tiles)
+    index = 0
+    while index + 3 <= len(result):
+        window = result[index:index + 3]
+        if all(tile < 9 for tile in window) and not _is_run(window) and len(set(window)) != 1:
+            options = set()
+            for position, tile in enumerate(window):
+                for other in CONFUSABLE_MANZU.get(tile, ()):
+                    changed = list(window)
+                    changed[position] = other
+                    if _is_run(changed) or len(set(changed)) == 1:
+                        options.add(tuple(changed))
+            if len(options) == 1:
+                result[index:index + 3] = list(options.pop())
+                index += 3
+                continue
+        index += 1
+    return result
+
+
 def describe(melds: dict[str, tuple[Meld, ...]]) -> str:
     parts = [f"{SEAT_NAMES[seat]} " + " ".join("".join(tile_name(t) for t in meld.tiles) for meld in group)
              for seat in SEATS if (group := melds.get(seat))]
@@ -81,10 +108,11 @@ class MeldWatch:
     def busy(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def request(self, frame: np.ndarray, chow_hints: dict[str, list[int]] | None = None) -> bool:
-        """開始讀這一幀（上一次還沒讀完就不讀）。chow_hints：各家可能吃了的那張牌（牌河推算、還沒讀到），
-        讀不到時用 MeldReader.guided_chow 引導搜尋（對家倒著的吃單張分數只有 0.5 左右）。"""
-        hints = {seat: list(tiles) for seat, tiles in (chow_hints or {}).items()}
+    def request(self, frame: np.ndarray, hints: dict[str, list] | None = None) -> bool:
+        """開始讀這一幀（上一次還沒讀完就不讀）。hints：各家吃碰了、還沒讀到的牌（牌河推算，(牌, "chow"／"pung"／None)
+        或只有牌＝可能是吃），用 MeldReader.guided_meld 引導搜尋（對家倒著的牌單張分數只有 0.5 左右）。"""
+        hints = {seat: [item if isinstance(item, tuple) else (item, "chow") for item in items]
+                 for seat, items in (hints or {}).items()}
         if self.busy():
             return False
         generation = self._generation
@@ -93,10 +121,11 @@ class MeldWatch:
         def work() -> None:
             read = self.reader.read(image)
             found_chows: list[tuple[str, list[MeldTile]]] = []
-            guided = getattr(self.reader, "guided_chow", None)
-            for seat, tiles in hints.items():
-                for tile in tiles:
-                    found = guided(image, seat, tile) if guided is not None else None
+            guided = getattr(self.reader, "guided_meld", None)
+            for seat, items in hints.items():
+                for tile, kind in items:
+                    kinds = (kind,) if kind else ("chow", "pung")
+                    found = guided(image, seat, tile, kinds) if guided is not None else None
                     current = read.get(seat, [])
                     grouped = _grouped_hits(current)
                     if found and not _overlaps(found, grouped):
@@ -126,7 +155,7 @@ class MeldWatch:
         result: dict[str, tuple[Meld, ...]] = {}
         for seat in SEATS:
             hits = sorted(read.get(seat, []), key=lambda hit: hit.position, reverse=seat != "left")
-            tiles = correct_manzu([hit.tile for hit in hits], known.get(seat, []))
+            tiles = fix_confusable_manzu(correct_manzu([hit.tile for hit in hits], known.get(seat, [])))
             melds, _ = group_melds(tiles)
             previous = self.melds.get(seat, ())
             if len(melds) < len(previous):

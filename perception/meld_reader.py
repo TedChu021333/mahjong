@@ -235,13 +235,22 @@ class MeldReader:
         return _refine_manzu(scan, hits, start, "top")[::-1]
 
     def guided_chow(self, image: np.ndarray, seat: str, tile: int) -> list[MeldTile] | None:
-        """已知這家吃了 tile（牌河看到被拿走的那張）：包含 tile 的三連號、三張任意順序、不同間距都比，
-        整組最像的位置與牌（分數不夠或分不出是哪一組吃時 None）。位置的單位同 read()（直條的列、那一列的欄）。"""
-        suit, rank = divmod(tile, 9)
-        if tile >= 27:
+        return self.guided_meld(image, seat, tile, ("chow",))
+
+    def guided_meld(self, image: np.ndarray, seat: str, tile: int,
+                    kinds: tuple[str, ...] = ("chow", "pung")) -> list[MeldTile] | None:
+        """已知這家吃或碰了 tile（牌河看到被拿走的那張）：可能的組（碰＝三張 tile；吃＝包含 tile 的三連號、三張任意順序）
+        在不同間距下整組比對，最像的位置與牌（分數不夠、或有兩種組合分不出時 None）。位置的單位同 read()。
+        10/22 對家倒著的吃（四五六筒）、碰一條（倒著的鳥）單張分數都只有 0.5 左右，整組比對才找得到。"""
+        runs: list[tuple[int, ...]] = []
+        if "pung" in kinds:
+            runs.append((tile,) * 3)
+        if "chow" in kinds and tile < 27:
+            suit, rank = divmod(tile, 9)
+            runs += [tuple(suit * 9 + r for r in range(start, start + 3))
+                     for start in range(rank - 2, rank + 1) if 0 <= start and start + 2 <= 8]
+        if not runs:
             return None
-        runs = [tuple(suit * 9 + r for r in range(start, start + 3))
-                for start in range(rank - 2, rank + 1) if 0 <= start and start + 2 <= 8]
         if seat == "top":
             left, top, right, bottom = TOP_MELD_ROW
             area, templates, axis, offset = image[top:bottom, left:right], self.top, 0, left
@@ -253,7 +262,7 @@ class MeldReader:
                  for t in {t for run in runs for t in run}}
         per_run: dict[tuple[int, ...], tuple[float, list[MeldTile]]] = {}
         for run in runs:
-            for order in permutations(run):
+            for order in set(permutations(run)):
                 profiles = [scans[t].best for t in order]
                 length = min(len(profile) for profile in profiles)
                 for pitch in pitches:

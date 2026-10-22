@@ -99,8 +99,8 @@ def test_chow_hint_guides_the_search_and_harvests_its_tiles(tmp_path):
     saved = []
 
     class GuidedReader(FakeReader):
-        def guided_chow(self, image, seat, tile):
-            assert (seat, tile) == ("top", P("4p"))
+        def guided_meld(self, image, seat, tile, kinds):
+            assert (seat, tile, kinds) == ("top", P("4p"), ("chow",))
             return [MeldTile(t, 0.5, 1300 + 50 * i, np.zeros((45, 52, 3), np.uint8))
                     for i, t in enumerate(parse("645p"))]
 
@@ -114,7 +114,7 @@ def test_chow_hint_guides_the_search_and_harvests_its_tiles(tmp_path):
 
 def test_guided_chow_is_ignored_where_a_meld_was_already_read():
     class GuidedReader(FakeReader):
-        def guided_chow(self, image, seat, tile):
+        def guided_meld(self, image, seat, tile, kinds):
             return [MeldTile(t, 0.5, 30 * i, None) for i, t in enumerate(parse("345s"))]
 
     watch = MeldWatch(GuidedReader({"left": hits("777z"), "top": [], "right": []}), template_dir=None,
@@ -122,3 +122,14 @@ def test_guided_chow_is_ignored_where_a_meld_was_already_read():
     watch.request(np.zeros((10, 10, 3), np.uint8), {"left": [P("5s")]})
     watch.collect({})
     assert watch.melds["left"] == (Meld("pung", (P("7z"),) * 3, -1),)
+
+
+def test_confusable_manzu_are_fixed_when_only_one_change_makes_a_meld():
+    from hint.meld_watch import fix_confusable_manzu
+
+    # 20:08 對家七九八萬讀成七萬九萬一萬
+    assert fix_confusable_manzu(parse("791m")) == parse("798m")
+    assert fix_confusable_manzu(parse("1m666p")) == parse("1m666p")      # 不是三張萬子
+    assert fix_confusable_manzu(parse("345m")) == parse("345m")          # 本來就成組
+    assert fix_confusable_manzu(parse("166m")) == parse("666m")          # 一萬→六萬才湊得成碰
+    assert fix_confusable_manzu(parse("249m")) == parse("249m")          # 沒有可疑的牌

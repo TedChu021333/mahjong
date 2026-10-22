@@ -366,18 +366,19 @@ def test_own_discard_claimed_before_the_river_saw_it_is_credited_to_the_claimer(
     assert watch.discards()[0] == ()
 
 
-def test_chow_hints_list_claimed_tiles_not_yet_read():
+def test_meld_hints_list_claimed_tiles_not_yet_read():
     from types import SimpleNamespace
 
     from game.rules import Meld
 
     reader = FakeReader()
     watch, _ = watch_with(reader)
-    watch._credit("right", "top", (), P("4p"), None)       # 下家的四筒被對家拿走：可能是吃
-    watch._credit("me", "left", (P("7z"), P("7z")), P("7z"), "pung")  # 碰不用引導
-    assert watch.chow_hints() == {"top": [P("4p")]}
+    watch._credit("right", "top", (), P("4p"), None)                    # 下家的四筒被對家拿走：吃或碰
+    watch._credit("me", "top", (P("1s"), P("1s")), P("1s"), "pung")      # 我打的一條被對家碰
+    watch._credit("me", "left", (), P("7z"), None)                      # 字牌一定是碰
+    assert watch.meld_hints() == {"top": [(P("4p"), None), (P("1s"), "pung")], "left": [(P("7z"), "pung")]}
     watch.meld_watch = SimpleNamespace(melds={"top": (Meld("chow", tuple(parse("456p")), -1),)})
-    assert watch.chow_hints() == {}
+    assert watch.meld_hints() == {"top": [(P("1s"), "pung")], "left": [(P("7z"), "pung")]}
     watch.meld_watch = None
     watch.new_hand()
-    assert watch.chow_hints() == {}
+    assert watch.meld_hints() == {}
