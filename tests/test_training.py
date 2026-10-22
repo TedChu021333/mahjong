@@ -229,63 +229,6 @@ def test_guard_takes_a_claim_the_network_passed_when_it_widens_the_hand():
     assert widening_claim(state, 0, legal_actions(state, 0)) is None
 
 
-def test_paired_games_share_the_deal_and_use_each_other_as_baseline():
-    torch = pytest.importorskip("torch")
-    from training.model import MahjongNet
-    from training.selfplay import Batcher, collect, play_one, play_pair, ppo_update
-
-    model = MahjongNet(width=16, blocks=1).eval()
-    batcher = Batcher(model, "cpu", max_batch=4)
-    try:
-        # 同一副牌、同一個 copy：完全重現（牌牆、對手、網路抽樣都一樣）
-        a = play_one(7, batcher, 0.5, Noise(), copy=0)
-        b = play_one(7, batcher, 0.5, Noise(), copy=0)
-        assert a.reward == b.reward and a.learners == b.learners
-        assert [s.action for s in a.steps[a.learners[0]]] == [s.action for s in b.steps[b.learners[0]]]
-        first, second = play_pair(7, batcher, 0.5, Noise())
-        assert first.learners == second.learners and first.rule_seats == second.rule_seats
-        assert first.baseline == second.reward and second.baseline == first.reward
-        records = collect(batcher, 4, 0, 0.5, Noise(), paired=True)
-    finally:
-        batcher.close()
-    assert len(records) == 4 and all(record.baseline is not None for record in records)
-    stats = ppo_update(model, torch.optim.Adam(model.parameters(), 1e-3), records, "cpu", epochs=1)
-    assert set(stats) == {"policy", "value", "entropy", "kl"}
-
-
-def test_parallel_actors_collect_paired_games():
-    pytest.importorskip("torch")
-    import multiprocessing
-
-    from training.model import MahjongNet
-    from training.selfplay import _actor_init, collect_parallel
-
-    model = MahjongNet(width=16, blocks=1)
-    with multiprocessing.get_context("spawn").Pool(2, _actor_init, (model.config, "cpu")) as pool:
-        records = collect_parallel(pool, model, 2, 6, 0, 0.5, paired=True)
-    assert len(records) == 6 and all(record.baseline is not None for record in records)
-
-
-def test_oracle_planes_show_hidden_hands_and_next_draws():
-    from random import Random
-
-    from game.rules import initial_state
-    from training.encoding import CHANNELS
-    from training.oracle_value import HIDDEN_CHANNELS, hidden_planes, play_and_record
-
-    state = initial_state(Random(3))
-    planes = hidden_planes(state, 0)
-    assert planes.shape == (HIDDEN_CHANNELS, 34)
-    # 下家（相對座位 1）的暗手：張數 ≥1 的平面和他的手牌一致
-    assert (planes[0] == (np.asarray(state.players[1].hand) >= 1)).all()
-    next_tile = state.wall[-1]
-    if next_tile < 34:
-        assert planes[16, next_tile] == 1
-    public, hidden, target = play_and_record(11)
-    assert public.shape[1:] == (CHANNELS, 34) and hidden.shape[1:] == (HIDDEN_CHANNELS, 34)
-    assert len(public) == len(hidden) == len(target)
-
-
 def test_attack_mode_claims_when_outs_grow_and_only_blocks_very_dangerous_tiles(monkeypatch):
     pytest.importorskip("torch")
     import agent.safety as safety

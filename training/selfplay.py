@@ -7,9 +7,6 @@
 每局每個座位有 rule_share 的機率換成規則式 AI（不訓練），避免只學會打贏自己。
 打完 games_per_iteration 局後，用這些決定做幾回 PPO 更新：
   優勢 = 這局實際輸贏 − 價值頭預測（麻將運氣成分大，用預測當基準扣掉大部分運氣）。
---paired（10/21 起）：同一副牌打兩次（牌牆、對手、對手的隨機數都一樣，只有網路的抽樣不同），
-  優勢 = 這次的輸贏 − 另一次的輸贏：發牌好壞兩次一樣、相減抵銷，剩下的差別來自網路自己的選擇。
-  10/20 rl7 用價值頭當基準練 840 輪沒有進步（只學到更保守），判斷是輸贏雜訊蓋過了打法的差別。
 """
 from __future__ import annotations
 
@@ -106,18 +103,13 @@ class GameRecord:
     discarder: int | None = None
     rule_seats: list[int] = field(default_factory=list)
     """規則式 AI 的座位（其餘非網路座位是對手池裡過去的自己）。"""
-    baseline: dict[int, float] | None = None
-    """同一副牌另一次的輸贏（--paired）；有的話優勢以它為基準，不用價值頭預測。"""
 
 
 def play_one(seed: int, batcher: Batcher, rule_share: float, noise: Noise,
-             opponent: Batcher | None = None, pool_share: float = 0.0, copy: int = 0) -> GameRecord:
+             opponent: Batcher | None = None, pool_share: float = 0.0) -> GameRecord:
     """每個座位依機率當規則式（rule_share）、對手池裡過去的自己（pool_share，需要 opponent）或
-    正在訓練的網路；至少一個座位是網路，只有它的決定拿來訓練。
-    同一個 seed 的牌牆、座位、對手用的隨機數都一樣；網路的抽樣另用 (seed, copy) 的隨機數，
-    所以 copy 不同就是「同一副牌、網路重打一次」。"""
+    正在訓練的網路；至少一個座位是網路，只有它的決定拿來訓練。"""
     rng = Random(seed)
-    learner_rng = Random(f"{seed}:{copy}")
     roles = []
     for _ in range(4):
         roll = rng.random()
@@ -148,7 +140,7 @@ def play_one(seed: int, batcher: Batcher, rule_share: float, noise: Noise,
         obs = encode(state, player, noise, noise_rng)
         if roles[player] == "pool":
             return lookup[opponent.ask(obs, mask, game_rng)[0]]
-        action, logprob, value = batcher.ask(obs, mask, learner_rng)
+        action, logprob, value = batcher.ask(obs, mask, game_rng)
         record.steps[player].append(Step(obs.astype(np.float16), mask, action, logprob, value))
         return lookup[action]
 
@@ -159,23 +151,12 @@ def play_one(seed: int, batcher: Batcher, rule_share: float, noise: Noise,
     return record
 
 
-def play_pair(seed: int, batcher: Batcher, rule_share: float, noise: Noise,
-              opponent: Batcher | None = None, pool_share: float = 0.0) -> list[GameRecord]:
-    """同一副牌打兩次，各自以另一次的輸贏為基準。"""
-    first = play_one(seed, batcher, rule_share, noise, opponent, pool_share, copy=0)
-    second = play_one(seed, batcher, rule_share, noise, opponent, pool_share, copy=1)
-    first.baseline, second.baseline = dict(second.reward), dict(first.reward)
-    return [first, second]
-
-
 def collect(batcher: Batcher, games: int, first_seed: int, rule_share: float,
             noise: Noise, opponent: Batcher | None = None,
-            pool_share: float = 0.0, paired: bool = False) -> list[GameRecord]:
-    """打 games 局（paired 時是 games // 2 副牌、每副打兩次）。"""
+            pool_share: float = 0.0) -> list[GameRecord]:
     records: list[GameRecord] = []
     lock = threading.Lock()
-    deals = max(1, games // 2) if paired else games
-    seeds = iter(range(first_seed, first_seed + deals))
+    seeds = iter(range(first_seed, first_seed + games))
 
     def worker() -> None:
         while True:
@@ -183,14 +164,11 @@ def collect(batcher: Batcher, games: int, first_seed: int, rule_share: float,
                 seed = next(seeds, None)
             if seed is None:
                 return
-            if paired:
-                played = play_pair(seed, batcher, rule_share, noise, opponent, pool_share)
-            else:
-                played = [play_one(seed, batcher, rule_share, noise, opponent, pool_share)]
+            record = play_one(seed, batcher, rule_share, noise, opponent, pool_share)
             with lock:
-                records.extend(played)
+                records.append(record)
 
-    threads = [threading.Thread(target=worker) for _ in range(min(GAMES_IN_FLIGHT, deals))]
+    threads = [threading.Thread(target=worker) for _ in range(min(GAMES_IN_FLIGHT, games))]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -210,8 +188,7 @@ def ppo_update(model: MahjongNet, optimizer, records: list[GameRecord], device: 
                 actions.append(step.action)
                 old_logprobs.append(step.logprob)
                 returns.append(record.reward[seat])
-                base = record.baseline[seat] if record.baseline is not None else step.value
-                advantages.append(record.reward[seat] - base)
+                advantages.append(record.reward[seat] - step.value)
     if not actions:
         return {}
     obs_t = torch.from_numpy(np.stack(obs).astype(np.float32))
@@ -305,11 +282,6 @@ def summarize(records: list[GameRecord]) -> str:
             f"放槍率 {deal_ins / seats:.1%}")
     if rule_seats:
         text += f"；規則式 胡牌率 {rule_wins / rule_seats:.1%}、放槍率 {rule_deal_ins / rule_seats:.1%}"
-    gaps = [(record.reward[seat] - record.baseline[seat]) * VALUE_SCALE
-            for record in records if record.baseline is not None for seat in record.learners]
-    if gaps:
-        # 同一副牌兩次的差距比單局輸贏的波動小多少＝雜訊降了多少
-        text += f"；同牌兩次相差標準差 {np.std(gaps):.2f} 台（單局輸贏 {np.std(rewards):.2f}）"
     return text
 
 
@@ -328,7 +300,7 @@ def _actor_init(config: dict, device: str) -> None:
 
 
 def _actor_collect(task: tuple) -> list[GameRecord]:
-    state, opponent_state, first_seed, games, rule_share, pool_share, paired = task
+    state, opponent_state, first_seed, games, rule_share, pool_share = task
     _actor_model.load_state_dict(state)
     batcher = Batcher(_actor_model, _actor_device)
     opponent = None
@@ -336,7 +308,7 @@ def _actor_collect(task: tuple) -> list[GameRecord]:
         _actor_opponent.load_state_dict(opponent_state)
         opponent = Batcher(_actor_opponent, _actor_device)
     try:
-        return collect(batcher, games, first_seed, rule_share, LIVE_NOISE, opponent, pool_share, paired)
+        return collect(batcher, games, first_seed, rule_share, LIVE_NOISE, opponent, pool_share)
     finally:
         batcher.close()
         if opponent is not None:
@@ -349,16 +321,13 @@ def cpu_state(model: MahjongNet) -> dict:
 
 def collect_parallel(pool, model: MahjongNet, actors: int, games: int, first_seed: int,
                      rule_share: float, opponent_state: dict | None = None,
-                     pool_share: float = 0.0, paired: bool = False) -> list[GameRecord]:
-    """把這輪的局數平均分給各對打程序，權重以 CPU 張量傳過去（paired 時以副為單位分）。"""
+                     pool_share: float = 0.0) -> list[GameRecord]:
+    """把這輪的局數平均分給各對打程序，權重以 CPU 張量傳過去。"""
     state = cpu_state(model)
-    unit = 2 if paired else 1
-    units = max(1, games // unit)
-    share = [units // actors + (1 if index < units % actors else 0) for index in range(actors)]
+    share = [games // actors + (1 if index < games % actors else 0) for index in range(actors)]
     tasks, seed = [], first_seed
     for count in share:
-        if count:
-            tasks.append((state, opponent_state, seed, count * unit, rule_share, pool_share, paired))
+        tasks.append((state, opponent_state, seed, count, rule_share, pool_share))
         seed += count
     return [record for part in pool.map(_actor_collect, tasks) for record in part]
 
@@ -392,8 +361,6 @@ def main() -> None:
     parser.add_argument("--pool-share", type=float, default=0.0,
                         help="每個座位換成對手池裡過去的自己的機率（對手池從 --init 開始）")
     parser.add_argument("--pool-every", type=int, default=50, help="每幾輪把目前的網路加進對手池")
-    parser.add_argument("--paired", action="store_true",
-                        help="同一副牌打兩次、以另一次的輸贏為基準（降雜訊，10/21 起）")
     parser.add_argument("--threads", type=int, default=0,
                         help="主程序 PyTorch CPU 執行緒數（0 = 預設）")
     args = parser.parse_args()
@@ -424,7 +391,7 @@ def main() -> None:
         opponent_state = league_rng.choice(league) if league else None
         if pool is not None:
             records = collect_parallel(pool, model, args.actors, args.games, seed, args.rule_share,
-                                       opponent_state, args.pool_share, args.paired)
+                                       opponent_state, args.pool_share)
         else:
             batcher = Batcher(model, device)
             opponent = None
@@ -432,7 +399,7 @@ def main() -> None:
                 opponent_model.load_state_dict(opponent_state)
                 opponent = Batcher(opponent_model, device)
             records = collect(batcher, args.games, seed, args.rule_share, LIVE_NOISE,
-                              opponent, args.pool_share, args.paired)
+                              opponent, args.pool_share)
             batcher.close()
             if opponent is not None:
                 opponent.close()

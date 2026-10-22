@@ -27,6 +27,19 @@ SEAT_NAMES = {"left": "上家", "top": "對家", "right": "下家"}
 MAX_TEMPLATES = 20
 HARVEST_MIN_SCORE = 0.5
 """引導搜尋找到的牌，單張分數到這個以上才收成模板。"""
+MAX_BACK_SHARE = 0.01
+"""切圖裡立著的手牌（青藍色牌背）超過這個比例就不收；MIN_BRIGHT：亮處（第 90 百分位）低於這個是畫面變暗時切的
+（吃碰按鈕亮著時遊戲會調暗畫面），也不收。10/22 收了 539 張，34 張是這兩種（上家九條、二筒角落被牌背蓋住，
+下家一萬整張偏暗），在測試截圖上把牌背、空位讀成九條、一萬。"""
+MIN_BRIGHT = 200
+
+
+def clean_crop(crop: np.ndarray) -> bool:
+    """切圖可以當模板嗎：沒被立著的手牌蓋住、不是畫面變暗時切的。"""
+    pixels = crop.astype(np.int16)
+    blue, green, red = pixels[..., 0], pixels[..., 1], pixels[..., 2]
+    back = ((green > 120) & (blue > 170) & (red < 110)).mean()
+    return back <= MAX_BACK_SHARE and np.percentile(pixels.mean(axis=2), 90) >= MIN_BRIGHT
 """每座位每種牌最多收集幾張專用模板。"""
 
 
@@ -227,6 +240,8 @@ class MeldWatch:
                 # 整組平均夠高、個別一張卻可能被立著的手牌或動畫蓋住（10/22 上家六條、七條存成半張藍色）
                 if (chow and hit.tile < 9) or hit.score < HARVEST_MIN_SCORE:
                     continue
+                if hit.crop is None or not clean_crop(hit.crop):
+                    continue
                 folder = self.template_dir / seat / tile_code(hit.tile)
                 existing = len(list(folder.glob("*.png"))) if folder.exists() else 0
                 if hit.crop is None or existing >= MAX_TEMPLATES:
@@ -248,7 +263,7 @@ class MeldWatch:
             for number, hit in enumerate(hits[start:start + length]):
                 if existing >= MAX_TEMPLATES:
                     break
-                if hit.crop is None:  # fill_gaps 補上的那張沒有切圖
+                if hit.crop is None or not clean_crop(hit.crop):  # fill_gaps 補上的那張沒有切圖
                     continue
                 self.save(folder / f"{time.strftime('%Y%m%d_%H%M%S')}_{number}.png", hit.crop)
                 existing += 1

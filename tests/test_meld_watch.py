@@ -30,7 +30,7 @@ class FakeReader:
 
 
 def hits(text):
-    crop = np.full((27, 84, 3), 200, np.uint8)
+    crop = np.full((27, 84, 3), 230, np.uint8)
     return [MeldTile(tile, 0.8, index * 30, crop) for index, tile in enumerate(parse(text))]
 
 
@@ -101,7 +101,7 @@ def test_chow_hint_guides_the_search_and_harvests_its_tiles(tmp_path):
     class GuidedReader(FakeReader):
         def guided_meld(self, image, seat, tile, kinds):
             assert (seat, tile, kinds) == ("top", P("4p"), ("chow",))
-            return [MeldTile(t, score, 1300 + 50 * i, np.zeros((45, 52, 3), np.uint8))
+            return [MeldTile(t, score, 1300 + 50 * i, np.full((45, 52, 3), 230, np.uint8))
                     for i, (t, score) in enumerate(zip(parse("645p"), (0.6, 0.55, 0.3)))]
 
     watch = MeldWatch(GuidedReader({"left": [], "top": [], "right": []}), template_dir=tmp_path,
@@ -193,3 +193,14 @@ def test_gap_between_two_same_tiles_is_filled():
     middle = [h for h in filled if h.score == 0.0]
     assert len(middle) == 1 and middle[0].position == (459 + 406) // 2
     assert fill_gaps(found[:3]) == sorted(found[:3], key=lambda h: h.position)  # 沒有空隙不補
+
+
+def test_crops_covered_by_standing_tiles_or_dimmed_are_not_templates():
+    from hint.meld_watch import clean_crop
+
+    face = np.full((27, 84, 3), 235, np.uint8)
+    assert clean_crop(face)
+    covered = face.copy()
+    covered[:, :10] = (230, 170, 40)   # BGR：青藍色牌背蓋住左邊
+    assert not clean_crop(covered)
+    assert not clean_crop((face * 0.55).astype(np.uint8))   # 吃碰按鈕亮著時畫面變暗

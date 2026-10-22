@@ -529,57 +529,6 @@ def test_exposed_tiles_count_as_visible():
     assert state.players[1].melds == []
 
 
-def test_loop_saves_frames_from_before_a_claim(monkeypatch):
-    import hint.__main__ as hint_main
-    from perception.river_tracker import RiverEvent
-
-    now = [0.0]
-    hands = [Observation(T("11223789m99m4p56779s"), None, None, ()) for _ in range(8)]
-
-    def frames():
-        for i, observation in enumerate(hands):
-            now[0] = i * 0.35
-            yield str(i), observation
-
-    class FakeRivers:
-        my_discards = 0
-
-        def update(self, frame, observation):
-            return [RiverEvent("claimed", "left", parse("7s")[0], (0, 0, 1, 1))] \
-                if frame is hands[6] else []
-
-        def discards(self):
-            return ((), (), (), ())
-
-        def meld_counts(self):
-            return (0, 0, 0, 0)
-
-        def exposed_tiles(self):
-            return ((), (), (), ())
-
-        def declared_safe(self):
-            return ((), (), (), ())
-
-        def has_discards(self):
-            return False
-
-        def total_discards(self):
-            return 0
-
-        my_pungs = []
-
-    monkeypatch.setattr(hint_main, "decide", lambda observation: None)
-    monkeypatch.setattr(hint_main, "SAVE_CLAIM_FRAMES", True)
-    saved = []
-    hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: frame,
-                  clock=lambda: now[0], rivers=FakeRivers(), show=lambda advice: None,
-                  save_result=lambda frame, prefix="": saved.append((frame, prefix)) or prefix,
-                  log=lambda *args, **kwargs: None)
-    # 2.1 秒時發現被拿走：存 0.6、1.0 秒前（1.5、1.1 秒）最接近的畫面（1.4、1.05 秒）
-    index = [next(i for i, hand in enumerate(hands) if hand is frame) for frame, _ in saved]
-    assert index == [4, 3] and {prefix for _, prefix in saved} == {"吃碰動畫_left_7s_"}
-
-
 def test_move_seconds_scale_the_monte_carlo_budget():
     import hint.advisor as advisor
     from agent.mc_agent import LIVE_ROLLOUTS, TIME_LIMIT
@@ -779,7 +728,7 @@ def test_esc_stops_at_the_end_of_the_round():
     assert seen == [0, 1, 2, 3, 4] and "這圈打完了" in lines[-1]
 
 
-def test_meld_screenshots_after_claims_and_while_melds_are_on_the_table(monkeypatch):
+def test_melds_are_read_after_claims_and_while_melds_are_on_the_table(monkeypatch):
     import hint.__main__ as hint_main
     from perception.river_tracker import RiverEvent
 
@@ -795,12 +744,17 @@ def test_meld_screenshots_after_claims_and_while_melds_are_on_the_table(monkeypa
         my_discards = 0
         my_pungs = []
         claimed = False
+        requests: list[float] = []
 
         def update(self, frame, observation):
             if frame is hands[3]:
                 self.claimed = True
                 return [RiverEvent("claimed", "left", parse("7s")[0], (0, 0, 1, 1))]
             return []
+
+        def request_melds(self, frame):
+            self.requests.append(now[0])
+            return True
 
         def discards(self):
             return ((), (), (), ())
@@ -817,16 +771,14 @@ def test_meld_screenshots_after_claims_and_while_melds_are_on_the_table(monkeypa
         def has_discards(self):
             return False
 
-        def total_discards(self):
-            return 0
-
     monkeypatch.setattr(hint_main, "decide", lambda observation: None)
+    rivers = FakeRivers()
     saved = []
     hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: frame,
-                  clock=lambda: now[0], rivers=FakeRivers(), show=lambda advice: None,
-                  save_result=lambda frame, prefix="": saved.append((now[0], prefix)) or prefix,
+                  clock=lambda: now[0], rivers=rivers, show=lambda advice: None,
+                  save_result=lambda frame, prefix="": saved.append(prefix) or prefix,
                   log=lambda *args, **kwargs: None)
-    shots = [t for t, prefix in saved if prefix == "副露_"]
-    # 1.05 秒被吃碰：1.5 秒後（2.55 起第一幀）存一張；之後場上有副露，每 8 秒一張
-    assert shots[0] >= 1.05 + hint_main.MELD_SHOT_DELAY and len(shots) == 2
-    assert shots[1] - shots[0] >= hint_main.MELD_SHOT_INTERVAL
+    # 1.05 秒被吃碰：1.5 秒後讀一次；之後場上有副露，每 8 秒讀一次；不存截圖
+    assert rivers.requests[0] >= 1.05 + hint_main.MELD_READ_DELAY and len(rivers.requests) == 2
+    assert rivers.requests[1] - rivers.requests[0] >= hint_main.MELD_READ_INTERVAL
+    assert saved == []

@@ -44,9 +44,6 @@ LABEL_MIN_SCORE = 0.7
 有 1447 張放錯資料夾或不是牌（吃碰動畫、暗條；標註套到錯的那張），自己打的牌只讀對約一半；清掉後今天讀錯的
 126 張全部讀對。門檻 0.7：正確的標註留下 99%、錯的擋下 91%。"""
 EMPTY_RESET_FRAMES = 10
-OWN_MISSING_FRAMES = 17
-"""手牌少了一張（自己打出）後這麼多次更新（約 5 秒）牌河還沒出現自己的出牌，就回報一次（存截圖查原因）。
-10/21 自己的出牌約 5.5% 牌河一直沒記到、記錄檔看不出原因。"""
 """四家牌河連續這麼多次都讀不到任何牌、追蹤器卻記著牌時，當成新的一局（沒有換三張的場、流局沒有結算畫面）。"""
 
 
@@ -286,9 +283,6 @@ class RiverWatch:
     def has_discards(self) -> bool:
         return any(self.tracker.history.values())
 
-    def total_discards(self) -> int:
-        return sum(len(tiles) for tiles in self.tracker.history.values())
-
     def declared_safe(self) -> tuple[tuple[int, ...], ...]:
         """各宣告者在認到他宣告之後，別家打出的牌（依 advisor 的座位編號排列）。"""
         result = [()] * 4
@@ -331,14 +325,6 @@ class RiverWatch:
                     # 牌河先看到這張出牌、手牌變化晚到（10/18 03:24 打的八萬、九萬被記成二筒、三萬）
                     self._apply_label(pending[0], pending[1], retry=True)
             self._turn_hand = None
-
-    def overdue_own_discard(self) -> tuple[bool, int | None]:
-        """自己打出的牌過了 OWN_MISSING_FRAMES 次更新牌河還沒看到：回傳 (True, 那張牌)，每張只回報一次。"""
-        pending = self._own_pending
-        if pending is None or self._frame - pending[1] < OWN_MISSING_FRAMES:
-            return False, None
-        self._own_pending = None
-        return True, pending[0]
 
     def _save_unknown(self, frame: np.ndarray | None, event: RiverEvent) -> None:
         """套用標註後還是認不出的牌：切圖存起來，之後人工標註補模板。"""

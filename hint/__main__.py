@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import time
 import traceback
-from collections import deque
 from dataclasses import replace
 from pathlib import Path
 from typing import Iterator
@@ -28,7 +27,7 @@ import cv2
 import numpy as np
 
 from game.rules import ActionType, forbidden_after_claim
-from game.tiles import tile_code, tile_name
+from game.tiles import tile_name
 from hint.advisor import (
     POLICIES,
     STREAK_UNKNOWN_GUESS,
@@ -61,25 +60,14 @@ CLAIM_PROMPT_REPORT = 1.5
 RIVER_INTERVAL = 0.3
 """牌河追蹤的門檻以幀數計、依約 0.3 秒一幀調校；擷取變快後牌河仍照這個間隔更新。"""
 UNREADABLE_AFTER = 6.0
-OWN_TAKEN_LIMIT = 20
-"""自己的牌被判定吃碰拿走時存畫面，每次執行最多幾張（查是不是誤判）。"""
-OWN_MISSING_LIMIT = 20
-"""自己打出的牌約 5 秒牌河都沒看到時存畫面，每次執行最多幾張（10/21 約 5.5% 原因不明）。"""
-MELD_SHOT_LIMIT = 150
-"""收集對手副露的截圖（10/22 起，改善 perception.meld_reader 的槓與側躺的萬子）：每次執行最多幾張。"""
-MELD_SHOT_DELAY = 1.5
-"""有人吃碰後等副露擺好再存。"""
-MELD_SHOT_INTERVAL = 8.0
-"""場上有人有副露時，每隔幾秒存一張（加槓、暗槓不一定有吃碰事件）。"""
+"""牌局中連續這麼多秒讀不到手牌（又不是聽牌代打）就存一張截圖，查版面認不出的原因。"""
+MELD_READ_DELAY = 1.5
+"""有人吃碰後等副露擺好再讀。"""
+MELD_READ_INTERVAL = 8.0
+"""場上有人有副露時，每隔幾秒讀一次（加槓、暗槓不一定有吃碰事件）。"""
 TABLE_INTERVAL = 1.0
 """別人的回合時放槍表最多幾秒重算一次（每次約 0.1 秒）。"""
-END_SHOT_DELAYS = (1.0, 2.0, 4.0)
-"""一局快打完（牌河記到 END_SHOT_MIN_DISCARDS 張以上）卻讀不到手牌、也還沒認到結算時，在這些秒數各存一張
-「局末_」截圖：流局沒有結算畫面，要看清楚那時畫面上是什麼（10/19 只有 6 秒後的「讀不到」，已經在擲骰子）。"""
-END_SHOT_MIN_DISCARDS = 40
-END_SHOT_LIMIT = 45
-"""每次執行最多存幾張局末截圖。"""
-"""牌局中連續這麼多秒讀不到手牌（又不是聽牌代打）就存一張截圖，查版面認不出的原因。"""
+
 CLAIM_MEMORY = 10.0
 """能吃碰時放大的牌可能先縮進牌河、按鈕卻還亮著；這段時間內沿用最近讀到的那張。"""
 RESULT_DIR = Path("result")
@@ -97,12 +85,6 @@ def save_result(frame: np.ndarray, prefix: str = "") -> Path:
     return path
 
 
-BANNER_COOLDOWN = 3.0
-"""同一次吃碰只存一次。"""
-BANNER_DELAYS = (0.6, 1.0)
-"""吃碰時吃碰者那邊會出現「吃」（紫）／「碰」（綠灰）大字約 1.5 秒，牌河要確認幾幀才報「被拿走」，
-所以存這麼多秒之前的畫面（收集起來做吃／碰與吃碰者的辨識）。"""
-RECENT_SECONDS = 2.0
 GAME_LOST_SECONDS = 60.0
 """自動模式看不到遊戲這麼久、使用者也這麼久沒操作電腦，就把遊戲切回前面
 （10/3 03:03 VS Code 跑到遊戲前面，停了 8 小時）。"""
@@ -115,8 +97,6 @@ UNKNOWN_SCREEN_SECONDS = 15.0
 STUCK_SHOTS = 2
 STUCK_SHOT_INTERVAL = 0.5
 """卡住時除了當下那張，再每 0.5 秒多存 2 張（查 10/3 出牌點了沒反應 34 次的原因）。"""
-SAVE_CLAIM_FRAMES = False
-"""收集吃碰動畫截圖（10/2 一天存了 1116 張、2.7GB，夠用了，預設關閉）。"""
 
 
 def print_log(line: str, detail: str | None = None, echo: bool = True) -> None:
@@ -208,9 +188,6 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     river_updated_at = float("-inf")
     claim_prompt_since = None
     popup_closed_at = float("-inf")
-    banner_saved_at = float("-inf")
-    recent = deque()
-    """最近幾秒的畫面（牌河更新時記一張），吃碰時存下之前的畫面。"""
     claim_prompt_reported = False
     last_readable = None
     """最近一次讀到手牌的時間；存過「讀不到」截圖後設為 None，直到再讀到手牌。"""
@@ -222,11 +199,9 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     """已經存過「不明畫面」截圖的那段期間（以 game_seen_at 區分）。"""
     stuck_shots_left, stuck_shot_at = 0, float("-inf")
     hands = HandBook()
-    own_taken_saved = 0
-    meld_shots, meld_shot_due, meld_shot_at = 0, None, clock()
+    meld_read_due, meld_read_at = None, clock()
     meld_labels = None
     """三家副露小標籤上一次顯示的文字。"""
-    own_missing_saved = 0
     meld_check = MeldCheck()
     meld_rejected = None
     """最近一次記錄過「副露數不合理」的 (副露數, 手牌)，同一個畫面只記一次。"""
@@ -255,13 +230,6 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         if text is not None:
             show_danger(text)
 
-    hand_seen_at = None
-    """最近一次讀到手牌的時間（局末截圖用）。"""
-    end_shots: set[float] = set()
-    """這段讀不到的期間已經存過的局末截圖（秒數）。"""
-    end_shots_saved = 0
-    continue_seen_at = float("-inf")
-    """卡住後還要存幾張後續截圖（每 STUCK_SHOT_INTERVAL 秒一張），看點擊後畫面怎麼變。"""
     for stamp, frame in frames:
         if stop_requested is not None and stop_requested():
             if stop_after_round:
@@ -314,9 +282,6 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             if (rivers is not None and observation is not None
                     and clock() - river_updated_at >= RIVER_INTERVAL):
                 river_updated_at = clock()
-                recent.append((clock(), frame))
-                while recent and clock() - recent[0][0] > RECENT_SECONDS:
-                    recent.popleft()
                 if observation.swap_prompt is not None and rivers.has_discards():
                     # 換三張＝新的一局。流局沒有小結算，牌河不會在按結算時重設（10/19 15:23 連兩局沒有結算，
                     # 三局的牌河疊在一起、牌牆估計剩 0 張，開局就當成最後一手在防守，拆了四五筒）
@@ -335,38 +300,15 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     name = tile_name(event.tile) if event.tile is not None else "?"
                     log(f"[{stamp}] 牌河 {event.seat} {event.kind} {name}", echo=False)
                     if event.kind in ("claimed", "claimed_unseen"):
-                        meld_shot_due = clock() + MELD_SHOT_DELAY
-                    if event.seat == "me" and event.kind == "claimed" and own_taken_saved < OWN_TAKEN_LIMIT:
-                        # 10/20 18:36～19:34 自己的牌被判定拿走 32 次、只還原 6 次，太多：存畫面查是真的吃碰還是被蓋住
-                        own_taken_saved += 1
-                        log(f"[{stamp}] 自己的牌被判定拿走，畫面存到 "
-                            f"{save_result(frame, '自己的牌被拿走_')}", echo=False)
-                    if SAVE_CLAIM_FRAMES and event.kind == "claimed" \
-                            and clock() - banner_saved_at >= BANNER_COOLDOWN:
-                        banner_saved_at = clock()
-                        for delay in BANNER_DELAYS:
-                            _, earlier = min(recent, key=lambda item: abs(clock() - delay - item[0]))
-                            code = tile_code(event.tile) if event.tile is not None else "x"
-                            path = save_result(earlier, f"吃碰動畫_{event.seat}_{code}_")
-                            log(f"[{stamp}] 有人吃碰，{delay} 秒前的畫面存到 {path}", echo=False)
-                overdue = getattr(rivers, "overdue_own_discard", None)
-                missing, tile = overdue() if overdue is not None else (False, None)
-                if missing and own_missing_saved < OWN_MISSING_LIMIT:
-                    own_missing_saved += 1
-                    name = tile_name(tile) if tile is not None else "?"
-                    log(f"[{stamp}] 自己打的 {name} 約 5 秒牌河都沒看到，畫面存到 "
-                        f"{save_result(frame, '自己的牌沒進牌河_')}", echo=False)
+                        meld_read_due = clock() + MELD_READ_DELAY
                 counts = getattr(rivers, "meld_counts", None)
                 has_melds = counts is not None and any(counts())
-                due = meld_shot_due is not None and clock() >= meld_shot_due
-                if due or (has_melds and clock() - meld_shot_at >= MELD_SHOT_INTERVAL):
-                    meld_shot_due, meld_shot_at = None, clock()
+                due = meld_read_due is not None and clock() >= meld_read_due
+                if due or (has_melds and clock() - meld_read_at >= MELD_READ_INTERVAL):
+                    meld_read_due, meld_read_at = None, clock()
                     request = getattr(rivers, "request_melds", None)
                     if request is not None:
                         request(frame)  # 背景讀對手副露
-                    if meld_shots < MELD_SHOT_LIMIT:
-                        meld_shots += 1
-                        log(f"[{stamp}] 副露截圖存到 {save_result(frame, '副露_')}", echo=False)
                 collect = getattr(rivers, "collect_melds", None)
                 if collect is not None and collect():
                     from hint.meld_watch import describe as describe_melds
@@ -394,8 +336,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     log(f"[{stamp}] {DECLARED_NAMES[seat]}宣告聽牌（第一次認到；牌河 {sizes}）", echo=False)
                 declared_seen |= observation.declared
             if observation is not None:
-                game_seen_at = last_readable = hand_seen_at = clock()
-                end_shots.clear()
+                game_seen_at = last_readable = clock()
                 for message in hands.see_dealer(observation.dealer):
                     log(f"[{stamp}] {message}", echo=False)
                 if observation.dealer_streak is None and not streak_reported:
@@ -404,17 +345,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                         f"{save_result(frame, '連莊_')}")
             elif find_autoplay is not None and find_autoplay(frame):
                 game_seen_at = last_readable = clock()  # 聽牌後遊戲代打：「取消代打」蓋住手牌是正常的
-            if (observation is None and hand_seen_at is not None and rivers is not None
-                    and continue_seen_at < hand_seen_at and end_shots_saved < END_SHOT_LIMIT
-                    and rivers.total_discards() >= END_SHOT_MIN_DISCARDS):
-                for delay in END_SHOT_DELAYS:
-                    if delay not in end_shots and clock() - hand_seen_at >= delay:
-                        end_shots.add(delay)
-                        end_shots_saved += 1
-                        log(f"[{stamp}] 局末讀不到手牌、還沒有結算畫面（{delay:.0f} 秒），截圖存到 "
-                            f"{save_result(frame, '局末_')}", echo=False)
-                        break
-            elif (last_readable is not None and clock() - last_readable >= UNREADABLE_AFTER
+            if (last_readable is not None and clock() - last_readable >= UNREADABLE_AFTER
                   and not (decided_action is not None
                            and decided_action.kind == ActionType.DECLARE)):
                 last_readable = None  # 每段讀不到的期間只存一張
@@ -463,7 +394,6 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 previous = observation
                 continue
             if isinstance(observation, ContinueButton):
-                continue_seen_at = clock()
                 if observation == acted_for:
                     if clock() - acted_at < RETRY_AFTER or retries >= MAX_RETRIES:
                         continue
