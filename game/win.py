@@ -67,6 +67,12 @@ def _expected_size(n_open_melds: int) -> int:
 def is_standard_win(counts: list[int], n_open_melds: int = 0) -> bool:
     if sum(counts) != _expected_size(n_open_melds):
         return False
+    return _standard_win_cached(tuple(counts))
+
+
+@lru_cache(maxsize=200_000)
+def _standard_win_cached(counts: tuple[int, ...]) -> bool:
+    """張數已經對了的手牌能不能胡（模擬時同樣的手牌一再檢查，快取起來）。"""
     c = list(counts)
     for pair in range(NUM_TILE_TYPES):
         if c[pair] >= 2:

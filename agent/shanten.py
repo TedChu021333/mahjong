@@ -9,16 +9,17 @@ from game.tiles import NUM_TILE_TYPES, is_suited
 
 
 def _validate_counts(counts: Sequence[int], n_open_melds: int) -> tuple[int, ...]:
-    if len(counts) != NUM_TILE_TYPES:
+    validated = tuple(counts)
+    if len(validated) != NUM_TILE_TYPES:
         raise ValueError("手牌計數陣列必須長度為 34")
     if not 0 <= n_open_melds <= 5:
         raise ValueError("副露數必須在 0-5 之間")
-    if any(count < 0 or count > 4 for count in counts):
+    if min(validated) < 0 or max(validated) > 4:  # 不用逐張 any()：模擬時每秒呼叫數萬次
         raise ValueError("每種牌的數量必須在 0-4 之間")
     expected = 16 - 3 * n_open_melds
-    if sum(counts) not in (expected, expected + 1):
+    if sum(validated) not in (expected, expected + 1):
         raise ValueError(f"向聽數計算需要 {expected} 或 {expected + 1} 張暗手牌")
-    return tuple(counts)
+    return validated
 
 
 @lru_cache(maxsize=500_000)  # 不設上限時長時間模擬會用光記憶體
@@ -123,6 +124,16 @@ def _group_frontier(counts: tuple[int, ...], suited: bool) -> tuple[tuple[int, i
     return tuple(sorted(a for a in found if not any(_better(b, a) for b in found)))
 
 
+@lru_cache(maxsize=200_000)
+def _merge_frontiers(a: tuple[tuple[int, int, int], ...],
+                     b: tuple[tuple[int, int, int], ...]) -> tuple[tuple[int, int, int], ...]:
+    """兩組牌的拆法合起來：各取一種相加，面子、搭子最多算 5、眼最多算 1（再多也不會讓向聽變好），
+    只留不被其他組合全面勝過的。向聽數只隨這三個數變好，所以先合併再取最好的結果不變。"""
+    found = {(min(5, m0 + m1), min(5, t0 + t1), min(1, p0 + p1))
+             for m0, t0, p0 in a for m1, t1, p1 in b}
+    return tuple(sorted(x for x in found if not any(_better(y, x) for y in found)))
+
+
 def standard_shanten(counts: Sequence[int], n_open_melds: int = 0) -> int:
     """回傳標準五面子一對眼的向聽數；胡牌為 -1。
 
@@ -131,21 +142,20 @@ def standard_shanten(counts: Sequence[int], n_open_melds: int = 0) -> int:
     （_group_frontier），再找最好的組合。結果與逐張遞迴的 _standard_shanten 相同
     （測試以隨機手牌比對），但快約 50 倍：模擬對局 95% 的時間原本都花在這裡。
     """
-    validated = _validate_counts(counts, n_open_melds)
-    groups = [_group_frontier(validated[start:start + 9], True) for start in (0, 9, 18)]
-    groups.append(_group_frontier(validated[27:34], False))
+    return _standard_shanten_tuple(_validate_counts(counts, n_open_melds), n_open_melds)
+
+
+def _standard_shanten_tuple(counts: tuple[int, ...], n_open_melds: int) -> int:
+    """standard_shanten 不檢查參數的版本（呼叫者已檢查過）。"""
+    merged = _merge_frontiers(
+        _merge_frontiers(_group_frontier(counts[0:9], True), _group_frontier(counts[9:18], True)),
+        _merge_frontiers(_group_frontier(counts[18:27], True), _group_frontier(counts[27:34], False)))
     best = 0
-    for m0, t0, p0 in groups[0]:
-        for m1, t1, p1 in groups[1]:
-            for m2, t2, p2 in groups[2]:
-                m = n_open_melds + m0 + m1 + m2
-                t = t0 + t1 + t2
-                p = p0 + p1 + p2
-                for m3, t3, p3 in groups[3]:
-                    melds = min(5, m + m3)
-                    value = 2 * melds + min(t + t3, 5 - melds) + min(1, p + p3)
-                    if value > best:
-                        best = value
+    for m, t, p in merged:
+        melds = min(5, n_open_melds + m)
+        value = 2 * melds + min(t, 5 - melds) + p
+        if value > best:
+            best = value
     return 10 - best
 
 
@@ -175,7 +185,7 @@ def seven_pairs_shanten(counts: Sequence[int]) -> int:
 
 @lru_cache(maxsize=200_000)  # 每筆約 0.5KB；100 萬筆時 15 個 arena 子程序用光記憶體
 def _shanten_cached(counts: tuple[int, ...], n_open_melds: int) -> int:
-    standard = standard_shanten(counts, n_open_melds)
+    standard = _standard_shanten_tuple(counts, n_open_melds)
     if n_open_melds or not win_module.LICKGU_ENABLED:
         return standard
     return min(standard, _seven_pairs_shanten_validated(counts))
