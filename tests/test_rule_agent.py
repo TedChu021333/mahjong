@@ -386,11 +386,11 @@ def test_claim_modes():
     # 碰完聽牌（一向聽 → 聽牌）：near 也碰
     state = response_state("111222333m44p77p5s89s", "4p", source=2)
     assert choose_rule_action_for_player(state, 1, claim_mode="near").kind == ActionType.PUNG
-    # 很散的手（八向聽 → 七向聽）：improve 碰；near 只碰會加台的中，不碰西（玩家 1 門風是南）
+    # 很散的手（八向聽 → 七向聽）：improve 碰；near 只碰會加台的字牌（風刻不分門風圈風都 1 台，西也碰）
     def far(pair, tile):
         return response_state(f"1479m258p369s12z{pair}67z", tile, source=2)
     assert choose_rule_action_for_player(far("33z", "3z"), 1, claim_mode="improve").kind         == ActionType.PUNG
-    assert choose_rule_action_for_player(far("33z", "3z"), 1, claim_mode="near").kind         == ActionType.PASS
+    assert choose_rule_action_for_player(far("33z", "3z"), 1, claim_mode="near").kind         == ActionType.PUNG
     assert choose_rule_action_for_player(far("55z", "5z"), 1, claim_mode="near").kind         == ActionType.PUNG
 
 

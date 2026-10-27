@@ -181,13 +181,9 @@ def choose_swap_tiles(hand: Sequence[int], limit: int = MAX_SWAP,
 
 
 def honor_tai(state: GameState, player: int, tile: int) -> int:
-    """這種字牌碰成刻子能加幾台（game.scoring 的三元牌、圈風牌、門風牌）；莊家不明時門風不算。"""
-    if tile >= 31:
-        return 1
-    tai = int(tile == state.round_wind)
-    if state.known_dealer is not None and tile == state.seat_winds[player]:
-        tai += 1
-    return tai
+    """這種字牌碰成刻子能加幾台：三元牌、東南西北都是 1 台（game.scoring；10/27 結算明細確認風刻
+    不分門風、圈風）。"""
+    return int(tile >= 27)
 
 
 GOLD_SWAP_COST = 0.2
@@ -544,9 +540,7 @@ def claim_is_worth(state: GameState, player: int, action: Action, before: tuple[
         return True
     if mode == "near":
         tile = state.last_discard
-        valued = action.kind == ActionType.PUNG and tile is not None and tile >= 27 and (
-            tile >= 31 or tile == state.round_wind
-            or (state.known_dealer is not None and tile == state.seat_winds[player]))
+        valued = action.kind == ActionType.PUNG and tile is not None and honor_tai(state, player, tile) > 0
         return valued or after[0] <= 1
     raise ValueError(f"未知的吃碰標準：{mode}")
 

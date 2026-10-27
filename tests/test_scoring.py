@@ -10,11 +10,21 @@ def C(value: str) -> list[int]:
 
 
 def test_no_honors_no_flowers_and_menzen_are_scored():
-    # 明星三缺一沒有平胡，改為無字無花 2 台（結算畫面 6 次）
+    # 全順、無字無花、胡別人的牌、兩面聽（四七筒）：門清 1 + 無字無花 2 + 平胡 2
     score = score_hand(C("123456789m123456p11p"), win_tile=parse("4p")[0])
-    assert score.tai == 3
-    assert "無字無花" in score.patterns and "門清" in score.patterns
-    assert "平胡" not in score.patterns
+    assert score.tai == 5
+    assert {"無字無花", "門清", "平胡"} <= set(score.patterns)
+    # 嵌張、邊張、有刻子都不是平胡
+    assert "平胡" not in score_hand(C("123456789m123456p11p"), win_tile=parse("5p")[0]).patterns
+    assert "平胡" not in score_hand(C("123456789m123456p11p"), win_tile=parse("3p")[0]).patterns
+    assert "平胡" not in score_hand(C("123456789m111456p11s"), win_tile=parse("4p")[0]).patterns
+
+
+def test_pinfu_allows_open_chows():
+    hand = C("456789m123456p11p")
+    melds = [Meld("chow", tuple(parse("123m")), 3)]
+    score = score_hand(hand, melds, win_tile=parse("4p")[0])
+    assert "平胡" in score.patterns and "門清" not in score.patterns
 
 
 def test_all_triplets_and_mixed_one_suit_are_scored():
@@ -52,10 +62,12 @@ def test_honor_triplets_score_dragon_and_wind_tai():
         C("111m222m333m111z555z66z"), seat_wind=27, round_wind=27
     )
     assert score.patterns.count("三元牌") == 1
-    assert score.patterns.count("門風牌") == 1
-    assert score.patterns.count("圈風牌") == 1
-    # 門清 1 + 碰碰胡 4 + 五暗刻 8 + 混一色 4 + 三元 1 + 門風 1 + 圈風 1
-    assert score.tai == 20
+    assert score.patterns.count("風牌") == 1  # 門風又是圈風也只算 1 台
+    # 門清 1 + 碰碰胡 4 + 五暗刻 8 + 混一色 4 + 三元 1 + 風 1
+    assert score.tai == 19
+    # 不是門風也不是圈風的西風刻子也算 1 台
+    other = score_hand(C("111m222m333m333z555z66z"), seat_wind=27, round_wind=27)
+    assert other.patterns.count("風牌") == 1
 
 def test_concealed_kong_keeps_menzen_but_open_kong_does_not():
     hand = C("123456789m123p11z")

@@ -33,8 +33,8 @@ TAI = {
     "三元牌": 1,
     "小三元": 4,
     "大三元": 8,
-    "門風牌": 1,
-    "圈風牌": 1,
+    "風牌": 1,
+    "平胡": 2,
     "小四喜": 8,
     "大四喜": 16,
     "花牌": 1,
@@ -156,9 +156,14 @@ def _patterns_for_decomposition(
 
     if all(kind == "pung" for kind, _ in sets):
         patterns.append("碰碰胡")
-    # 明星三缺一沒有平胡（38 張結算畫面都沒出現），改為無字無花 2 台
     if not has_flowers and not any(is_honor(tile) for tile in tiles_used):
         patterns.append("無字無花")
+        # 平胡另加 2 台（10/27 讀 1851 張結算明細：27 次全是全順、無字無花、胡別人的牌、兩面聽，
+        # 有副露也算；9/30 只看 38 張以為沒有平胡）
+        if (not self_draw and not single_wait and win_tile is not None
+                and all(kind == "chow" for kind, _ in sets)
+                and any(kind == "chow" and _two_sided(start, win_tile) for kind, start in concealed_melds)):
+            patterns.append("平胡")
     for meld in open_melds:
         if meld.kind == "kong":
             patterns.append("暗槓" if meld.from_player is None else "槓牌")
@@ -200,12 +205,15 @@ def _patterns_for_decomposition(
     elif len(wind_pungs) == 3 and pair in WINDS:
         patterns.append("小四喜")
     else:
-        for tile in wind_pungs:
-            if tile == seat_wind:
-                patterns.append("門風牌")
-            if tile == round_wind:
-                patterns.append("圈風牌")
+        # 東南西北的刻子不分門風、圈風都是 1 台、也不會重複算（10/27 結算明細 474 次，四種風各約 120 次）
+        patterns.extend("風牌" for _ in wind_pungs)
     return patterns
+
+
+def _two_sided(start: int, win_tile: int) -> bool:
+    """胡的那張落在 start 起的順子、而且是兩面聽（不是嵌張、邊張）。"""
+    position = win_tile - start
+    return (position == 0 and start % 9 != 6) or (position == 2 and start % 9 != 0)
 
 
 def _make_score(patterns: Sequence[str], dealer_streak: int,
