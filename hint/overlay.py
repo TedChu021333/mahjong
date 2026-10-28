@@ -13,6 +13,7 @@ import queue
 import threading
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 from pathlib import Path
 from typing import Callable
 
@@ -114,6 +115,26 @@ class DangerTable:
         save_position(self.window.winfo_x(), self.window.winfo_y(), TABLE_POSITION_FILE)
 
 
+SCREEN_MARGIN = 20
+"""副露小標籤離螢幕右緣至少留幾像素。"""
+
+
+def wrap_parts(text: str, measure, width: int, separator: str = "　") -> str:
+    """把「下家　碰 白　吃 七八九筒…」依 separator 分段，排不下 width 就換行（每段不拆開）。
+    10/28 使用者：下家的小標籤在螢幕右邊，副露一多就超出螢幕。"""
+    lines: list[str] = []
+    current = ""
+    for part in text.split(separator):
+        candidate = f"{current}{separator}{part}" if current else part
+        if current and measure(candidate) > width:
+            lines.append(current)
+            current = part
+        else:
+            current = candidate
+    lines.append(current)
+    return "\n".join(lines)
+
+
 class MeldLabel:
     """對手旁邊的副露小標籤：沒有副露時隱藏；左鍵拖曳（位置存檔）、右鍵隱藏到下次有變化；擷取畫面看不到它。"""
 
@@ -126,8 +147,9 @@ class MeldLabel:
         self.window.configure(bg=BACKGROUND)
         x, y = load_position(self.path, MELD_DEFAULTS[seat])
         self.window.geometry(f"+{x}+{y}")
-        self.label = tk.Label(self.window, font=("Microsoft JhengHei", 15, "bold"), fg=MELD_COLOR,
-                              bg=BACKGROUND, padx=10, pady=4)
+        self.font = tkfont.Font(family="Microsoft JhengHei", size=15, weight="bold")
+        self.label = tk.Label(self.window, font=self.font, fg=MELD_COLOR,
+                              bg=BACKGROUND, padx=10, pady=4, justify=tk.LEFT)
         self.label.pack()
         self._drag_from: tuple[int, int] | None = None
         for widget in (self.window, self.label):
@@ -144,7 +166,9 @@ class MeldLabel:
         if not text:
             self.window.withdraw()
             return
-        self.label.config(text=text)
+        # 從標籤左緣到螢幕右緣放得下多寬（扣掉左右 padx），放不下就換行
+        width = self.window.winfo_screenwidth() - self.window.winfo_x() - SCREEN_MARGIN - 20
+        self.label.config(text=wrap_parts(text, self.font.measure, max(width, 120)))
         self.window.deiconify()
         self.window.attributes("-topmost", True)
 

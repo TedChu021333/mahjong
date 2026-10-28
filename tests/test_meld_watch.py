@@ -182,7 +182,8 @@ def test_odd_middle_tile_of_a_pung_or_kong_is_fixed():
     from hint.meld_watch import fix_odd_middle
 
     assert fix_odd_middle(parse("979s")) == parse("999s")      # 21:04 對家九條槓
-    assert fix_odd_middle(parse("998s")) == parse("999s")
+    assert fix_odd_middle(parse("998s")) == parse("998s")      # 錯在頭尾可能是吃（22:53 對家七七六條）
+    assert fix_odd_middle(parse("776s")) == parse("776s")
     assert fix_odd_middle(parse("789s")) == parse("789s")      # 吃不動
     assert fix_odd_middle(parse("959s")) == parse("959s")      # 差太多
     assert fix_odd_middle(parse("9s99m")) == parse("9s99m")    # 不同花色

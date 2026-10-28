@@ -158,6 +158,13 @@ WASTE_OUTS = 4
 """沒人宣告時，網路那張的進張比同向聽最好的少這麼多張以上就改打（聽牌時改看 WASTE_TENPAI_SHARE）。"""
 WASTE_TENPAI_SHARE = 2 / 3
 """聽牌時，網路那張聽的張數不到最好的這個比例就改打。"""
+SHAPE_IMPROVEMENT_MARGIN = 4
+SHAPE_IMPROVEMENT_RATIO = 1.25
+SHAPE_NEXT_MARGIN = 0.10
+"""進張一樣時比牌型：別的牌改良牌、牌型（next_step_outs）都不比網路那張差，而且改良牌多 SHAPE_IMPROVEMENT_MARGIN 張以上、
+又是 SHAPE_IMPROVEMENT_RATIO 倍以上，或牌型好 SHAPE_NEXT_MARGIN 以上就改打（10/20～10/28 記錄重放：門檻只有「多 4 張或好 5%」時
+沒人宣告的出牌改 4.6%，很多是 29→33 這種小差距）。10/28 使用者：一二四打四（留一二邊張）——10/20 起這種形狀 45 次有 16 次打四，
+進張全都一樣、網路照自己的偏好留么九；打一留二四，摸五變成二＋四五兩面（23:15 改良牌 16 對 8）。"""
 
 
 def wasteful_discard(state: GameState, player: int, choice: Action, lookup: dict[int, Action],
@@ -190,12 +197,41 @@ def wasteful_discard(state: GameState, player: int, choice: Action, lookup: dict
         return None
     top = max(scored[tile][1] for tile in same)
     if (outs >= top * WASTE_TENPAI_SHARE) if level == 0 else (top - outs < WASTE_OUTS):
-        return None
+        return None if level == 0 else _better_shape(state, player, choice, lookup, same, scored, outs, visible)
     best = [tile for tile in same if scored[tile][1] == top]
     pick = min(best, key=lambda tile: (keep_value(me.hand, tile, state.gold_tiles), -float(logits[DISCARD + tile])))
     word = "聽" if level == 0 else "進張"
     return (lookup[DISCARD + pick],
             f"湊牌：打{tile_name(choice.tile)}{word} {outs} 張 → 改打{tile_name(pick)} {top} 張")
+
+
+def _better_shape(state: GameState, player: int, choice: Action, lookup: dict[int, Action], same: list[int],
+                  scored: dict[int, tuple[int, int]], outs: int, visible: list[int]) -> tuple[Action, str] | None:
+    """進張不比網路那張少的牌裡，牌型、改良牌都不差、其中一項明顯較好的（見 SHAPE_IMPROVEMENT_MARGIN）。"""
+    me = state.players[player]
+    candidates = [tile for tile in same if scored[tile][1] >= outs]
+    if not candidates:
+        return None
+
+    def shape(tile: int) -> tuple[int, int]:
+        hand = list(me.hand)
+        hand[tile] -= 1
+        return (next_step_outs(hand, me.open_melds, visible), improvement_count(hand, me.open_melds, visible))
+
+    base_next, base_improve = shape(choice.tile)
+    better = []
+    for tile in candidates:
+        next_outs, improve = shape(tile)
+        if next_outs >= base_next and improve >= base_improve and (
+                (improve - base_improve >= SHAPE_IMPROVEMENT_MARGIN and improve >= base_improve * SHAPE_IMPROVEMENT_RATIO)
+                or next_outs >= base_next * (1 + SHAPE_NEXT_MARGIN)):
+            better.append((next_outs, improve, -keep_value(me.hand, tile, state.gold_tiles), tile))
+    if not better:
+        return None
+    next_outs, improve, _, pick = max(better)
+    return (lookup[DISCARD + pick],
+            f"牌型：打{tile_name(choice.tile)}改良牌 {base_improve}、牌型 {base_next} → "
+            f"改打{tile_name(pick)} {improve}、{next_outs}")
 
 
 def efficient_discard(state: GameState, player: int, choice: Action, lookup: dict[int, Action],

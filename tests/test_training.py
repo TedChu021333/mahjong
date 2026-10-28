@@ -260,4 +260,24 @@ def test_wasteful_discard_leaves_small_differences_to_the_network():
     state = GameState([0] * 60, players, phase=Phase.DISCARD, last_drawn=parse("5z")[0])
     _, lookup = legal_mask(legal_actions(state, 0))
     logits = np.zeros(108, dtype=np.float32)
-    assert wasteful_discard(state, 0, Action(ActionType.DISCARD, tile=parse("6m")[0]), lookup, logits) is None
+    result = wasteful_discard(state, 0, Action(ActionType.DISCARD, tile=parse("6m")[0]), lookup, logits)
+    # 進張差不到 4 張不算浪費；但打中牌型好 22%（216 → 264），由牌型比較改打中（10/28 起）
+    assert result is not None and result[0].tile == parse("5z")[0] and result[1].startswith("牌型")
+
+
+def test_same_outs_but_clearly_worse_shape_is_switched():
+    pytest.importorskip("torch")
+    from agent.nn_agent import wasteful_discard
+    from game.rules import Meld
+    from training.actions import legal_mask
+
+    # 10/28 23:15：三四四五六七七七萬 一二四筒 一二四條（另一組副露），網路打四條；打一筒、一條進張一樣、改良牌多一倍
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("34456777m124p124s"))
+    players[0].melds = [Meld("pung", tuple(parse("555z")), 1)]
+    state = GameState([0] * 60, players, phase=Phase.DISCARD, last_drawn=parse("4s")[0])
+    _, lookup = legal_mask(legal_actions(state, 0))
+    logits = np.zeros(108, dtype=np.float32)
+    action, note = wasteful_discard(state, 0, Action(ActionType.DISCARD, tile=parse("4s")[0]), lookup, logits)
+    assert action.tile in (parse("1p")[0], parse("1s")[0]) and note.startswith("牌型：打四條")
+    assert wasteful_discard(state, 0, Action(ActionType.DISCARD, tile=parse("1s")[0]), lookup, logits) is None

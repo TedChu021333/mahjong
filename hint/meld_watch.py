@@ -100,9 +100,10 @@ def fix_confusable_manzu(tiles: list[int]) -> list[int]:
 
 
 def fix_odd_middle(tiles: list[int]) -> list[int]:
-    """連續三張同花色的數牌、兩張一樣、另一張只差 1～2（「九七九條」）：吃不可能有重複的牌，當成三張一樣的碰。
-    槓的第四張疊在中間那張上，那張最常讀錯（21:04 對家九條槓讀成九條七條九條、整組被丟掉）；
-    倒著、側躺的七八九條、一六八萬也常互相讀錯。"""
+    """連續三張同花色的數牌、頭尾兩張一樣、中間那張只差 1～2（「九七九條」）：吃不可能有重複的牌，當成三張一樣的碰。
+    槓的第四張疊在中間那張上，那張最常讀錯（21:04 對家九條槓讀成九條七條九條、整組被丟掉）。
+    只改中間那張：10/28 起「七七六條」這種錯在頭尾的也改，結果對家的條子吃（22:53 原始讀到七條、七條、六條，
+    分數只有 0.55～0.72）兩次被硬改成七條碰；頭尾讀錯的可能是吃，不猜，留給牌河引導搜尋。"""
     result = list(tiles)
     index = 0
     while index + 3 <= len(result):
@@ -110,7 +111,7 @@ def fix_odd_middle(tiles: list[int]) -> list[int]:
         counts = Counter(window)
         if len(counts) == 2 and all(tile < 27 for tile in window):
             (major, major_count), (minor, _) = counts.most_common()
-            if major_count == 2 and major // 9 == minor // 9 and abs(major - minor) <= 2 and not _is_run(window):
+            if window[0] == window[2] == major and major // 9 == minor // 9 and abs(major - minor) <= 2:
                 result[index:index + 3] = [major] * 3
                 index += 3
                 continue

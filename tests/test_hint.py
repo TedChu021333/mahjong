@@ -664,10 +664,11 @@ def test_chow_panel_is_not_a_missed_win(monkeypatch):
     assert "未胡_" not in saved
 
 
-def test_unknown_screen_is_saved_once():
-    # 10/4 06:09 跳出升級畫面後停了 4 小時，沒有截圖可以做辨識
+def test_unknown_screen_is_logged_once_without_a_screenshot():
+    # 10/4 06:09 跳出升級畫面後停了 4 小時；10/28 起只記錄、不存截圖（多半是場外畫面，省空間）
     lines = run_unrecognised(FakeGameWindow(idle=3.0))
     assert sum("認不出畫面" in line for line in lines) == 1
+    assert not any("不明畫面_" in line for line in lines)
 
 
 def test_danger_table_lists_the_riskiest_tiles_in_hand():

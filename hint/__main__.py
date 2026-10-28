@@ -96,8 +96,8 @@ STUCK_IDLE_SECONDS = 5.0
 """點了幾次都沒反應時，遊戲不在前景、使用者也這麼久沒操作，就把遊戲切到前面再試
 （10/3 02:23～03:03 出牌點了沒反應 9 次）。"""
 UNKNOWN_SCREEN_SECONDS = 15.0
-"""這麼久認不出畫面（不是手牌、按鈕、結算、代打）就存一張截圖：10/4 06:09 跳出升級畫面後停了 4 小時，
-當時沒有截圖可以做辨識。"""
+"""這麼久認不出畫面（不是手牌、按鈕、結算、代打）就記一行記錄（10/4 06:09 跳出升級畫面後停了 4 小時）。
+10/28 起不再存截圖：認不出的幾乎都是場外畫面（配桌、大廳），使用者要省空間、只截場中的圖。"""
 STUCK_SHOTS = 2
 STUCK_SHOT_INTERVAL = 0.5
 """卡住時除了當下那張，再每 0.5 秒多存 2 張（查 10/3 出牌點了沒反應 34 次的原因）。"""
@@ -261,9 +261,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 log(f"[{stamp}] 卡住後續截圖存到 {save_result(frame, '卡住_後續_')}", echo=False)
             if clock() - game_seen_at >= UNKNOWN_SCREEN_SECONDS \
                     and unknown_saved_for != game_seen_at:
-                unknown_saved_for = game_seen_at  # 每段認不出的期間只存一張
-                log(f"[{stamp}] {UNKNOWN_SCREEN_SECONDS:.0f} 秒認不出畫面（不是手牌、按鈕或結算），"
-                    f"截圖存到 {save_result(frame, '不明畫面_')}")
+                unknown_saved_for = game_seen_at  # 每段認不出的期間只記一次
+                log(f"[{stamp}] {UNKNOWN_SCREEN_SECONDS:.0f} 秒認不出畫面（不是手牌、按鈕或結算，多半是場外畫面）")
             if (actuator is not None and window is not None
                     and clock() - game_seen_at >= GAME_LOST_SECONDS
                     and clock() - focus_tried_at >= GAME_LOST_SECONDS
