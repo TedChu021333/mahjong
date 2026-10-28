@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import numpy as np
 
 from game.rules import Meld
@@ -221,14 +223,16 @@ def test_felt_crops_kongs_and_forced_manzu_pungs_are_not_harvested(tmp_path):
     assert clean_crop(np.full((27, 84, 3), 230, np.uint8))
 
     saved = []
-    reader = FakeReader({"left": hits("3333m"), "top": hits("618m"), "right": hits("555p")})
+    # 上家：直條開頭的桌布被讀成三萬、和三萬碰並排（10/28）——碰照收，桌布那張不收
+    left = [replace(hits("3m")[0], crop=felt)] + hits("333m", 30)
+    reader = FakeReader({"left": left, "top": hits("618m"), "right": hits("555p")})
     watch = MeldWatch(reader, template_dir=tmp_path, save=lambda path, image: saved.append(path),
                       background=False)
     watch.request(np.zeros((10, 10, 3), np.uint8))
-    # 推算上家碰三萬（讀到四張並排＝多讀一張）、對家碰五萬（讀到的是六一八萬，校正硬改成碰）、下家碰五筒
+    # 推算上家碰三萬、對家碰五萬（讀到的是六一八萬，校正硬改成碰，不收）、下家碰五筒
     watch.collect({"left": parse("33m"), "top": parse("55m"), "right": parse("55p")})
-    assert {path.parent.parent.name for path in saved} == {"right"}
-    assert len(saved) == 3
+    seats = [path.parent.parent.name for path in saved]
+    assert seats.count("left") == 2 and seats.count("right") == 3 and "top" not in seats
 
 
 def test_misread_manzu_chow_is_replaced_by_the_guided_chow_with_the_taken_tile():
@@ -267,3 +271,16 @@ def test_impossible_confusable_manzu_pung_becomes_the_one_that_fits():
                               opponent_melds=((), (), (), (Meld("pung", (P("1m"),) * 3, -1),)))
     melds = build_state(observation, waiting=True).players[3].melds
     assert melds[0].tiles == (P("6m"),) * 3
+
+
+
+def test_stacked_pung_is_shown_as_a_kong_and_stays_one():
+    reader = FakeReader({"left": [], "top": [], "right": [replace(hit, stacked=True) for hit in hits("888m")]})
+    watch = MeldWatch(reader, template_dir=None, background=False)
+    frame = np.zeros((10, 10, 3), np.uint8)
+    watch.request(frame); watch.collect({})
+    assert watch.melds["right"] == (Meld("kong", (P("8m"),) * 4, -1),)
+    # 下一次疊起來那張被擋住、只讀成碰：還是槓
+    reader.result = {"left": [], "top": [], "right": hits("888m")}
+    watch.request(frame); watch.collect({})
+    assert watch.melds["right"] == (Meld("kong", (P("8m"),) * 4, -1),)

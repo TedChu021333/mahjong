@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import permutations
 from pathlib import Path
 
@@ -65,6 +65,8 @@ class MeldTile:
     """在直條（上家、下家）或那一列（對家）上的位置，用來排順序。"""
     crop: np.ndarray | None = field(default=None, compare=False, repr=False)
     """這張牌在直條／那一列上的切圖（轉向後、和模板同方向），收集專用模板用。"""
+    stacked: bool = field(default=False, compare=False)
+    """這張是槓的一部分（看到第四張疊在中間那張上，見 _side_kongs、_top_kongs）。"""
 
 
 def _strip_transform(seat: str) -> np.ndarray:
@@ -153,6 +155,14 @@ class Scan:
         return self.area[other:other + height, position:position + width]
 
 
+KONG_BAND_SHARE = 0.6
+KONG_BAND_ROWS = 3
+KONG_PAIR_SPAN = 75
+"""上家、下家的槓：第四張疊在中間那張上、往畫面上方偏，拉直後兩張一樣的牌之間露出一段藍色牌側（一般的碰三張牌面相連、
+沒有藍色）。兩張一樣的牌相距不超過 KONG_PAIR_SPAN、中間有 KONG_BAND_ROWS 列以上藍色超過 KONG_BAND_SHARE 就是槓。
+10/28 槓截圖：上家八萬槓、東槓抓到；上家九筒槓在直條起點、第一張被切掉，抓不到；已知答案的截圖沒有誤判。"""
+TOP_STACK_RISE = 8
+"""對家的槓：疊起來的中間那張牌面上緣比兩旁高（10/28 對家八萬槓 141 對 159；一般的碰、吃 41 張都在 158～159）。"""
 NUMBER_HALF = {"left": "right", "right": "left", "top": "bottom"}
 MANZU_SHIFT = 6
 """萬子數字比對時，允許和定位的位置差幾像素。"""
@@ -250,6 +260,7 @@ class MeldReader:
             scan = Scan(strip, self.side[seat], axis=1)
             hits = _peaks(scan.best, scan.label, SIDE_MIN_SCORE, SIDE_SPACING)
         hits = _refine_manzu(scan, hits, start, seat, self.side_base[seat])
+        hits = _side_kongs(strip, hits)
         return hits if seat == "left" else hits[::-1]
 
     def _top(self, image: np.ndarray) -> list[MeldTile]:
@@ -261,7 +272,7 @@ class MeldReader:
             start = left
             scan = Scan(image[top:bottom, left:right], self.top, axis=0)
             hits = _peaks(scan.best, scan.label, TOP_MIN_SCORE, TOP_SPACING, left)
-        return _refine_manzu(scan, hits, start, "top", self.top_base)[::-1]
+        return _top_kongs(image, _refine_manzu(scan, hits, start, "top", self.top_base))[::-1]
 
     def guided_chow(self, image: np.ndarray, seat: str, tile: int) -> list[MeldTile] | None:
         return self.guided_meld(image, seat, tile, ("chow",))
@@ -319,16 +330,66 @@ class MeldReader:
         return {"left": self._side(image, "left"), "right": self._side(image, "right"), "top": self._top(image)}
 
 
+def _band_rows(strip: np.ndarray) -> np.ndarray:
+    """直條每一列有多少比例是藍色牌側（紅色幾乎沒有、藍明顯比綠多；牌面、桌布都不是）。"""
+    pixels = strip.astype(np.int16)
+    blue, green, red = pixels[..., 0], pixels[..., 1], pixels[..., 2]
+    return ((blue > 130) & (red < 40) & (blue - green > 25)).mean(axis=1)
+
+
+def _side_kongs(strip: np.ndarray, hits: list[MeldTile]) -> list[MeldTile]:
+    """上家、下家：兩張一樣的牌之間有藍色牌側＝槓。中間讀到的牌（疊起來那張的側面常被讀成別的）換成一張同樣的牌，
+    三張都標成 stacked。"""
+    ordered = sorted(hits, key=lambda hit: hit.position)
+    band = _band_rows(strip)
+    index = 0
+    while index < len(ordered):
+        a = ordered[index]
+        for other in range(index + 1, len(ordered)):
+            b = ordered[other]
+            if b.position - a.position > KONG_PAIR_SPAN:
+                break
+            between = band[a.position + 20:b.position + 4]
+            if b.tile != a.tile or (between > KONG_BAND_SHARE).sum() < KONG_BAND_ROWS:
+                continue
+            middle = MeldTile(a.tile, min(a.score, b.score), (a.position + b.position) // 2, None, True)
+            ordered[index:other + 1] = [replace(a, stacked=True), middle, replace(b, stacked=True)]
+            index += 2
+            break
+        index += 1
+    return ordered
+
+
+def _face_top(image: np.ndarray, hit: MeldTile) -> int | None:
+    """對家那張牌（hit.position 是牌的左緣）牌面上緣的 y。"""
+    _, top, _, bottom = TOP_MELD_ROW
+    area = image[top - 40:bottom, hit.position + 12:hit.position + 40]
+    white = (area.min(axis=2) > 200).mean(axis=1)
+    rows = np.flatnonzero(white > 0.6)
+    return int(rows[0]) + top - 40 if len(rows) else None
+
+
+def _top_kongs(image: np.ndarray, hits: list[MeldTile]) -> list[MeldTile]:
+    """對家：碰的中間那張牌面比兩旁高 TOP_STACK_RISE 以上＝槓（第四張疊在上面），三張標成 stacked。"""
+    ordered = sorted(hits, key=lambda hit: hit.position)
+    for kind, start, length in meld_spans([hit.tile for hit in ordered]):
+        if kind != "pung":
+            continue
+        tops = [_face_top(image, hit) for hit in ordered[start:start + length]]
+        if None not in tops and tops[1] <= min(tops[0], tops[2]) - TOP_STACK_RISE:
+            ordered[start:start + length] = [replace(hit, stacked=True) for hit in ordered[start:start + length]]
+    return ordered
+
+
 def meld_spans(tiles: list[int]) -> list[tuple[str, int, int]]:
-    """依擺放順序分組：四張一樣＝槓、三張一樣＝碰、同花色連續三張＝吃；回傳每組 (種類, 起點, 張數)，分不出的牌跳過。"""
+    """依擺放順序分組：三張一樣＝碰、同花色連續三張＝吃；回傳每組 (種類, 起點, 張數)，分不出的牌跳過。
+    槓不會四張並排（第四張疊在中間那張上，由 MeldTile.stacked 標出）：四張一樣並排是多讀了一張（10/28 對家
+    九萬碰旁邊的七萬碰讀成九萬，被當成九萬槓、七萬碰不見），當成碰加一張分不出的牌。"""
     spans = []
     index = 0
     while index < len(tiles):
         rest = tiles[index:]
-        if len(rest) >= 4 and len(set(rest[:4])) == 1:
-            spans.append(("kong", index, 4))
-            index += 4
-        elif len(rest) >= 3 and len(set(rest[:3])) == 1:
+        if len(rest) >= 3 and len(set(rest[:3])) == 1:
             spans.append(("pung", index, 3))
             index += 3
         elif len(rest) >= 3 and _is_run(rest[:3]):

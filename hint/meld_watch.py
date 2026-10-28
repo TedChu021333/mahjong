@@ -197,7 +197,11 @@ class MeldWatch:
         melds = []
         for _, votes, latest, locked in slots:
             top = max(votes.values())
-            melds.append(locked or (latest if votes[latest] == top else max(votes, key=votes.get)))
+            meld = locked or (latest if votes[latest] == top else max(votes, key=votes.get))
+            kong = Meld("kong", (meld.tiles[0],) * 4, from_player=-1)
+            if meld.kind == "pung" and kong in votes:
+                meld = kong  # 碰只會變成槓（加槓），看過一次是槓就一直算槓；疊起來那張有時被擋住
+            melds.append(meld)
         return melds[:5]
 
     def busy(self) -> bool:
@@ -261,6 +265,8 @@ class MeldWatch:
             tiles = fix_odd_middle(fix_confusable_manzu(tiles))
             for kind, start, length in meld_spans(tiles):
                 group = tiles[start:start + length]
+                if kind == "pung" and any(hit.stacked for hit in hits[start:start + length]):
+                    kind, group = "kong", group + group[:1]  # 第四張疊在中間那張上
                 meld = Meld(kind, tuple(sorted(group)) if kind == "chow" else tuple(group), from_player=-1)
                 self._vote(seat, hits[start + 1].position, meld)
             for guided_seat, found, replaced in pending[2]:

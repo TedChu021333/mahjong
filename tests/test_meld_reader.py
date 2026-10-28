@@ -11,10 +11,11 @@ def P(text):
 
 
 def test_group_melds_finds_kongs_pungs_and_chows_in_order():
+    # 四張並排不是槓（遊戲把第四張疊在中間那張上）：碰加一張分不出的牌
     melds, leftover = group_melds(parse("5555m777z546p1s"))
-    assert [m.kind for m in melds] == ["kong", "pung", "chow"]
+    assert [m.kind for m in melds] == ["pung", "pung", "chow"]
     assert melds[2].tiles == tuple(parse("456p"))
-    assert leftover == [P("1s")]
+    assert leftover == [P("5m"), P("1s")]
     # 跨花色不是吃
     melds, leftover = group_melds(parse("89m1p"))
     assert melds == [] and len(leftover) == 3
@@ -65,3 +66,37 @@ def test_top_seat_reading_stays_accurate_on_labelled_screenshots(tmp_path):
         good += sum((got & want).values())
         wrong += sum((got - want).values())
     assert good >= 32 and wrong <= 1, (good, wrong)
+
+
+@pytest.mark.parametrize("name, seat, tile", [
+    ("經典_槓_對家八萬.png", "top", "8m"),        # 10/28 21:37 中間那張比兩旁高
+    ("經典_槓_上家八萬.png", "left", "8m"),       # 10/28 21:54 兩張八萬之間露出藍色牌側
+    ("經典_副露_驗證_203436.png", "left", "1z"),  # 10/22 上家東槓
+])
+def test_stacked_fourth_tile_marks_a_kong(name, seat, tile):
+    from perception.capture import read_image
+    from perception.meld_reader import MeldReader
+
+    path = Path("train") / name
+    reader = MeldReader.from_directory()
+    if not path.exists() or reader is None:
+        pytest.skip("缺少訓練截圖或牌河模板")
+    hits = reader.read(read_image(path))[seat]
+    stacked = [hit for hit in hits if hit.stacked]
+    assert len(stacked) == 3 and {hit.tile for hit in stacked} == {P(tile)}
+
+
+def test_no_kong_on_screens_without_one():
+    from perception.capture import read_image
+    from perception.meld_reader import MeldReader
+
+    reader = MeldReader.from_directory()
+    names = ["經典_副露_上家碰白_下家碰一筒.png", "經典_副露_對家碰發.png", "經典_副露_下家吃四五六筒.png",
+             "經典_副露_驗證_193456.png", "經典_副露_驗證_200831.png", "經典_副露_驗證_202741.png",
+             "經典_副露_驗證_203038.png", "經典_副露_驗證_203544.png"]
+    paths = [Path("train") / name for name in names]
+    if reader is None or not all(path.exists() for path in paths):
+        pytest.skip("缺少訓練截圖或牌河模板")
+    for path in paths:
+        read = reader.read(read_image(path))
+        assert not any(hit.stacked for hits in read.values() for hit in hits), path.name
