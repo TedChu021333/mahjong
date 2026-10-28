@@ -37,6 +37,9 @@ MAX_BACK_SHARE = 0.01
 （吃碰按鈕亮著時遊戲會調暗畫面），也不收。10/22 收了 539 張，34 張是這兩種（上家九條、二筒角落被牌背蓋住，
 下家一萬整張偏暗），在測試截圖上把牌背、空位讀成九條、一萬。"""
 MIN_BRIGHT = 200
+MIN_FACE_SHARE = 0.35
+"""切圖裡亮（牌面）的部分至少要這麼多：10/28 上家直條開頭的綠色桌布（只有下緣一條白）被讀成三萬、八萬收進模板，
+越收越會把桌布讀成牌（測試截圖上家多讀一張三萬）；桌布切圖 0.19～0.22，真的牌最少 0.42。"""
 
 
 def clean_crop(crop: np.ndarray) -> bool:
@@ -44,7 +47,9 @@ def clean_crop(crop: np.ndarray) -> bool:
     pixels = crop.astype(np.int16)
     blue, green, red = pixels[..., 0], pixels[..., 1], pixels[..., 2]
     back = ((green > 120) & (blue > 170) & (red < 110)).mean()
-    return back <= MAX_BACK_SHARE and np.percentile(pixels.mean(axis=2), 90) >= MIN_BRIGHT
+    gray = pixels.mean(axis=2)
+    return (back <= MAX_BACK_SHARE and np.percentile(gray, 90) >= MIN_BRIGHT
+            and (gray > 170).mean() >= MIN_FACE_SHARE)
 """每座位每種牌最多收集幾張專用模板。"""
 
 
@@ -154,7 +159,7 @@ class MeldWatch:
         """換局時加一：換局前送出的讀取結果作廢。"""
         self.saved_templates = 0
         self._slots: dict[str, list[list]] = {}
-        """各家副露的位置：[位置, 這個位置讀到各種組的票數, 最近一次讀到的組]。"""
+        """各家副露的位置：[位置, 這個位置讀到各種組的票數, 最近一次讀到的組, 引導搜尋確認後固定的組]。"""
 
         self.reads = 0
 
@@ -171,18 +176,28 @@ class MeldWatch:
         gap = SLOT_GAP["top" if seat == "top" else "side"]
         slot = next((slot for slot in slots if abs(slot[0] - position) < gap), None)
         if slot is None:
-            slot = [position, Counter(), meld]
+            slot = [position, Counter(), meld, None]
             slots.append(slot)
         slot[1][meld] += 1
         slot[2] = meld
+
+    def _pin(self, seat: str, found: list[MeldTile]) -> None:
+        """引導搜尋用牌河確認的牌換掉讀錯的萬子吃：那個位置固定成這組，之後一般讀取又讀錯也不換回去。"""
+        ordered = sorted(found, key=lambda hit: hit.position)
+        meld = Meld("chow", tuple(sorted(hit.tile for hit in ordered)), from_player=-1)
+        self._vote(seat, ordered[1].position, meld)
+        gap = SLOT_GAP["top" if seat == "top" else "side"]
+        for slot in self._slots[seat]:
+            if abs(slot[0] - ordered[1].position) < gap:
+                slot[3] = meld
 
     def _seat_melds(self, seat: str) -> list[Meld]:
         """每個位置票數最多的那組（同票取最近讀到的），從副露那一端排起（上家從小到大，對家、下家從大到小）。"""
         slots = sorted(self._slots.get(seat, []), key=lambda slot: slot[0], reverse=seat != "left")
         melds = []
-        for _, votes, latest in slots:
+        for _, votes, latest, locked in slots:
             top = max(votes.values())
-            melds.append(latest if votes[latest] == top else max(votes, key=votes.get))
+            melds.append(locked or (latest if votes[latest] == top else max(votes, key=votes.get)))
         return melds[:5]
 
     def busy(self) -> bool:
@@ -200,7 +215,7 @@ class MeldWatch:
 
         def work() -> None:
             read = self.reader.read(image)
-            found_chows: list[tuple[str, list[MeldTile]]] = []
+            found_chows: list[tuple[str, list[MeldTile], bool]] = []
             guided = getattr(self.reader, "guided_meld", None)
             for seat, items in hints.items():
                 for tile, kind in items:
@@ -208,11 +223,17 @@ class MeldWatch:
                     found = guided(image, seat, tile, kinds) if guided is not None else None
                     current = read.get(seat, [])
                     grouped = _grouped_hits(current)
-                    if found and not _overlaps(found, grouped):
-                        # 沒成組的單張（多半是讀錯）在同一位置的換成引導搜尋找到的
-                        kept = [hit for hit in current if hit in grouped or not _overlaps([hit], found)]
+                    if not found:
+                        continue
+                    blocking = [group for group in _hit_groups(current) if _overlaps(found, group)]
+                    replace = bool(blocking) and _misread_manzu_chows(blocking, found, tile)
+                    if not blocking or replace:
+                        # 沒成組的單張（多半是讀錯）在同一位置的換成引導搜尋找到的；讀錯的萬子吃整組換掉
+                        dropped = [hit for group in blocking for hit in group] if replace else []
+                        kept = [hit for hit in current if hit not in dropped
+                                and (hit in grouped or not _overlaps([hit], found))]
                         read[seat] = kept + found
-                        found_chows.append((seat, found))
+                        found_chows.append((seat, found, replace))
             with self._lock:
                 if generation == self._generation:
                     self._pending = (generation, read, found_chows)
@@ -242,22 +263,25 @@ class MeldWatch:
                 group = tiles[start:start + length]
                 meld = Meld(kind, tuple(sorted(group)) if kind == "chow" else tuple(group), from_player=-1)
                 self._vote(seat, hits[start + 1].position, meld)
+            for guided_seat, found, replaced in pending[2]:
+                if guided_seat == seat and replaced:
+                    self._pin(seat, found)
             melds = self._seat_melds(seat)
             if melds:
                 result[seat] = tuple(melds[:5])
-            self._harvest(seat, hits, tiles, known.get(seat, []))
+            self._harvest(seat, hits, tiles, known.get(seat, []), [hit.tile for hit in hits])
         self._harvest_guided(pending[2])
         changed = result != self.melds
         self.melds = result
         return changed
 
-    def _harvest_guided(self, guided: list[tuple[str, list[MeldTile]]]) -> None:
+    def _harvest_guided(self, guided: list[tuple[str, list[MeldTile], bool]]) -> None:
         """引導搜尋找到的副露：切圖存成專用模板。哪三張是確定的（包含被吃的那張、三張連號），但吃的三張「誰是誰」
         靠三種排列的分數比，萬子數字倒著或側躺時很小、分數很接近，10/22 對家一二三萬就把一萬存成二萬、二萬存成三萬
         （錯的模板會讓對家越讀越錯）——吃的萬子不收；碰三張一樣、筒條的形狀差很多，照收。"""
         if self.template_dir is None:
             return
-        for seat, hits in guided:
+        for seat, hits, _ in guided:
             chow = len({hit.tile for hit in hits}) > 1
             for number, hit in enumerate(hits):
                 # 整組平均夠高、個別一張卻可能被立著的手牌或動畫蓋住（10/22 上家六條、七條存成半張藍色）
@@ -272,14 +296,23 @@ class MeldWatch:
                 self.save(folder / f"{time.strftime('%Y%m%d_%H%M%S')}_c{number}.png", hit.crop)
                 self.saved_templates += 1
 
-    def _harvest(self, seat: str, hits: list[MeldTile], tiles: list[int], known: list[int]) -> None:
-        """讀到（校正後）的碰和牌河推算的對得上：那幾張切圖存成專用模板（標註用校正後的牌）。"""
+    def _harvest(self, seat: str, hits: list[MeldTile], tiles: list[int], known: list[int],
+                 raw: list[int] | None = None) -> None:
+        """讀到（校正後）的碰和牌河推算的對得上：那幾張切圖存成專用模板（標註用校正後的牌）。
+        只收三張的碰：畫面上槓的第四張是疊起來的，四張並排一定是多讀了一張（10/28 桌布、七萬就這樣跟著碰被收進去）。
+        raw（校正前讀到的牌）裡至少兩張就是這種牌，或者三張都是容易混的一／六／八萬，才收：萬子校正會把吃硬改成碰
+        （10/22 對家六七八萬被收成五萬）。"""
         if self.template_dir is None:
             return
         confirmed = {tile for tile, count in Counter(known).items() if count >= 2}
+        raw = raw if raw is not None else tiles
         for kind, start, length in meld_spans(tiles):
             tile = tiles[start]
-            if kind not in ("pung", "kong") or tile not in confirmed:
+            if kind != "pung" or tile not in confirmed:
+                continue
+            read = raw[start:start + length]
+            if read.count(tile) < 2 and not (tile in CONFUSABLE_MANZU
+                                             and all(t in CONFUSABLE_MANZU for t in read)):
                 continue
             folder = self.template_dir / seat / tile_code(tile)
             existing = len(list(folder.glob("*.png"))) if folder.exists() else 0
@@ -298,6 +331,25 @@ def _grouped_hits(hits: list[MeldTile]) -> list[MeldTile]:
     ordered = sorted(hits, key=lambda hit: hit.position)
     spans = meld_spans([hit.tile for hit in ordered])
     return [hit for _, start, length in spans for hit in ordered[start:start + length]]
+
+
+def _hit_groups(hits: list[MeldTile]) -> list[list[MeldTile]]:
+    """依位置排序後能成組的每一組牌。"""
+    ordered = sorted(hits, key=lambda hit: hit.position)
+    spans = meld_spans([hit.tile for hit in ordered])
+    return [ordered[start:start + length] for _, start, length in spans]
+
+
+def _misread_manzu_chows(blocking: list[list[MeldTile]], found: list[MeldTile], tile: int) -> bool:
+    """擋住引導搜尋的組都是不含被吃那張的萬子吃，而引導搜尋找到的是含那張的萬子吃：一般讀取讀錯了。
+    10/22 對家倒著的一二三萬讀成三四五萬（合法的吃，萬子校正修不了）；牌河知道對家吃的是哪一張。"""
+    if tile >= 9 or any(hit.tile >= 9 for hit in found) or tile not in [hit.tile for hit in found]:
+        return False
+    for group in blocking:
+        tiles = [hit.tile for hit in group]
+        if len(tiles) != 3 or not _is_run(tiles) or tiles[0] >= 9 or tile in tiles:
+            return False
+    return True
 
 
 def _overlaps(found: list[MeldTile], hits: list[MeldTile], gap: int = 15) -> bool:

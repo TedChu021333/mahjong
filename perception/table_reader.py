@@ -58,7 +58,9 @@ STREAK_WHITE_MIN = 190
 STREAK_DIGIT_MIN_X = 10
 STREAK_DIGIT_MIN_AREA = 50
 STREAK_DIGIT_SIZE = (12, 20)
-STREAK_MIN_IOU = 0.7
+STREAK_MIN_IOU = 0.55
+"""連莊數字和模板的重疊比例門檻。原本 0.7：10/20、10/22 兩次「1」只有 0.66（方塊位置略偏）被當成認不出；
+6 張 `連莊_` 截圖裡不同數字最高只有 0.42。"""
 
 
 def _hsv(image: np.ndarray) -> np.ndarray:

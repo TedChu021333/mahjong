@@ -208,3 +208,62 @@ def test_crops_covered_by_standing_tiles_or_dimmed_are_not_templates():
     covered[:, :10] = (230, 170, 40)   # BGR：青藍色牌背蓋住左邊
     assert not clean_crop(covered)
     assert not clean_crop((face * 0.55).astype(np.uint8))   # 吃碰按鈕亮著時畫面變暗
+
+
+def test_felt_crops_kongs_and_forced_manzu_pungs_are_not_harvested(tmp_path):
+    from hint.meld_watch import clean_crop
+
+    # 綠色桌布、只有下緣一條白：不是牌
+    felt = np.zeros((27, 84, 3), np.uint8)
+    felt[..., 1] = 40
+    felt[22:] = 230
+    assert not clean_crop(felt)
+    assert clean_crop(np.full((27, 84, 3), 230, np.uint8))
+
+    saved = []
+    reader = FakeReader({"left": hits("3333m"), "top": hits("618m"), "right": hits("555p")})
+    watch = MeldWatch(reader, template_dir=tmp_path, save=lambda path, image: saved.append(path),
+                      background=False)
+    watch.request(np.zeros((10, 10, 3), np.uint8))
+    # 推算上家碰三萬（讀到四張並排＝多讀一張）、對家碰五萬（讀到的是六一八萬，校正硬改成碰）、下家碰五筒
+    watch.collect({"left": parse("33m"), "top": parse("55m"), "right": parse("55p")})
+    assert {path.parent.parent.name for path in saved} == {"right"}
+    assert len(saved) == 3
+
+
+def test_misread_manzu_chow_is_replaced_by_the_guided_chow_with_the_taken_tile():
+    class GuidedReader(FakeReader):
+        def guided_meld(self, image, seat, tile, kinds):
+            return [MeldTile(t, 0.5, 10 + 30 * i, None) for i, t in enumerate(parse("123m"))]
+
+    # 對家倒著的一二三萬讀成三四五萬；牌河知道對家吃的是一萬
+    reader = GuidedReader({"left": [], "top": hits("345m"), "right": []})
+    watch = MeldWatch(reader, template_dir=None, background=False)
+    frame = np.zeros((10, 10, 3), np.uint8)
+    for _ in range(3):  # 之前已經讀錯好幾次
+        watch.request(frame)
+        watch.collect({})
+    watch.request(frame, {"top": [(P("1m"), "chow")]})
+    watch.collect({})
+    assert watch.melds["top"] == (Meld("chow", tuple(parse("123m")), -1),)
+    # 之後一般讀取又讀成三四五萬（沒有提示了）：不換回去
+    watch.request(frame)
+    watch.collect({})
+    assert watch.melds["top"] == (Meld("chow", tuple(parse("123m")), -1),)
+    # 擋住的組含有被吃的那張（讀的可能是對的）：不換
+    reader2 = GuidedReader({"left": [], "top": hits("234m"), "right": []})
+    watch2 = MeldWatch(reader2, template_dir=None, background=False)
+    watch2.request(frame, {"top": [(P("2m"), "chow")]})
+    watch2.collect({})
+    assert watch2.melds["top"] == (Meld("chow", tuple(parse("234m")), -1),)
+
+
+def test_impossible_confusable_manzu_pung_becomes_the_one_that_fits():
+    from hint.advisor import Observation, build_state
+
+    # 讀成一萬碰，但自己手上已經有兩張一萬：一萬放不下；八萬手上也有兩張，只剩六萬放得下
+    observation = Observation(tuple(parse("1188m234p56779s11z4p")), None, None, (),
+                              melds=(0, 0, 0, 1),
+                              opponent_melds=((), (), (), (Meld("pung", (P("1m"),) * 3, -1),)))
+    melds = build_state(observation, waiting=True).players[3].melds
+    assert melds[0].tiles == (P("6m"),) * 3

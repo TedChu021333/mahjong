@@ -141,6 +141,14 @@ DECLARED_NAMES = {"left": "上家", "top": "對家", "right": "下家"}
 CLAIM_SOURCE_NAMES = DECLARED_NAMES
 
 
+def decision_key(observation) -> tuple:
+    """決定只跟這些有關；一樣就沿用上次的決定。金牌、選起的牌、牌河等每幀會跳動的辨識不算：10/28 16:24、16:39
+    手牌沒變，「聽」標記漏認一幀、或別家多打一張，網路的選擇就在南／四筒、九筒／二條之間換（使用者要求解決）。
+    宣告者算在內（漏認由提示迴圈補成整局都算）：新的人宣告要重新決定。"""
+    return (observation.hand, observation.buttons or frozenset(), observation.claim, observation.claimed,
+            observation.forbidden, observation.swap_prompt, observation.chow_panels, observation.declared)
+
+
 def screen_frames(interval: float) -> Iterator[tuple[str, np.ndarray]]:
     while True:
         yield time.strftime("%H:%M:%S"), grab_screen()
@@ -342,6 +350,9 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 for seat in sorted(observation.declared - declared_seen):
                     log(f"[{stamp}] {DECLARED_NAMES[seat]}宣告聽牌（第一次認到；牌河 {sizes}）", echo=False)
                 declared_seen |= observation.declared
+            if observation is not None and declared_seen - observation.declared:
+                # 宣告了就不會取消：這一幀漏認「聽」標記（16:24:36）照樣算
+                observation = replace(observation, declared=observation.declared | declared_seen)
             if observation is not None:
                 game_seen_at = last_readable = clock()
                 for message in hands.see_dealer(observation.dealer):
@@ -369,7 +380,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             if lit and lit & {"chow", "pung", "kong"} and responding:
                 if claim_prompt_since is None:
                     claim_prompt_since, claim_prompt_reported = clock(), False
-                handled = observation is not None and decided_for == observation \
+                handled = observation is not None and decided_for == decision_key(observation) \
                     and decided_action is not None
                 if not handled and not claim_prompt_reported \
                         and clock() - claim_prompt_since >= CLAIM_PROMPT_REPORT:
@@ -441,8 +452,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 else:
                     pending_claim = None
             # 同一個畫面只決定一次：蒙地卡羅 AI 每次要約 2 秒且有隨機性，重算會讓建議閃動
-            if observation != decided_for:
-                decided_for, decided_action = observation, decide(observation)
+            if decision_key(observation) != decided_for:
+                decided_for, decided_action = decision_key(observation), decide(observation)
                 decided_note = last_note()
             action = decided_action
             if action is not None and action.kind in (ActionType.CHOW, ActionType.PUNG):

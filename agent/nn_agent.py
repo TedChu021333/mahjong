@@ -12,6 +12,7 @@ import torch
 
 from agent.rule_agent import (
     choose_rule_action_for_player,
+    choose_self_kong,
     claim_value,
     claim_widens,
     hand_value,
@@ -110,6 +111,12 @@ class NetworkPolicy:
             return choice
         if choice.kind not in (ActionType.DISCARD, ActionType.DECLARE):
             return choice
+        if state.phase == Phase.DISCARD and not state.declared[player]:
+            # 能暗槓／加槓、槓完向聽不變差就槓（規則式也是如此）：10/28 19:12 四張五條、「槓」亮著，網路卻打五筒
+            kong = choose_self_kong(state, player)
+            if kong is not None:
+                self.last_note = "槓完向聽不變差就槓"
+                return kong
         tile, note = safer_discard(state, player, choice.tile, rng)
         if note is not None:
             notes.append(note)

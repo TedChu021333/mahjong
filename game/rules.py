@@ -144,6 +144,9 @@ class GameState:
     min_discards: int = 0
     """實戰中每位對手至少打過幾張（由自己打了幾手推算）：牌河追蹤只記到約八成的出牌，
     對手模型查聽牌率時取它與牌河張數較大者。模擬器裡牌河完整，維持 0。"""
+    self_kong_allowed: bool = True
+    """輪到自己時能不能暗槓／加槓。實戰由遊戲的「槓」按鈕決定：按鈕沒亮就點不到（10/28 19:13 手上四張五條、
+    按鈕沒亮卻決定槓，點不到只好略過、白白耗掉出牌時間）。模擬器裡維持 True。"""
 
     def __post_init__(self) -> None:
         if len(self.players) != 4:
@@ -331,7 +334,7 @@ def legal_actions(state: GameState, player: int | None = None) -> list[Action]:
                        for t in _declarable_discards(current) if t in allowed)
         if state.claimed:
             return actions
-        if state.drawable:  # 槓完要補牌
+        if state.drawable and state.self_kong_allowed:  # 槓完要補牌
             actions.extend(
                 Action(ActionType.KONG, tile=t, tiles=(t,) * 4)
                 for t, count in enumerate(current.hand) if count >= 4

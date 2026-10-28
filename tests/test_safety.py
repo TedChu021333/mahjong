@@ -3,7 +3,7 @@ from random import Random
 import pytest
 
 from agent.safety import claim_is_worse, safer_discard
-from game.rules import Action, ActionType, GameState, Phase, PlayerState
+from game.rules import Action, ActionType, GameState, Phase, PlayerState, legal_actions
 from game.tiles import parse, to_counts
 
 
@@ -195,3 +195,20 @@ def test_one_shanten_hand_is_kept_unless_the_tile_is_very_dangerous(monkeypatch)
     patch(0.30)  # 很危險：可以拆
     tile, note = safer_discard(state, 0, P("9p"), Random(0))
     assert not keeps(tile) and "改打" in note
+
+
+def test_guard_takes_a_concealed_kong_that_keeps_the_shanten():
+    pytest.importorskip("torch")
+    from agent.nn_agent import NetworkPolicy
+
+    policy = NetworkPolicy.__new__(NetworkPolicy)
+    policy.last_note = None
+    # 10/28 19:12：四萬五萬七八九萬 二二五筒 三三條 五條×4 八八條 一筒，「槓」亮著，網路打五筒
+    state = state_with("45789m1225p335555s8s8s")
+    discard = Action(ActionType.DISCARD, tile=P("5p"))
+    actions = legal_actions(state, 0)
+    chosen = policy._guarded(state, 0, discard, actions, Random(0))
+    assert chosen.kind == ActionType.KONG and chosen.tile == P("5s")
+    # 遊戲沒給槓（按鈕沒亮）就照打
+    state.self_kong_allowed = False
+    assert policy._guarded(state, 0, discard, legal_actions(state, 0), Random(0)) == discard

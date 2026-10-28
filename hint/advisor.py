@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from random import Random
 
@@ -175,7 +176,10 @@ def _rivers(observation: Observation, claim_seat: int | None = None,
 
 def _known_melds(observation: Observation, rivers: list[list[int]]) -> list[tuple[Meld, ...]]:
     """讀到的對手副露；加上手牌、牌河、前面的副露會超過 4 張的那組丟掉（讀錯）。來源座位不明，記成他的上家
-    （Meld.from_player 不能是 None，那是暗槓）。"""
+    （Meld.from_player 不能是 None，那是暗槓）。容易混的萬子（一／六／八萬）碰或槓超過 4 張時，另外兩種裡剛好
+    一種放得下就改成它（hint.meld_watch.CONFUSABLE_MANZU；側躺、倒著的萬子數字常讀錯）。"""
+    from hint.meld_watch import CONFUSABLE_MANZU
+
     seen = [0] * NUM_TILE_TYPES
     for tile in observation.hand:
         seen[tile] += 1
@@ -187,13 +191,20 @@ def _known_melds(observation: Observation, rivers: list[list[int]]) -> list[tupl
         read = observation.opponent_melds[seat] if seat < len(observation.opponent_melds) else ()
         kept = []
         for meld in read:
-            need = [0] * NUM_TILE_TYPES
-            for tile in meld.tiles:
-                need[tile] += 1
-            if all(seen[tile] + need[tile] <= 4 for tile in set(meld.tiles)):
-                for tile in meld.tiles:
+            def fits(tiles) -> bool:
+                need = Counter(tiles)
+                return all(seen[tile] + count <= 4 for tile, count in need.items())
+
+            tiles = meld.tiles
+            if not fits(tiles) and meld.kind in ("pung", "kong") and tiles[0] in CONFUSABLE_MANZU:
+                options = [(other,) * len(tiles) for other in CONFUSABLE_MANZU[tiles[0]]
+                           if fits((other,) * len(tiles))]
+                if len(options) == 1:
+                    tiles = options[0]
+            if fits(tiles):
+                for tile in tiles:
                     seen[tile] += 1
-                kept.append(Meld(meld.kind, meld.tiles, (seat + 3) % 4))
+                kept.append(Meld(meld.kind, tiles, (seat + 3) % 4))
         result[seat] = tuple(kept[:5])
     return result
 
@@ -280,7 +291,9 @@ def build_state(observation: Observation, waiting: bool = False) -> GameState | 
         else:
             table = ObservedTable(players=tuple(players), current_player=ME, phase=Phase.DISCARD,
                                   last_drawn=observation.hand[-1], **common)
-        return parse_observed_table(table)
+        state = parse_observed_table(table)
+        state.self_kong_allowed = "kong" in (observation.buttons or ())
+        return state
     if not responding:
         if not waiting:
             return None
@@ -395,11 +408,9 @@ def decide(observation: Observation, rng: Random | None = None) -> Action | None
         counts = [0] * NUM_TILE_TYPES
         for tile in observation.hand:
             counts[tile] += 1
-        # 會加台的字牌：中發白、圈風（東風圈的東）、認得出莊家時自己的門風
-        valued = [27, 31, 32, 33]
-        if observation.dealer is not None:
-            dealer = ME if observation.dealer == "me" else SOURCE_SEAT[observation.dealer]
-            valued.append(seat_winds_for_dealer(dealer)[ME])
+        # 會加台的字牌：所有字牌的刻子都 1 台。東南西北不分門風、圈風——10/28 讀 1851 張結算：胡牌者手上不是自己門風
+        # 也不是東的風刻 195 次全部有台（例如坐西碰北「北風 1 台」）。原本只保護東與自己門風，別的風的對子會被換掉
+        valued = list(range(27, 34))
         return Action(ActionType.SWAP, tiles=choose_swap_tiles(counts,
                                                                gold_tiles=observation.gold_tiles,
                                                                valued_honors=valued,

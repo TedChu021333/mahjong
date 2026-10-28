@@ -84,13 +84,15 @@ def straighten(image: np.ndarray, seat: str) -> np.ndarray:
 
 def load_seat_templates(directory: Path = MELD_TEMPLATE_DIR,
                         per_tile: int = SEAT_TEMPLATES_PER_TILE) -> dict[str, list[tuple[int, np.ndarray]]]:
-    """實戰收集的副露模板（每座位每種牌取最新的幾張）。"""
+    """實戰收集的副露模板（每座位每種牌：人工標註的 manual_* 全部，再補最新的幾張）。"""
     result: dict[str, list[tuple[int, np.ndarray]]] = {}
     if not directory.exists():
         return result
     for seat_dir in sorted(path for path in directory.iterdir() if path.is_dir()):
         for folder in sorted(path for path in seat_dir.iterdir() if path.is_dir()):
-            for path in sorted(folder.glob("*.png"))[-per_tile:]:
+            manual = sorted(folder.glob("manual_*.png"))
+            others = sorted(path for path in folder.glob("*.png") if not path.name.startswith("manual_"))
+            for path in manual + others[-max(0, per_tile - len(manual)):] if per_tile > len(manual) else manual:
                 image = read_image(path)
                 if image is not None:
                     result.setdefault(seat_dir.name, []).append((parse(folder.name)[0], image))
@@ -132,6 +134,17 @@ class Scan:
             self.which[index] = number
             self.cross[index] = cross[index]
 
+    def around(self, position: int, margin: int) -> np.ndarray:
+        """crop 四周各多 margin 像素（萬子數字比對時容許位置差幾像素）。"""
+        height, width = self.templates[self.which[position]][1].shape[:2]
+        other = self.cross[position]
+        if self.axis == 1:
+            top, left = position - margin, other - margin
+        else:
+            top, left = other - margin, position - margin
+        top, left = max(0, top), max(0, left)
+        return self.area[top:top + height + 2 * margin, left:left + width + 2 * margin]
+
     def crop(self, position: int) -> np.ndarray:
         height, width = self.templates[self.which[position]][1].shape[:2]
         other = self.cross[position]
@@ -141,6 +154,8 @@ class Scan:
 
 
 NUMBER_HALF = {"left": "right", "right": "left", "top": "bottom"}
+MANZU_SHIFT = 6
+"""萬子數字比對時，允許和定位的位置差幾像素。"""
 """萬子的數字在牌面上半；轉向後在哪一邊。"""
 
 
@@ -150,9 +165,13 @@ def _half(image: np.ndarray, side: str) -> np.ndarray:
             "bottom": image[height // 2:], "top": image[:height // 2]}[side]
 
 
-def _refine_manzu(scan: Scan, hits: list[MeldTile], offset: int, seat: str) -> list[MeldTile]:
+def _refine_manzu(scan: Scan, hits: list[MeldTile], offset: int, seat: str,
+                  templates: list[tuple[int, np.ndarray]] | None = None) -> list[MeldTile]:
     """萬子只比數字那一半：下半部的「萬」字每張都一樣、佔大半張，整張比對時一萬、六萬、八萬容易混
-    （10/22 對家碰六萬讀成一萬、亮牌時側躺的八萬讀成一萬）。"""
+    （10/22 對家碰六萬讀成一萬、亮牌時側躺的八萬讀成一萬）。
+
+    templates：數字只和牌河模板（轉向）比。實戰收集的副露模板是同一個位置切的、分數一定比較高，但只有部分萬子有：
+    10/28 對家沒有四萬的專用模板、二萬有十幾張，碰四萬最右那張就讀成二萬；只用牌河模板時已知答案的 9 張萬子全對。"""
     refined = []
     for hit in hits:
         position = hit.position - offset
@@ -161,12 +180,16 @@ def _refine_manzu(scan: Scan, hits: list[MeldTile], offset: int, seat: str) -> l
             refined.append(MeldTile(hit.tile, hit.score, hit.position, crop))
             continue
         shape = crop.shape
-        number = _half(crop, NUMBER_HALF[seat])
+        # 位置可能偏幾像素（10/28 對家碰四萬最右那張用專用模板定位、偏了，數字只比到一半而讀成一萬）：在稍大的範圍裡找數字
+        area = scan.around(position, MANZU_SHIFT)
         best_tile, best_score = hit.tile, -1.0
-        for tile, template in scan.templates:
+        for tile, template in (templates if templates is not None else scan.templates):
             if tile >= 9 or template.shape != shape:
                 continue
-            score = float(cv2.matchTemplate(number, _half(template, NUMBER_HALF[seat]), cv2.TM_CCOEFF_NORMED).max())
+            number = _half(template, NUMBER_HALF[seat])
+            if number.shape[0] > area.shape[0] or number.shape[1] > area.shape[1]:
+                continue
+            score = float(cv2.matchTemplate(area, number, cv2.TM_CCOEFF_NORMED).max())
             if score > best_score:
                 best_tile, best_score = tile, score
         refined.append(MeldTile(best_tile, hit.score, hit.position, crop))
@@ -183,15 +206,17 @@ class MeldReader:
         def sized(image: np.ndarray, size: tuple[int, int]) -> np.ndarray:
             return cv2.resize(image, size, interpolation=cv2.INTER_AREA)
 
+        self.side_base = {seat: [(tile, sized(cv2.rotate(image, rotation), (width - 6, height)))
+                                 for tile, image in templates for height in SIDE_HEIGHTS]
+                          for seat, rotation in SIDE_ROTATION.items()}
+        """只有牌河模板（萬子數字比對用，見 _refine_manzu）。"""
         self.side = {seat: [(tile, sized(image, (width - 6, height)))
                             for tile, image in seat_templates.get(seat, []) for height in SIDE_HEIGHTS]
-                     + [(tile, sized(cv2.rotate(image, rotation), (width - 6, height)))
-                        for tile, image in templates for height in SIDE_HEIGHTS]
-                     for seat, rotation in SIDE_ROTATION.items()}
+                     + self.side_base[seat] for seat in SIDE_ROTATION}
+        self.top_base = [(tile, sized(cv2.rotate(image, cv2.ROTATE_180), (width_, round(width_ * TOP_ASPECT))))
+                         for tile, image in templates for width_ in TOP_WIDTHS]
         self.top = [(tile, sized(image, (width_, round(width_ * TOP_ASPECT))))
-                    for tile, image in seat_templates.get("top", []) for width_ in TOP_WIDTHS] \
-            + [(tile, sized(cv2.rotate(image, cv2.ROTATE_180), (width_, round(width_ * TOP_ASPECT))))
-               for tile, image in templates for width_ in TOP_WIDTHS]
+                    for tile, image in seat_templates.get("top", []) for width_ in TOP_WIDTHS] + self.top_base
 
     @classmethod
     def from_directory(cls, directory: Path = RIVER_TEMPLATE_DIR, per_tile: int = TEMPLATES_PER_TILE,
@@ -224,7 +249,7 @@ class MeldReader:
             start = 0
             scan = Scan(strip, self.side[seat], axis=1)
             hits = _peaks(scan.best, scan.label, SIDE_MIN_SCORE, SIDE_SPACING)
-        hits = _refine_manzu(scan, hits, start, seat)
+        hits = _refine_manzu(scan, hits, start, seat, self.side_base[seat])
         return hits if seat == "left" else hits[::-1]
 
     def _top(self, image: np.ndarray) -> list[MeldTile]:
@@ -236,7 +261,7 @@ class MeldReader:
             start = left
             scan = Scan(image[top:bottom, left:right], self.top, axis=0)
             hits = _peaks(scan.best, scan.label, TOP_MIN_SCORE, TOP_SPACING, left)
-        return _refine_manzu(scan, hits, start, "top")[::-1]
+        return _refine_manzu(scan, hits, start, "top", self.top_base)[::-1]
 
     def guided_chow(self, image: np.ndarray, seat: str, tile: int) -> list[MeldTile] | None:
         return self.guided_meld(image, seat, tile, ("chow",))

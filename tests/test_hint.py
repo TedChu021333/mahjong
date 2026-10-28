@@ -241,6 +241,18 @@ def test_added_kong_when_the_kong_button_is_lit():
     assert decide(replace(observation, my_pungs=())).kind != ActionType.KONG
 
 
+def test_concealed_kong_needs_the_kong_button():
+    from game.rules import legal_actions
+    from hint.advisor import build_state
+
+    # 10/28 19:13：手上四張五條，「槓」沒亮——遊戲不給槓就不能選槓（點不到）
+    hand = T("45789m12223p335555s8s")
+    lit = build_state(Observation(hand, frozenset({"kong"}), None, ()))
+    dark = build_state(Observation(hand, None, None, ()))
+    assert any(a.kind == ActionType.KONG for a in legal_actions(lit, 0))
+    assert not any(a.kind == ActionType.KONG for a in legal_actions(dark, 0))
+
+
 def test_added_kong_does_not_break_a_run():
     from hint.advisor import decide
 
@@ -475,9 +487,11 @@ def test_dealer_streak_on_real_screens():
     from perception.table_reader import load_streak_templates, read_dealer_streak
 
     templates = load_streak_templates()
-    if set(templates) != {1, 2}:
+    if not {1, 2, 3} <= set(templates):
         pytest.skip("缺少連莊數字模板")
-    expected = {"經典_上家第二欄吃": 1, "經典_上家第二欄吃2": 2, "經典_碰": 0, "經典_牌河290": 0}
+    # 經典_連莊3、經典_連莊1_偏：10/22 03:39、10/20 17:33 原本認不出的（3 沒有模板、1 只有 0.66）
+    expected = {"經典_上家第二欄吃": 1, "經典_上家第二欄吃2": 2, "經典_碰": 0, "經典_牌河290": 0,
+                "經典_連莊3": 3, "經典_連莊1_偏": 1}
     for name, streak in expected.items():
         path = TRAIN_DIR / f"{name}.png"
         if path.exists():
@@ -485,7 +499,7 @@ def test_dealer_streak_on_real_screens():
     # 沒有模板時認不出數字
     path = TRAIN_DIR / "經典_上家第二欄吃.png"
     if path.exists():
-        assert read_dealer_streak(read_image(path), {2: templates[2]}) is None
+        assert read_dealer_streak(read_image(path), {3: templates[3]}) is None
 
 
 def test_autoplay_is_not_reported_as_unreadable():
@@ -782,3 +796,34 @@ def test_melds_are_read_after_claims_and_while_melds_are_on_the_table(monkeypatc
     assert rivers.requests[0] >= 1.05 + hint_main.MELD_READ_DELAY and len(rivers.requests) == 2
     assert rivers.requests[1] - rivers.requests[0] >= hint_main.MELD_READ_INTERVAL
     assert saved == []
+
+
+def test_same_hand_is_not_redecided_when_only_flickering_details_change(monkeypatch):
+    import hint.__main__ as hint_main
+
+    # 10/28 16:24：上家宣告後有一幀漏認「聽」；16:39：手牌沒變、別家多打一張——都不該重新決定
+    hand = T("789m667p12345688s22z4p")
+    declared = Observation(hand, None, None, (2,), declared=frozenset({"left"}))
+    missed = replace(declared, declared=frozenset(), gold_tiles=())
+    river = replace(declared, discards=((), (), (), (parse("6m")[0],)))
+    seen = []
+    monkeypatch.setattr(hint_main, "decide", lambda observation: seen.append(observation) or None)
+    frames = [declared, missed, river, declared]
+    hint_main.run(((str(i), f) for i, f in enumerate(frames)), readers=None,
+                  observe_fn=lambda frame, readers: frame)
+    assert len(seen) == 1
+    # 新的人宣告：要重新決定
+    seen.clear()
+    both = replace(declared, declared=frozenset({"left", "top"}))
+    hint_main.run(((str(i), f) for i, f in enumerate([declared, declared, both, both])), readers=None,
+                  observe_fn=lambda frame, readers: frame)
+    assert len(seen) == 2 and seen[1].declared == frozenset({"left", "top"})
+
+
+def test_swap_keeps_pairs_of_any_wind():
+    from hint.advisor import decide
+
+    # 東南西北的刻子不分門風都 1 台（10/28 讀 1851 張結算）：一對北、一對西都不換
+    for text, kept in (("13579m2468p135s22z44z", "4z"), ("1357m2468p13s22z33z44z", "3z")):
+        action = decide(Observation(T(text), None, None, (), swap_prompt=True))
+        assert action.kind == ActionType.SWAP and parse(kept)[0] not in action.tiles
