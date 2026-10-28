@@ -344,14 +344,13 @@ def use_worker_pool(pool, workers: int) -> None:
 _network = None
 
 
-def use_network(path: str, efficiency_turns: int = 0, guard: bool = True, attack: bool = False) -> None:
+def use_network(path: str, efficiency_turns: int = 0, guard: bool = True) -> None:
     """學習型 AI 的權重（--ai nn；需要 PyTorch）；efficiency_turns 見 agent.nn_agent.efficient_discard，
     guard 見 NetworkPolicy.guard（按聽照規則式、有人宣告時檢查放槍）。"""
     from agent.nn_agent import NetworkPolicy
 
     global _network
-    _network = NetworkPolicy.from_file(path, efficiency_turns=efficiency_turns, guard=guard or attack,
-                                       attack=attack)
+    _network = NetworkPolicy.from_file(path, efficiency_turns=efficiency_turns, guard=guard)
 
 
 def last_note() -> str | None:

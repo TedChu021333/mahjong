@@ -36,6 +36,12 @@ OVERRIDE_SHARE = 0.25
 同一組內的差別看不出來（很多改法顯示「進攻少 0.00」），太小的差距留給網路；手越接近聽牌、越大，網路的進攻判斷
 越重要，門檻跟著提高（聽牌約 1 台、一向聽約 0.5 台），沒希望的手照樣改打免費的安全牌。
 10/17 記錄重放：固定 0.05 時有人宣告的出牌 66 次改 37 次，0.2 改 29 次。10/20 使用者：還是太保守。"""
+KEEP_SHANTEN = 1
+RETREAT_MIN_DANGER = 0.20
+"""網路那張打完聽牌或一向聽（≤ KEEP_SHANTEN）時，只有它的放槍估計超過 RETREAT_MIN_DANGER 才准改打讓向聽變差的牌
+（10/28 使用者選 20%）。10/17～10/28 實戰：有人宣告後自己聽牌胡 29%、一向聽 15%、兩向聽只有 4%，放槍率卻都在 16～22%，
+退一步實際少約 0.8～1 台，查表只算 0.1～0.3 台；放槍估計本身是準的（9094 手分組比對，有人宣告時估計 115.8 次、實際 109）。
+10/20～10/28 護欄讓網路退向聽 84 次，這條會擋下約 63 次。"""
 SAMPLES = 40
 MIN_VALID = 150
 """每位宣告者湊滿這麼多副有效的聽牌手牌（見 opponent_model.estimate_danger）；原本只嘗試 160 次、
@@ -121,7 +127,9 @@ def safer_discard(state: GameState, player: int, tile: int, rng: Random,
     choices = evaluate(state, player, me.hand, me.melds, candidates, danger.expected_loss,
                        danger.probability, calibration)
     current = choices[tile]
-    safer = [c for c in choices.values() if c.danger < current.danger]
+    safer = [c for c in choices.values() if c.danger < current.danger
+             and not (c.level > current.level and current.level <= KEEP_SHANTEN
+                      and current.danger <= RETREAT_MIN_DANGER)]
     if not safer:
         return tile, None
     worth = [c for c in safer if _gain(current, c) > _margin(current, c)]
@@ -129,52 +137,6 @@ def safer_discard(state: GameState, player: int, tile: int, rng: Random,
         return tile, None
     best = max(worth, key=lambda c: _gain(current, c))
     return best.tile, _describe(current, best)
-
-
-ATTACK_MAX_DANGER = 0.25
-"""極致進攻（--attack）：有人宣告時只擋放槍機率超過這個的牌（使用者 10/22 選「只擋極危險的牌」）。
-10/22 一整晚 268 局一次都沒觸發（估計值很少超過 25%）。"""
-ATTACK_SAME_MARGIN = 0.005
-"""向聽、進張一樣的牌，放槍機率至少低這麼多才換（估計值有抽樣誤差，差一點點不必換）。"""
-
-
-def attack_discard(state: GameState, player: int, tile: int, rng: Random,
-                   calibration: Calibration | None = None) -> tuple[int, str | None]:
-    """極致進攻的放槍檢查：tile 放槍機率超過 ATTACK_MAX_DANGER 才換，換成門檻內向聽最好、進張最多的牌
-    （都超過時打最安全的）。回傳 (要打的牌, 說明或 None)。"""
-    if not anyone_declared(state, player):
-        return tile, None
-    calibration = calibration or default_calibration()
-    me = state.players[player]
-    candidates = allowed_discards(me.hand, state.forbidden_discards if state.claimed else ())
-    if tile not in candidates or len(candidates) < 2:
-        return tile, None
-    danger = estimate_danger(state, player, candidates, rng, calibration, SAMPLES, min_valid=MIN_VALID)
-    risk = danger.probability
-    visible = visible_tile_counts(state, player)
-
-    def value(t: int) -> tuple[int, int, float]:
-        hand = list(me.hand)
-        hand[t] -= 1
-        outs = sum(max(0, 4 - visible[x]) for x in effective_tiles(hand, len(me.melds)))
-        return shanten(hand, len(me.melds)), -outs, risk[t]
-
-    if risk[tile] <= ATTACK_MAX_DANGER:
-        # 向聽、進張一樣的牌裡挑最安全的：進攻完全不吃虧（10/22 極致進攻放槍 21 次中好幾次有這種牌）
-        mine = value(tile)
-        same = [t for t in candidates if value(t)[:2] == mine[:2]]
-        safest = min(same, key=lambda t: risk[t])
-        if risk[safest] < risk[tile] - ATTACK_SAME_MARGIN:
-            return safest, (f"極致進攻：{tile_name(safest)}進攻一樣、比較安全"
-                            f"（{risk[tile]:.1%} → {risk[safest]:.1%}）")
-        return tile, None
-    allowed = [t for t in candidates if risk[t] <= ATTACK_MAX_DANGER]
-    if allowed:
-        pick = min(allowed, key=value)
-    else:
-        pick = min(candidates, key=lambda t: risk[t])
-    return pick, (f"極致進攻：{tile_name(tile)}放槍 {risk[tile]:.1%} 太危險 → 改打 {tile_name(pick)} "
-                  f"{risk[pick]:.1%}")
 
 
 def _margin(current: Choice, other: Choice) -> float:

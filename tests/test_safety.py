@@ -163,3 +163,33 @@ def test_guard_rejects_claims_that_do_not_improve_the_hand():
     assert policy.last_note == "吃碰不會讓向聽變好"
     # 同樣的手、眼是中：碰中（三元牌加台）向聽不變也碰
     assert respond("123456789m123p55z79s", "5z").kind == ActionType.PUNG
+
+
+def test_one_shanten_hand_is_kept_unless_the_tile_is_very_dangerous(monkeypatch):
+    import agent.safety as safety
+    from agent.opponent_model import Danger
+    from agent.shanten import shanten
+
+    # 一向聽（123萬 456筒 789條 東東 二三條 六七條 + 九筒 中）：網路打九筒（還是一向聽）
+    state = state_with("123m456p789s2367s9p115z")
+    state.declared[1] = True
+    hand = state.players[0].hand
+
+    def keeps(tile):
+        if not hand[tile]:
+            return True
+        after = list(hand)
+        after[tile] -= 1
+        return shanten(after, 0) <= 1
+
+    def patch(risk):
+        probability = {t: (risk if keeps(t) else 0.0) for t in range(34)}
+        monkeypatch.setattr(safety, "estimate_danger", lambda *args, **kwargs: Danger(
+            probability, {t: p * 10 for t, p in probability.items()}))
+
+    patch(0.18)  # 不到 20%：不准拆成兩向聽
+    tile, _ = safer_discard(state, 0, P("9p"), Random(0))
+    assert keeps(tile)
+    patch(0.30)  # 很危險：可以拆
+    tile, note = safer_discard(state, 0, P("9p"), Random(0))
+    assert not keeps(tile) and "改打" in note

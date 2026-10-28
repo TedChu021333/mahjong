@@ -16,30 +16,24 @@ from agent.rule_agent import (
     claim_widens,
     hand_value,
     declare_is_worth,
+    gold_in_use,
     network_claim_is_worth,
-    honor_tai,
     open_kong_is_worth,
     keep_value,
     visible_tile_counts,
 )
-from agent.safety import anyone_declared, attack_discard, claim_is_worse, safer_discard
+from agent.safety import claim_is_worse, safer_discard
 from agent.shanten import effective_tiles, improvement_count, next_step_outs, shanten
 from game.rules import Action, ActionType, GameState, Phase, legal_actions
+from game.tiles import tile_name
 from training.actions import DISCARD, legal_mask
 from training.encoding import encode
 from training.model import MahjongNet, load, masked_logits
 
 
-ATTACK_TURNS = 99
-"""極致進攻時湊牌優先整局都用。"""
-ATTACK_FOLD_SHANTEN = 2
-"""極致進攻：自己還有這麼多向聽以上、又有人宣告時，暫停進攻、照一般護欄（10/22 極致進攻放給已宣告者 21 次，
-好幾次是兩、三向聽根本快胡不了的手）。"""
-
-
 class NetworkPolicy:
     def __init__(self, model: MahjongNet, device: str = "cpu", temperature: float = 0.0,
-                 efficiency_turns: int = 0, guard: bool = False, attack: bool = False) -> None:
+                 efficiency_turns: int = 0, guard: bool = False) -> None:
         self.model = model.to(device).eval()
         self.device = device
         self.temperature = temperature
@@ -50,17 +44,13 @@ class NetworkPolicy:
         """實戰用（提示模式預設開啟）：按聽照規則式（地聽或聽牌型態夠好才按，declare_is_worth），有對手宣告時
         用期望值檢查打牌與吃碰（agent.safety）。10/17 實戰 45 局按聽 11 次、放槍 10 次（6 次放給已宣告的人），
         使用者 10/5 也說過太容易按聽。自我對打訓練不開。"""
-        self.attack = attack
-        """極致進攻（使用者 10/22 要求，提示模式 --attack）：整局湊牌優先（有人宣告也一樣）；有人宣告時只擋放槍
-        超過 safety.ATTACK_MAX_DANGER 的牌；進張變多就吃碰（向聽變好、或向聽相同進張變多），不做吃碰後的放槍檢查；
-        按聽、門清不明槓照一般規則。需要 guard=True。"""
         self.last_note: str | None = None
         """上一個決定被 guard 改掉的原因（記錄用）。"""
 
     @classmethod
     def from_file(cls, path, device: str = "cpu", temperature: float = 0.0,
-                  efficiency_turns: int = 0, guard: bool = False, attack: bool = False) -> "NetworkPolicy":
-        return cls(load(path, device), device, temperature, efficiency_turns, guard, attack)
+                  efficiency_turns: int = 0, guard: bool = False) -> "NetworkPolicy":
+        return cls(load(path, device), device, temperature, efficiency_turns, guard)
 
     def __call__(self, state: GameState, player: int, rng: Random) -> Action | None:
         self.last_note = None
@@ -78,15 +68,17 @@ class NetworkPolicy:
         logits = masked_logits(logits, torch.from_numpy(mask[None]).to(self.device))[0]
         if self.temperature <= 0:
             choice = lookup[int(logits.argmax())]
-            if self._attacking(state, player):
-                choice = efficient_discard(state, player, choice, lookup, logits.cpu().numpy(),
-                                           ATTACK_TURNS, ignore_declared=True)
-            elif self.efficiency_turns:
+            if self.efficiency_turns:
                 choice = efficient_discard(state, player, choice, lookup, logits.cpu().numpy(),
                                            self.efficiency_turns)
             if self.guard:
                 try:
+                    wasteful = wasteful_discard(state, player, choice, lookup, logits.cpu().numpy())
+                    if wasteful is not None:
+                        choice, waste_note = wasteful
                     choice = self._guarded(state, player, choice, actions, rng)
+                    if wasteful is not None:
+                        self.last_note = "；".join(note for note in (waste_note, self.last_note) if note)
                 except ValueError:  # 局面不合法（例如辨識出的張數不對）：照網路
                     self.last_note = None
             return choice
@@ -101,11 +93,6 @@ class NetworkPolicy:
         if choice.kind == ActionType.KONG and state.phase == Phase.RESPONSE                 and not open_kong_is_worth(state.players[player].melds):
             self.last_note = "門清不明槓"
             return next(action for action in actions if action.kind == ActionType.PASS)
-        attack = self._attacking(state, player)
-        paused = getattr(self, "attack", False) and not attack
-        if attack and state.phase == Phase.RESPONSE and choice.kind in (
-                ActionType.CHOW, ActionType.PUNG, ActionType.PASS):
-            return self._attack_claim(state, player, choice, actions)
         if choice.kind in (ActionType.CHOW, ActionType.PUNG)                 and not network_claim_is_worth(state, player, choice):
             self.last_note = "吃碰不會讓向聽變好"
             return next(action for action in actions if action.kind == ActionType.PASS)
@@ -123,10 +110,9 @@ class NetworkPolicy:
             return choice
         if choice.kind not in (ActionType.DISCARD, ActionType.DECLARE):
             return choice
-        check = attack_discard if attack else safer_discard
-        tile, note = check(state, player, choice.tile, rng)
+        tile, note = safer_discard(state, player, choice.tile, rng)
         if note is not None:
-            notes.append(f"極致進攻暫停（兩向聽以上又有人宣告）：{note}" if paused else note)
+            notes.append(note)
         # 按不按聽照規則（rule_agent.declare_is_worth：地聽、或聽牌型態夠好），不看網路想不想按
         declare = Action(ActionType.DECLARE, tile=tile)
         if declare in actions and declare_is_worth(state, player, tile):
@@ -139,45 +125,6 @@ class NetworkPolicy:
             result = Action(ActionType.DISCARD, tile=tile)
         self.last_note = "；".join(notes) or None
         return result
-
-
-    def _attacking(self, state: GameState, player: int) -> bool:
-        """這一步要不要用極致進攻：有開，而且不是「有人宣告、自己還有兩向聽以上」。"""
-        if not getattr(self, "attack", False):
-            return False
-        me = state.players[player]
-        try:
-            far = shanten(me.hand, me.open_melds) >= ATTACK_FOLD_SHANTEN
-        except ValueError:
-            return True
-        return not (far and anyone_declared(state, player))
-
-    def _attack_claim(self, state: GameState, player: int, choice: Action, actions: list[Action]) -> Action:
-        """極致進攻的吃碰：進張變多就吃碰（loose，加台的字牌碰了向聽不變差也碰），網路不吃碰時改成最好的那個。"""
-        if state.last_discard is None or state.declared[player]:
-            return choice
-        me = state.players[player]
-        before = hand_value(me.hand, me.open_melds)
-        best = None
-        for action in actions:
-            if action.kind not in (ActionType.CHOW, ActionType.PUNG):
-                continue
-            after = claim_value(me.hand, me.open_melds, action, state.last_discard)
-            honor = action.kind == ActionType.PUNG and honor_tai(state, player, state.last_discard)
-            if (after < before or (honor and after[0] <= before[0])) and (best is None or after < best[1]):
-                best = (action, after)
-        passing = next(action for action in actions if action.kind == ActionType.PASS)
-        if best is None:
-            if choice.kind != ActionType.PASS:
-                self.last_note = "極致進攻：吃碰後進張沒變多，不要"
-            return passing
-        if choice.kind == ActionType.PASS or claim_value(me.hand, me.open_melds, choice,
-                                                         state.last_discard) > best[1]:
-            word = "碰" if best[0].kind == ActionType.PUNG else "吃"
-            self.last_note = (f"極致進攻：{word}了 向聽 {before[0]} → {best[1][0]}、"
-                              f"進張 {-before[1]} → {-best[1][1]} 張")
-            return best[0]
-        return choice
 
 
 def widening_claim(state: GameState, player: int, actions: list[Action]) -> tuple[Action, str] | None:
@@ -200,8 +147,52 @@ def widening_claim(state: GameState, player: int, actions: list[Action]) -> tupl
     return best[0], f"{word}了進張 {-before[1]} → {-best[1][1]} 張（一向聽）"
 
 
+WASTE_OUTS = 4
+"""沒人宣告時，網路那張的進張比同向聽最好的少這麼多張以上就改打（聽牌時改看 WASTE_TENPAI_SHARE）。"""
+WASTE_TENPAI_SHARE = 2 / 3
+"""聽牌時，網路那張聽的張數不到最好的這個比例就改打。"""
+
+
+def wasteful_discard(state: GameState, player: int, choice: Action, lookup: dict[int, Action],
+                     logits: np.ndarray) -> tuple[Action, str] | None:
+    """沒人宣告時，網路打的牌比同向聽最好的打法進張少很多：改打進張最多的（用得上的金牌不列入），回傳 (動作, 說明)。
+
+    使用者 10/28：網路太死板，對子好像一定要留，旁邊能組的牌反而打掉。10/20～10/28 沒人宣告的 5639 手中 71 手如此，
+    例如 10/22 14:30 八八萬 二二筒 六七八筒 二三四條 四五六條 摸三筒打三筒，聽 4 張（打二筒聽 8 張）；
+    10/21 23:48 二三四萬 一條 三條 五條 六六條 中中 摸三條打五條，進張 10（打三條 16）。
+    只比同向聽的牌（退向聽由湊牌優先管），網路要宣告的那張也照樣比（按不按聽之後由護欄決定）。"""
+    me = state.players[player]
+    if (choice.kind not in (ActionType.DISCARD, ActionType.DECLARE) or state.phase != Phase.DISCARD
+            or state.declared[player] or any(state.declared[seat] for seat in range(4) if seat != player)):
+        return None
+    options = [index - DISCARD for index in lookup if DISCARD <= index < DISCARD + 34]
+    if choice.tile not in options:
+        return None
+    visible = visible_tile_counts(state, player)
+
+    def evaluate(tile: int) -> tuple[int, int]:
+        hand = list(me.hand)
+        hand[tile] -= 1
+        return shanten(hand, me.open_melds), sum(max(0, 4 - visible[t]) for t in effective_tiles(hand, me.open_melds))
+
+    level, outs = evaluate(choice.tile)
+    scored = {tile: evaluate(tile) for tile in options
+              if tile != choice.tile and not (tile in state.gold_tiles and gold_in_use(me.hand, tile))}
+    same = [tile for tile, value in scored.items() if value[0] == level]
+    if not same:
+        return None
+    top = max(scored[tile][1] for tile in same)
+    if (outs >= top * WASTE_TENPAI_SHARE) if level == 0 else (top - outs < WASTE_OUTS):
+        return None
+    best = [tile for tile in same if scored[tile][1] == top]
+    pick = min(best, key=lambda tile: (keep_value(me.hand, tile, state.gold_tiles), -float(logits[DISCARD + tile])))
+    word = "聽" if level == 0 else "進張"
+    return (lookup[DISCARD + pick],
+            f"湊牌：打{tile_name(choice.tile)}{word} {outs} 張 → 改打{tile_name(pick)} {top} 張")
+
+
 def efficient_discard(state: GameState, player: int, choice: Action, lookup: dict[int, Action],
-                      logits: np.ndarray, turns: int, ignore_declared: bool = False) -> Action:
+                      logits: np.ndarray, turns: int) -> Action:
     """前 turns 手、沒有對手宣告聽牌時湊牌優先：在同向聽的牌中依序比 有效進張 → 改良牌 → 牌型（往後多看一步，
     next_step_outs）都最多的，最後才比最孤立（孤張字牌 → 孤張么九；用得上的金牌算值得留，rule_agent.keep_value）。
 
@@ -215,7 +206,7 @@ def efficient_discard(state: GameState, player: int, choice: Action, lookup: dic
     me = state.players[player]
     if (choice.kind != ActionType.DISCARD or state.phase != Phase.DISCARD
             or max(len(me.discards), state.min_discards) >= turns
-            or (not ignore_declared and any(state.declared[seat] for seat in range(4) if seat != player))):
+            or any(state.declared[seat] for seat in range(4) if seat != player)):
         return choice
     visible = visible_tile_counts(state, player)
 
