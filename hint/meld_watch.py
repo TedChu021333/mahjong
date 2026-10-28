@@ -20,9 +20,14 @@ import numpy as np
 from game.rules import Meld
 from game.tiles import tile_code, tile_name
 from perception.capture import write_image
-from perception.meld_reader import MELD_TEMPLATE_DIR, MeldReader, MeldTile, _is_run, group_melds, meld_spans
+from perception.meld_reader import (MELD_TEMPLATE_DIR, SIDE_PITCH, TOP_PITCH, MeldReader, MeldTile, _is_run,
+                                   meld_spans)
 
 SEATS = ("left", "top", "right")
+SLOT_GAP = {"side": round(1.5 * SIDE_PITCH), "top": round(1.5 * TOP_PITCH)}
+"""兩次讀到的組（以中間那張的位置）相差不到這麼多就算同一組（一組三張約 3 張牌寬，組和組之間還有空隙）。
+10/28 下家吃二三四筒、一二三萬、碰西三組，某次一二三萬被擋住，原本「組數不超過牌河推算」（推算常少一半）就把最早的吃丟掉，
+之後在兩組之間換來換去（使用者指出）；改成依位置記、位置不會消失。"""
 SEAT_NAMES = {"left": "上家", "top": "對家", "right": "下家"}
 MAX_TEMPLATES = 20
 HARVEST_MIN_SCORE = 0.5
@@ -148,6 +153,8 @@ class MeldWatch:
         self._generation = 0
         """換局時加一：換局前送出的讀取結果作廢。"""
         self.saved_templates = 0
+        self._slots: dict[str, list[list]] = {}
+        """各家副露的位置：[位置, 這個位置讀到各種組的票數, 最近一次讀到的組]。"""
 
         self.reads = 0
 
@@ -156,6 +163,27 @@ class MeldWatch:
             self._generation += 1
             self._pending = None
         self.melds = {}
+        self._slots = {}
+
+    def _vote(self, seat: str, position: int, meld: Meld) -> None:
+        """副露依桌上的位置記：每一組擺在固定的地方，同一個位置讀到的算一票。"""
+        slots = self._slots.setdefault(seat, [])
+        gap = SLOT_GAP["top" if seat == "top" else "side"]
+        slot = next((slot for slot in slots if abs(slot[0] - position) < gap), None)
+        if slot is None:
+            slot = [position, Counter(), meld]
+            slots.append(slot)
+        slot[1][meld] += 1
+        slot[2] = meld
+
+    def _seat_melds(self, seat: str) -> list[Meld]:
+        """每個位置票數最多的那組（同票取最近讀到的），從副露那一端排起（上家從小到大，對家、下家從大到小）。"""
+        slots = sorted(self._slots.get(seat, []), key=lambda slot: slot[0], reverse=seat != "left")
+        melds = []
+        for _, votes, latest in slots:
+            top = max(votes.values())
+            melds.append(latest if votes[latest] == top else max(votes, key=votes.get))
+        return melds[:5]
 
     def busy(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -197,7 +225,8 @@ class MeldWatch:
         return True
 
     def collect(self, known: dict[str, list[int]], counts: dict[str, int] | None = None) -> bool:
-        """讀完的結果套用進 self.melds（known：牌河推算的各家副露裡的牌）；有變化回傳 True。"""
+        """讀完的結果套用進 self.melds（known：牌河推算的各家副露裡的牌）；有變化回傳 True。
+        counts（牌河推算的組數）不再用來限制組數：推算常少一半。"""
         with self._lock:
             pending, self._pending = self._pending, None
         if pending is None:
@@ -209,17 +238,11 @@ class MeldWatch:
             hits = sorted(fill_gaps(read.get(seat, [])), key=lambda hit: hit.position, reverse=seat != "left")
             tiles = correct_manzu([hit.tile for hit in hits], known.get(seat, []))
             tiles = fix_odd_middle(fix_confusable_manzu(tiles))
-            melds, _ = group_melds(tiles)
-            previous = self.melds.get(seat, ())
-            if len(melds) < len(previous):
-                # 副露在一局中不會變少：這次讀少了（被動畫、按鈕擋住，或碰變成槓、疊起來那張讀不到），
-                # 沿用之前的，只補上之前沒有的（10/22 19:34 上家加槓一筒後「碰一筒」就從紀錄消失）
-                melds = list(previous) + [meld for meld in melds if meld not in previous]
-            elif melds != list(previous) and previous:
-                # 組數一樣、內容不同：可能是校正了之前讀錯的，也可能是之前那組這次被擋住、又多讀到一組新的
-                # （20:35 對家「一二三萬」被下一次的「一條×3」換掉）。新的優先、再補上之前的，組數不超過牌河推算的
-                limit = max(len(melds), (counts or {}).get(seat, len(melds)))
-                melds = (melds + [meld for meld in previous if meld not in melds])[:limit]
+            for kind, start, length in meld_spans(tiles):
+                group = tiles[start:start + length]
+                meld = Meld(kind, tuple(sorted(group)) if kind == "chow" else tuple(group), from_player=-1)
+                self._vote(seat, hits[start + 1].position, meld)
+            melds = self._seat_melds(seat)
             if melds:
                 result[seat] = tuple(melds[:5])
             self._harvest(seat, hits, tiles, known.get(seat, []))

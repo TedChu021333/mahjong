@@ -29,9 +29,9 @@ class FakeReader:
         return self.result
 
 
-def hits(text):
+def hits(text, start=0):
     crop = np.full((27, 84, 3), 230, np.uint8)
-    return [MeldTile(tile, 0.8, index * 30, crop) for index, tile in enumerate(parse(text))]
+    return [MeldTile(tile, 0.8, start + index * 30, crop) for index, tile in enumerate(parse(text))]
 
 
 def test_watch_applies_reads_and_harvests_confirmed_pungs(tmp_path):
@@ -152,24 +152,28 @@ def test_manzu_from_guided_chows_are_not_harvested(tmp_path):
     assert saved == []  # 一二三萬的排列可能錯，不存
 
 
-def test_same_count_with_different_content_keeps_both_up_to_the_inferred_count():
-    reader = FakeReader({"left": [], "top": hits("123m"), "right": []})
+def test_melds_are_kept_by_position_and_a_hidden_one_is_not_dropped():
+    reader = FakeReader({"left": [], "top": hits("234p123m"), "right": []})
     watch = MeldWatch(reader, template_dir=None, background=False)
     frame = np.zeros((10, 10, 3), np.uint8)
-    watch.request(frame)
-    watch.collect({}, {"top": 1})
-    # 20:35 下一次只讀到新的一條×3（一二三萬被擋住）：牌河推算對家 2 組 → 兩組都留
-    reader.result = {"left": [], "top": hits("111s"), "right": []}
-    watch.request(frame)
-    watch.collect({}, {"top": 2})
-    assert set(watch.melds["top"]) == {Meld("chow", tuple(parse("123m")), -1), Meld("pung", (P("1s"),) * 3, -1)}
-    # 只推算 1 組：新讀到的取代舊的（例如萬子校正）
+    watch.request(frame); watch.collect({}, {"top": 1})
+    # 10/28 17:13：下家三組，這次最早那組（位置 0）以外又讀到新的一組，牌河只推算 2 組——三組都要留
+    reader.result = {"left": [], "top": hits("123m", 90) + hits("444z", 180), "right": []}
+    watch.request(frame); watch.collect({}, {"top": 2})
+    assert watch.melds["top"] == (Meld("pung", (P("4z"),) * 3, -1), Meld("chow", tuple(parse("123m")), -1),
+                                  Meld("chow", tuple(parse("234p")), -1))
+    # 同一個位置讀成不同的組（萬子校正）：同票取最近的
     watch.new_hand()
     reader.result = {"left": [], "top": hits("111m"), "right": []}
-    watch.request(frame); watch.collect({}, {"top": 1})
+    watch.request(frame); watch.collect({})
     reader.result = {"left": [], "top": hits("666m"), "right": []}
-    watch.request(frame); watch.collect({}, {"top": 1})
+    watch.request(frame); watch.collect({})
     assert watch.melds["top"] == (Meld("pung", (P("6m"),) * 3, -1),)
+    # 票數多的勝過偶爾讀錯的一次（17:35 下家五筒×3、七筒×3 來回換）
+    for text in ("555p", "555p", "777p"):
+        reader.result = {"left": [], "top": [], "right": hits(text)}
+        watch.request(frame); watch.collect({})
+    assert watch.melds["right"] == (Meld("pung", (P("5p"),) * 3, -1),)
 
 
 def test_odd_middle_tile_of_a_pung_or_kong_is_fixed():
