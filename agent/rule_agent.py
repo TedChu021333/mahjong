@@ -517,11 +517,15 @@ def network_claim_is_worth(state: GameState, player: int, action: Action) -> boo
     """網路要吃碰時的檢查：吃碰完打掉最好的一張後向聽一定要變好；碰會加台的字牌（三元、圈風、
     認得出莊家時的門風）只要向聽不變差。10/20 02:51～15:17 網路吃碰 316 次中 26 次向聽沒變好（數牌 23 次，
     其中 10 次是第一組副露、等於白白放掉門清），那 24 局胡牌 12%、被自摸 50%、平均每局 −470。
-    模擬器 arena：吃碰一定要讓向聽變好（improve）比放寬的版本好 +0.23±0.19（CLAIM_MODE 的說明）。"""
+    模擬器 arena：吃碰一定要讓向聽變好（improve）比放寬的版本好 +0.23±0.19（CLAIM_MODE 的說明）。
+    門清又已經聽牌時一律不吃碰：10/28 17:19 七九萬 三四五筒 七八九筒 二三四條 南南南 北北 門清聽八萬，碰北（字牌刻 1 台）
+    之後照樣聽，卻沒了門清（使用者指出）。"""
     if action.kind not in (ActionType.CHOW, ActionType.PUNG) or state.last_discard is None:
         return True
     me = state.players[player]
     before = hand_value(me.hand, me.open_melds)
+    if before[0] == 0 and is_concealed(me.melds):
+        return False  # 門清聽牌：吃碰不會更好，白白少門清 1 台、門清自摸 3 台變自摸 1 台
     after = claim_value(me.hand, me.open_melds, action, state.last_discard)
     if action.kind == ActionType.PUNG and honor_tai(state, player, state.last_discard):
         return after[0] <= before[0]

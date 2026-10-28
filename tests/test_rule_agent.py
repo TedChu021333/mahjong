@@ -473,3 +473,21 @@ def test_claim_that_widens_a_one_shanten_hand_is_taken():
     # 向聽不變、只多幾張進張的照舊不吃碰
     assert not claim_widens((1, -16), (1, -24))
     assert not claim_widens((2, -4), (2, -40))
+
+
+def test_network_does_not_claim_when_concealed_and_already_tenpai():
+    from agent.rule_agent import network_claim_is_worth
+    from game.rules import ActionType, GameState, Meld, Phase, PlayerState, legal_actions
+
+    # 10/28 17:19：七九萬 三四五筒 七八九筒 二三四條 南南南 北北，門清聽八萬；對家打北
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("79m345789p234s22244z"))
+    players[2].discards = parse("4z")
+    state = GameState([0] * 60, players, phase=Phase.RESPONSE, last_discard=parse("4z")[0],
+                      discard_player=2, response_players=[0])
+    pung = next(a for a in legal_actions(state, 0) if a.kind == ActionType.PUNG)
+    assert not network_claim_is_worth(state, 0, pung)
+    # 已經有副露（不是門清）時，字牌刻照舊只要向聽不變差
+    players[0].hand = to_counts(parse("79m345p234s22244z"))
+    players[0].melds = [Meld("chow", tuple(parse("789p")), from_player=3)]
+    assert network_claim_is_worth(state, 0, pung)

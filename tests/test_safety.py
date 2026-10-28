@@ -161,8 +161,10 @@ def test_guard_rejects_claims_that_do_not_improve_the_hand():
     # 已經聽牌（一對五萬當眼、聽八條），碰了還是聽牌、沒變好：不碰
     assert respond("123456789m123p55m79s", "5m").kind == ActionType.PASS
     assert policy.last_note == "吃碰不會讓向聽變好"
-    # 同樣的手、眼是中：碰中（三元牌加台）向聽不變也碰
-    assert respond("123456789m123p55z79s", "5z").kind == ActionType.PUNG
+    # 同樣的手、眼是中：門清已經聽牌，碰中（三元牌加台）也不碰（白白少門清，10/28 17:19 碰北）
+    assert respond("123456789m123p55z79s", "5z").kind == ActionType.PASS
+    # 還沒聽牌（一向聽）時，碰中向聽不變也碰
+    assert respond("123456789m139p55z79s", "5z").kind == ActionType.PUNG
 
 
 def test_one_shanten_hand_is_kept_unless_the_tile_is_very_dangerous(monkeypatch):

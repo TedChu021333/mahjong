@@ -42,6 +42,7 @@ from hint.advisor import (
     use_policy,
 )
 from hint.hand_end import HandBook
+from hint.kong_shots import KongShots
 from hint.meld_check import MeldCheck
 from hint.river_watch import RiverWatch
 from hint.river_watch import summary as river_summary
@@ -212,6 +213,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     table_for = None
     """放槍表算過的局面（手牌、各家牌河張數、宣告者），沒變就不重算。"""
     table_at = float("-inf")
+    kong_shots = KongShots()
 
     def update_table(observation) -> None:
         nonlocal table_for, table_at
@@ -274,6 +276,10 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                         f"{observation.meld_count} 組不合理，可能被動畫蓋住），不採用", echo=False)
                 observation = None
             if observation is not None:
+                if observation.swap_prompt is not None:
+                    kong_shots.new_hand()
+                elif kong_shots.update(len(observation.gold_tiles), clock()):
+                    log(f"[{stamp}] 金牌多一種（有人槓），截圖存到 {save_result(frame, '槓_')}", echo=False)
                 if observation.claim is not None and observation.claim.tile is not None:
                     last_claim = (observation.claim, clock())
                 elif observation.buttons is not None and not observation.my_turn \
@@ -294,6 +300,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 events = rivers.update(frame, observation)
                 if getattr(rivers, "reset_by_empty_table", 0) != resets:
                     log(f"[{stamp}] 牌河整個清空，當成新的一局、重設牌河", echo=False)
+                    kong_shots.new_hand()
                     hands.hand_ended(settled=False)
                     declared_seen = set()
                 for event in events:
