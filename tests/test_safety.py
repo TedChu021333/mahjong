@@ -212,3 +212,19 @@ def test_guard_takes_a_concealed_kong_that_keeps_the_shanten():
     # 遊戲沒給槓（按鈕沒亮）就照打
     state.self_kong_allowed = False
     assert policy._guarded(state, 0, discard, legal_actions(state, 0), Random(0)) == discard
+
+
+def test_efficiency_prefers_shape_over_improvement_count():
+    pytest.importorskip("torch")
+    import numpy as np
+
+    from agent.nn_agent import efficient_discard
+    from game.rules import Meld
+    from training.actions import legal_mask
+
+    # 10/28 22:24 碰白後 一萬五六萬九九萬 二二四五七八筒 一二二條：打一萬、五筒都是 30 張，牌型一萬較好
+    state = state_with("1569m9m22p4578p122s")
+    state.players[0].melds = [Meld("pung", (P("7z"),) * 3, 2)]
+    _, lookup = legal_mask(legal_actions(state, 0))
+    action = efficient_discard(state, 0, Action(ActionType.DISCARD, tile=P("5p")), lookup, np.zeros(200), turns=6)
+    assert action == Action(ActionType.DISCARD, tile=P("1m"))

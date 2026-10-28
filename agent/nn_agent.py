@@ -200,8 +200,10 @@ def wasteful_discard(state: GameState, player: int, choice: Action, lookup: dict
 
 def efficient_discard(state: GameState, player: int, choice: Action, lookup: dict[int, Action],
                       logits: np.ndarray, turns: int) -> Action:
-    """前 turns 手、沒有對手宣告聽牌時湊牌優先：在同向聽的牌中依序比 有效進張 → 改良牌 → 牌型（往後多看一步，
-    next_step_outs）都最多的，最後才比最孤立（孤張字牌 → 孤張么九；用得上的金牌算值得留，rule_agent.keep_value）。
+    """前 turns 手、沒有對手宣告聽牌時湊牌優先：在同向聽的牌中依序比 有效進張 → 牌型（往後多看一步，
+    next_step_outs）→ 改良牌 都最多的，最後才比最孤立（孤張字牌 → 孤張么九；用得上的金牌算值得留，rule_agent.keep_value）。
+    牌型排在改良牌前面（10/28 使用者）：一萬五六萬九九萬 二二四五七八筒 一二二條（碰白），打一萬、五筒都是 30 張，
+    改良牌五筒多（26 對 18）就拆了四五筒，牌型一萬較好（724 對 696）。
 
     10/15 實戰：網路學到前期先打中張、留字牌與么九當後期的安全牌（規則式打孤張字牌的局面它 42% 改打
     數牌），例如 六八九萬 打六萬比打孤張東少 4 張進張。使用者認為湊牌應該優先。宣告聽牌、向聽不同、
@@ -233,7 +235,7 @@ def efficient_discard(state: GameState, player: int, choice: Action, lookup: dic
     same = [tile for tile in options if scored[tile][0] == level]
     top = max(scored[tile][1] for tile in same)
     best = [tile for tile in same if scored[tile][1] == top]
-    for measure in (improvement_count, next_step_outs):  # 平手時才算（每張約 20～50 ms）
+    for measure in (next_step_outs, improvement_count):  # 平手時才算（每張約 20～50 ms）
         if len(best) > 1:
             values = {tile: measure(after(tile), me.open_melds, visible) for tile in best}
             best = [tile for tile in best if values[tile] == max(values.values())]

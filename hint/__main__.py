@@ -66,6 +66,9 @@ MELD_READ_DELAY = 1.5
 """有人吃碰後等副露擺好再讀。"""
 MELD_READ_INTERVAL = 8.0
 """場上有人有副露時，每隔幾秒讀一次（加槓、暗槓不一定有吃碰事件）。"""
+MELD_SHOT_LIMIT = 80
+"""讀到的對手副露有變化時存一張 `副露_` 截圖（復盤時對照副露讀得對不對，10/28 使用者要求；復盤結束後刪掉），
+每次執行最多幾張。"""
 TABLE_INTERVAL = 1.0
 """別人的回合時放槍表最多幾秒重算一次（每次約 0.1 秒）。"""
 
@@ -222,6 +225,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     """放槍表算過的局面（手牌、各家牌河張數、宣告者），沒變就不重算。"""
     table_at = float("-inf")
     kong_shots = KongShots()
+    meld_shots_left = MELD_SHOT_LIMIT
 
     def update_table(observation) -> None:
         nonlocal table_for, table_at
@@ -327,7 +331,11 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 collect = getattr(rivers, "collect_melds", None)
                 if collect is not None and collect():
                     from hint.meld_watch import describe as describe_melds
-                    log(f"[{stamp}] 對手副露：{describe_melds(rivers.meld_watch.melds)}", echo=False)
+                    shot = ""
+                    if meld_shots_left > 0 and rivers.meld_watch.melds:
+                        meld_shots_left -= 1
+                        shot = f"（截圖 {Path(str(save_result(frame, '副露_'))).name}）"
+                    log(f"[{stamp}] 對手副露：{describe_melds(rivers.meld_watch.melds)}{shot}", echo=False)
                 watch = getattr(rivers, "meld_watch", None)
                 if show_melds is not None and watch is not None:
                     from hint.meld_watch import seat_labels
