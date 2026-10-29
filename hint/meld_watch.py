@@ -225,6 +225,24 @@ class MeldWatch:
         self.melds = {**self.melds, seat: tuple(melds)}
         return kong
 
+    def mark_kong(self, tile: int) -> str | None:
+        """推算有人明槓了 tile（hint.river_watch.RiverWatch.kong_confirmed）：讀到 tile 的碰的那家改成槓，回傳座位；
+        還沒有人讀到這個碰（或已經是槓）時回傳 None。"""
+        pung = Meld("pung", (tile,) * 3, from_player=-1)
+        kong = Meld("kong", (tile,) * 4, from_player=-1)
+        for seat, slots in self._slots.items():
+            melds = self._seat_melds(seat)
+            if kong in melds:
+                return None
+            if pung not in melds:
+                continue
+            for slot in slots:
+                if pung in slot[1]:
+                    slot[1][kong] += 1
+            self.melds = {**self.melds, seat: tuple(self._seat_melds(seat))}
+            return seat
+        return None
+
     def count_concealed(self, image: np.ndarray) -> dict[str, int]:
         counter = getattr(self.reader, "concealed_kongs", None)
         return counter(image) if counter is not None else {}

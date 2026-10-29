@@ -37,3 +37,30 @@ def test_unknown_previous_dealer_cannot_be_judged():
     book.hand_ended(settled=False)
     messages = book.see_dealer("me")
     assert len(messages) == 2 and DRAW_TEXT not in messages[1] and MISSED_TEXT not in messages[1]
+
+
+def test_streak_counts_consecutive_hands_with_the_same_dealer():
+    book = HandBook()
+    book.see_dealer("left")
+    assert book.streak is None  # 剛啟動：不知道之前連了幾局
+    book.hand_ended(settled=True)
+    book.see_dealer("me")
+    assert book.streak == 0  # 換莊
+    for expected in (1, 2, 3, 4, 5):
+        book.hand_ended(settled=True)
+        book.see_dealer("me")
+        assert book.streak == expected
+    book.read_streak(None)  # 5 以上沒有數字模板：沿用數的
+    assert book.streak == 5
+    book.hand_ended(settled=False)
+    book.see_dealer("right")
+    assert book.streak == 0
+
+
+def test_read_streak_overrides_the_count_after_starting_mid_streak():
+    book = HandBook()
+    book.see_dealer("top")
+    book.read_streak(2)
+    book.hand_ended(settled=True)
+    book.see_dealer("top")
+    assert book.streak == 3

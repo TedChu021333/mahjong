@@ -208,6 +208,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     last_readable = None
     """最近一次讀到手牌的時間；存過「讀不到」截圖後設為 None，直到再讀到手牌。"""
     streak_reported = False
+    gold_missing_shots = 0
     game_seen_at = clock()
     """最近一次認出遊戲畫面（手牌、按鈕、結算、代打）的時間。"""
     focus_tried_at = float("-inf")
@@ -291,6 +292,17 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                         f"{observation.meld_count} 組不合理，可能被動畫蓋住），不採用", echo=False)
                 observation = None
             if observation is not None:
+                if observation.swap_prompt is not None:
+                    hands.gold = ()
+                elif observation.gold_tiles:
+                    hands.gold = observation.gold_tiles
+                elif hands.gold:
+                    observation = replace(observation, gold_tiles=hands.gold)  # 這一幀讀不到：沿用這局之前讀到的
+                else:
+                    hands.gold_missing_frames += 1
+                    if hands.gold_missing_frames == GOLD_MISSING_FRAMES and gold_missing_shots < GOLD_MISSING_SHOT_LIMIT:
+                        gold_missing_shots += 1  # 整局都讀不到：存一張查原因（10/28 18:27 那局 10 手都沒有）
+                        log(f"[{stamp}] 這局一直讀不到金牌，截圖存到 {save_result(frame, '金牌_')}", echo=False)
                 if observation.swap_prompt is not None:
                     kong_shots.new_hand()
                 else:
@@ -391,10 +403,15 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 game_seen_at = last_readable = clock()
                 for message in hands.see_dealer(observation.dealer):
                     log(f"[{stamp}] {message}", echo=False)
-                if observation.dealer_streak is None and not streak_reported:
-                    streak_reported = True  # 每次執行只存一張，補模板用
-                    log(f"[{stamp}] 認不出連莊數（先當 {STREAK_UNKNOWN_GUESS}），截圖存到 "
-                        f"{save_result(frame, '連莊_')}")
+                hands.read_streak(observation.dealer_streak)
+                if observation.dealer_streak is None:
+                    if not streak_reported:
+                        streak_reported = True  # 每次執行只存一張，補模板用
+                        guess = (f"數得出這家連莊 {hands.streak} 局，照這個算" if hands.streak is not None
+                                 else f"先當 {STREAK_UNKNOWN_GUESS}")
+                        log(f"[{stamp}] 認不出連莊數（{guess}），截圖存到 {save_result(frame, '連莊_')}")
+                    if hands.streak is not None:
+                        observation = replace(observation, dealer_streak=hands.streak)
             elif find_autoplay is not None and find_autoplay(frame):
                 game_seen_at = last_readable = clock()  # 聽牌後遊戲代打：「取消代打」蓋住手牌是正常的
             if (last_readable is not None and clock() - last_readable >= UNREADABLE_AFTER
@@ -714,6 +731,12 @@ def network_options(network) -> str:
         return ""
     return (f"，湊牌優先 {network.efficiency_turns} 手"
             f"，護欄{'開' if getattr(network, 'guard', False) else '關'}")
+
+
+GOLD_MISSING_SHOT_LIMIT = 20
+"""讀不到金牌的截圖每次執行最多存幾張（每局最多一張）。"""
+GOLD_MISSING_FRAMES = 20
+"""同一局讀得到手牌、卻連這麼多幀都沒讀到過金牌才存截圖（偶爾一幀被動畫蓋住不算）。"""
 
 
 def win_is_lit(frame: np.ndarray) -> bool:

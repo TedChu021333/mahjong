@@ -18,17 +18,34 @@ class HandBook:
         """這一局認到的莊家（me/right/top/left）。"""
         self._unsettled: tuple[str | None] | None = None
         """上一局沒有結算畫面就結束時，上一局的莊家（包成 tuple，區分「沒有」與「莊家不明」）。"""
+        self.gold: tuple[int, ...] = ()
+        """這一局最近讀到的金牌：某一幀讀不到時沿用（金牌只會變多，10/28～29 打牌 3627 手有 61 手沒讀到）。"""
+        self.gold_missing_frames = 0
+        """這一局讀得到手牌、卻還沒讀到過金牌的幀數。"""
+        self._last_dealer: str | None = None
+        self.streak: int | None = None
+        """這一局的連莊數：同一家連續當莊幾局（莊家換了歸 0）。剛啟動、還沒看過換莊也沒讀到數字時不知道（None）。
+        連莊 5 以上還沒有數字模板，讀不出來時用它（以前一律當 3）。"""
 
     def hand_ended(self, settled: bool) -> None:
         """一局結束：settled 為有沒有認到結算畫面（換三張、牌河清空才發現的就是沒有）。"""
         self._unsettled = None if settled else (self.dealer,)
         self.dealer = None
+        self.gold = ()
+        self.gold_missing_frames = 0
 
     def see_dealer(self, dealer: str | None) -> list[str]:
         """這一局第一次認到莊家時回傳要記錄的訊息。"""
         if dealer is None or self.dealer is not None:
             return []
         self.dealer = dealer
+        if self._last_dealer is None:
+            self.streak = None
+        elif dealer == self._last_dealer:
+            self.streak = None if self.streak is None else self.streak + 1
+        else:
+            self.streak = 0
+        self._last_dealer = dealer
         messages = [f"本局莊家：{SEAT_NAMES[dealer]}"]
         if self._unsettled is not None:
             previous = self._unsettled[0]
@@ -41,3 +58,8 @@ class HandBook:
                 messages.append(f"上一局沒有結算畫面：{MISSED_TEXT}，"
                                 f"莊家 {SEAT_NAMES[previous]} → {SEAT_NAMES[dealer]}")
         return messages
+
+    def read_streak(self, value: int | None) -> None:
+        """畫面讀到的連莊數（莊方塊右下的數字）：讀得到就以它為準。"""
+        if value is not None and self.dealer is not None:
+            self.streak = value

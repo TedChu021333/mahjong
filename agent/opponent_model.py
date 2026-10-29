@@ -35,6 +35,12 @@ UNDECLARED_TENPAI_SHARE = 0.5
 """實戰中聽牌卻不宣告的比例（模擬器評估時用 0）。由結算畫面左邊台數清單有沒有「聽牌／地聽／天聽」量出：
 10/1～10/4 別人胡牌 752 次，胡牌者沒宣告 50%（電腦場 53%、真人配對場 46%）；我們放槍的 158 次中
 54% 是放給沒宣告的人。原本粗估 0.4。"""
+UNDECLARED_SMOOTHING = 0.3
+"""沒宣告的人聽哪張牌的分布往平均攤平的比例（總危險度不變，「幾乎安全」的牌分到一些）。
+10/29 校準（10/17～10/29 記錄、5000 手出牌 × 三家，eval.deal_in --calibrate）：沒宣告的對手估計不到 1% 的牌
+估 23.4 次、實際 38 次（1.63 倍）——模型太相信某些牌安全。0.3：<1% 1.37、1～3% 0.86、3～6% 1.06、合計 1.10；
+0.5：<1% 1.44、1～3% 0.72（變差）。已宣告的不攤平（估 46.3、實際 41，本來就準）。
+「聽牌不宣告的比例」改 0.7 是整體放大，合計變 0.81、1～10% 的牌高估更多，不採用。"""
 SEQUENCE_SHARE = 0.7
 """組面子時順子的比例（其餘為刻子）。"""
 OFFENSE_MIN_SAMPLES = 200
@@ -296,8 +302,10 @@ def estimate_danger(state: GameState, player: int, candidates: Sequence[int],
             # 放槍給莊家、或自己是莊家放槍：多付莊家台與連莊台（論文 TaKe：只防莊家反而總分最高）
             per_loss += TAI["莊家"] + 2 * state.dealer_streak
         by_opponent[opponent] = {}
+        smoothing = 0.0 if declared else UNDECLARED_SMOOTHING
+        uniform = sum(hits.values()) / valid / NUM_TILE_TYPES
         for tile in candidates:
-            risk = p_tenpai * hits[tile] / valid
+            risk = p_tenpai * ((1 - smoothing) * hits[tile] / valid + smoothing * uniform)
             by_opponent[opponent][tile] = risk
             safe_probability[tile] *= 1 - risk
             loss[tile] += risk * (per_loss + (GOLD_WIN_TAI if tile in gold else 0))

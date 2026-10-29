@@ -158,3 +158,18 @@ def test_offense_value_fades_late_and_keeps_shanten_gaps():
     for wall in (40, 30, 20):
         assert cal.offense_value(0, 16, wall) > cal.offense_value(1, 16, wall) \
             > cal.offense_value(2, 16, wall)
+
+
+def test_smoothing_spreads_undeclared_waits_without_changing_the_total(monkeypatch):
+    import agent.opponent_model as om
+
+    state = table(p1="1z2z3z4z5z6z")
+    tiles = list(range(34))
+    plain = estimate_danger(state, 0, tiles, Random(0), calibration(0.5), 200, undeclared_share=1.0)
+    monkeypatch.setattr(om, "UNDECLARED_SMOOTHING", 0.5)
+    smooth = estimate_danger(state, 0, tiles, Random(0), calibration(0.5), 200, undeclared_share=1.0)
+    for seat in plain.by_opponent:
+        assert abs(sum(plain.by_opponent[seat].values()) - sum(smooth.by_opponent[seat].values())) < 1e-9
+    # 最安全的牌變危險一點、最危險的牌變安全一點
+    assert min(smooth.by_opponent[1].values()) > min(plain.by_opponent[1].values())
+    assert max(smooth.by_opponent[1].values()) < max(plain.by_opponent[1].values())

@@ -812,10 +812,24 @@ def test_melds_are_read_after_claims_and_while_melds_are_on_the_table(monkeypatc
                   clock=lambda: now[0], rivers=rivers, show=lambda advice: None,
                   save_result=lambda frame, prefix="": saved.append(prefix) or prefix,
                   log=lambda *args, **kwargs: None)
-    # 1.05 秒被吃碰：1.5 秒後讀一次；之後場上有副露，每 8 秒讀一次；不存截圖
+    # 1.05 秒被吃碰：1.5 秒後讀一次；之後場上有副露，每 8 秒讀一次；不存副露截圖（假畫面沒有金牌，只存讀不到金牌的那張）
     assert rivers.requests[0] >= 1.05 + hint_main.MELD_READ_DELAY and len(rivers.requests) == 2
     assert rivers.requests[1] - rivers.requests[0] >= hint_main.MELD_READ_INTERVAL
-    assert saved == []
+    assert saved == ["金牌_"]
+
+
+def test_gold_is_reused_within_a_hand_when_a_frame_misses_it(monkeypatch):
+    import hint.__main__ as hint_main
+
+    # 10/29 17:10 那一手金牌讀不到：同一局之前讀到過就沿用
+    with_gold = Observation(T("11223789m99m4p56779s"), None, None, tuple(parse("1p3m")))
+    without = replace(with_gold, gold_tiles=())
+    seen = []
+    monkeypatch.setattr(hint_main, "decide", lambda observation: seen.append(observation) or None)
+    hint_main.run(((str(i), f) for i, f in enumerate([with_gold, without, without])), readers=None,
+                  observe_fn=lambda frame, readers: frame, show=lambda advice: None,
+                  save_result=lambda frame, prefix="": prefix, log=lambda *args, **kwargs: None)
+    assert all(observation.gold_tiles == tuple(parse("1p3m")) for observation in seen)
 
 
 def test_same_hand_is_not_redecided_when_only_flickering_details_change(monkeypatch):

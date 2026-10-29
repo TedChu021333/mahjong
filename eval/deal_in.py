@@ -431,8 +431,9 @@ def analyse(game: Game, outcome: Outcome, rng: Random, samples: int) -> Analysis
 
 
 def calibration_rows(games: list[tuple[Game, Outcome | None]], limit: int, rng: Random,
-                     samples: int) -> list[tuple[float, int, int, int, int]]:
-    """抽樣每一手出牌：(估計放槍給這家的機率, 實際有沒有放槍給他, 他打過幾張, 副露數, 對手座位)。"""
+                     samples: int) -> list[tuple[float, int, int, int, int, bool]]:
+    """抽樣每一手出牌：(估計放槍給這家的機率, 實際有沒有放槍給他, 他打過幾張, 副露數, 對手座位, 當下認到他宣告)。
+    宣告者與宣告後的安全牌照 AI 當下認到的（記錄檔每一步的「宣告」），和實戰決定時看到的一樣。"""
     pool = []
     for game, outcome in games:
         for index, decision in enumerate(game.decisions):
@@ -444,14 +445,17 @@ def calibration_rows(games: list[tuple[Game, Outcome | None]], limit: int, rng: 
     rng.shuffle(pool)
     rows = []
     for game, outcome, decision, hit in pool[:limit]:
-        state = to_state(decision, game.melds, outcome.dealer if outcome else None,
-                         my_discards=game.decisions.index(decision))
+        index = game.decisions.index(decision)
+        declared = decision.declared or frozenset()
+        state = to_state(decision, game.melds, outcome.dealer if outcome else None, declared,
+                         my_discards=index, safe=declared_safe(game.decisions, index))
         if state is None:
             continue
         danger = estimate_danger(state, ME, [decision.tile], rng, samples=samples)
         for seat in (1, 2, 3):
             p = danger.by_opponent.get(seat, {}).get(decision.tile, 0.0)
-            rows.append((p, int(hit == seat), len(decision.rivers[seat]), game.melds[seat], seat))
+            rows.append((p, int(hit == seat), len(decision.rivers[seat]), game.melds[seat], seat,
+                         seat in declared))
     return rows
 
 
@@ -513,6 +517,12 @@ def calibration_report(rows) -> str:
     table("依對手打過幾張", lambda r: f"{min(r[2] // 4 * 4, 16):02d}+ 張")
     table("依對手副露數（局末）", lambda r: f"{min(r[3], 3)} 組")
     table("依對手座位", lambda r: SEAT_NAMES[r[4]])
+    table("依當下有沒有認到他宣告", lambda r: "已宣告" if r[5] else "沒宣告")
+    undeclared = [r for r in rows if not r[5]]
+    rows, full = undeclared, rows
+    table("沒宣告的對手，依他打過幾張", lambda r: f"{min(r[2] // 4 * 4, 12):02d}+ 張")
+    table("沒宣告的對手，依估計機率", lambda r: next(f"{lo:.0%}~{hi:.0%}" for lo, hi in buckets if lo <= r[0] < hi))
+    rows = full
     return "\n".join(lines)
 
 

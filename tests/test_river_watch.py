@@ -442,6 +442,30 @@ def test_claim_seen_after_the_gold_changed_is_an_exposed_kong():
     assert watch.kong_confirmed() is None
 
 
+def test_exposed_kong_turns_the_read_pung_into_a_kong():
+    # 疊上去的第四張常讀不到：金牌變多時被拿走的那張，哪一家讀到它的碰就改成槓（之後才讀到的碰也算）
+    from game.rules import Meld
+    from hint.meld_watch import MeldWatch
+
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    melds = MeldWatch(None, template_dir=None, background=False)
+    watch.meld_watch = melds
+    reader.current["me"] = [RiverTile(P("1p"), 0.9, (700, 600, 760, 680))]
+    frames(watch, waiting())
+    watch.kong_started()
+    reader.current["me"] = []
+    frames(watch, waiting())
+    assert watch.kong_confirmed() is None
+    assert watch.open_kong_tiles == [P("1p")] and watch.kong_pending()
+    pung = Meld("pung", (P("1p"),) * 3, -1)
+    melds._vote("top", 1300, pung)
+    melds.melds = {"top": (pung,)}
+    assert watch._resolve_open_kongs()
+    assert melds.melds["top"] == (Meld("kong", (P("1p"),) * 4, -1),)
+    assert watch.open_kong_tiles == [] and "對家的一筒碰改成明槓" in watch.kong_notes[-1]
+
+
 def test_concealed_kong_waits_for_meld_reads():
     from game.rules import Meld
     from hint.meld_watch import MeldWatch
