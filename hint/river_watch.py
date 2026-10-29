@@ -43,6 +43,8 @@ LABEL_MIN_SCORE = 0.7
 """標註（手牌變化、放大的牌）和這張牌河的牌比對，至少要這麼像才採用、存成模板。10/19 發現牌河模板 6753 張
 有 1447 張放錯資料夾或不是牌（吃碰動畫、暗條；標註套到錯的那張），自己打的牌只讀對約一半；清掉後今天讀錯的
 126 張全部讀對。門檻 0.7：正確的標註留下 99%、錯的擋下 91%。"""
+ADDED_KONG_READS = 2
+"""推算加槓後等讀幾次副露（約 8 秒一次）才把碰改成槓。"""
 EMPTY_RESET_FRAMES = 10
 """四家牌河連續這麼多次都讀不到任何牌、追蹤器卻記著牌時，當成新的一局（沒有換三張的場、流局沒有結算畫面）。"""
 
@@ -106,6 +108,8 @@ class RiverWatch:
         self._last_mover: tuple[str, str] | None = None
         """牌河最近一個事件：(座位, "discard"／"claimed")，推算槓的是誰用。"""
         self._kong_from: tuple[str, str] | None = None
+        self._added_pending: tuple[str, int, int, int] | None = None
+        """推算某家加槓、等讀副露確認：(座位, 當時讀到他的槓數, 畫面上看到他的暗槓數, 當時讀副露的次數)。"""
         self._declare_marks: dict[str, dict[str, int]] = {}
         """第一次認到某家宣告時，各家牌河（含被吃碰的）已有幾張；之後別家打出的牌他一定不聽
         （遊戲代打、自動胡），見 declared_safe。"""
@@ -129,7 +133,7 @@ class RiverWatch:
         self._own_pending = None
         self.unseen_claimed = []
         self.hidden_kongs = {seat: 0 for seat in SEATS}
-        self._last_mover = self._kong_from = None
+        self._last_mover = self._kong_from = self._added_pending = None
         if getattr(self, "meld_watch", None) is not None:
             self.meld_watch.new_hand()
 
@@ -266,8 +270,9 @@ class RiverWatch:
         """金牌剛變多（有人槓）：記下當時牌河最近的事件，槓的是那之後輪到的人。"""
         self._kong_from = self._last_mover
 
-    def kong_confirmed(self) -> str | None:
-        """金牌變多確認了、又不是自己槓的：推算是不是別家暗槓，是的話副露數加 1、回傳座位。
+    def kong_confirmed(self) -> tuple[str, str] | None:
+        """金牌變多確認了、又不是自己槓的：推算是誰槓、哪一種，回傳 ("暗槓"／"加槓", 座位)，推算不出來回傳 None。
+        暗槓：副露數加 1。加槓：那家只有一組碰時把它改成槓（MeldWatch.mark_added_kong）。
         暗槓牌背朝上、副露辨識讀不到，原本整組漏掉（10/29 對手的槓 33 次只讀到 9 次，抽看的多是暗槓）。
         槓的人＝最近一張打出的牌的下一家（自己 → 下家 → 對家 → 上家）。保守起見這些不算：
         最近的事件是有牌被拿走（明槓，已由吃碰推算）、輪到自己、那家已有碰（可能是加槓，不多一組；
@@ -280,13 +285,18 @@ class RiverWatch:
         if seat == "me":
             return None
         read = self.meld_watch.melds.get(seat, ()) if self.meld_watch is not None else ()
+        if any(meld.kind == "pung" for meld in read):
+            # 先等讀副露：剛槓的可能是別組（暗槓、或疊上去的那張讀得到），讀到新的槓就不改
+            kongs = sum(meld.kind == "kong" for meld in read)
+            self._added_pending = (seat, kongs, self.meld_watch.concealed.get(seat, 0), self.meld_watch.reads)
+            return ("加槓", seat)
         if any(meld.kind != "chow" for meld in read):
             return None
         claims = self.claims[seat]
         if len(claims) > len(read) and any(kind != "chow" for _, kind in claims):
             return None
         self.hidden_kongs[seat] += 1
-        return seat
+        return ("暗槓", seat)
 
     def meld_hints(self) -> dict[str, list[tuple[int, str | None]]]:
         """推算有吃碰、讀到的副露裡還沒有的：各家 (被拿走的牌, "chow"／"pung"／None 分不出)，引導讀副露用。"""
@@ -314,7 +324,22 @@ class RiverWatch:
         if self.meld_watch is None:
             return False
         known = {seat: list(tiles) for seat, tiles in self.exposed.items() if seat != "me"}
-        return self.meld_watch.collect(known, {seat: count for seat, count in self.melds.items() if seat != "me"})
+        changed = self.meld_watch.collect(known, {seat: count for seat, count in self.melds.items() if seat != "me"})
+        return self._resolve_added_kong() or changed
+
+    def _resolve_added_kong(self) -> bool:
+        """推算的加槓：之後讀了 ADDED_KONG_READS 次副露，那家都沒有多讀到槓，就把他唯一的碰改成槓。"""
+        if self._added_pending is None:
+            return False
+        seat, kongs, concealed, reads = self._added_pending
+        read = self.meld_watch.melds.get(seat, ())
+        if sum(meld.kind == "kong" for meld in read) > kongs or self.meld_watch.concealed.get(seat, 0) > concealed:
+            self._added_pending = None  # 讀到了新的槓（或畫面上看到暗槓）：不用改
+            return False
+        if self.meld_watch.reads - reads < ADDED_KONG_READS:
+            return False
+        self._added_pending = None
+        return self.meld_watch.mark_added_kong(seat) is not None
 
     def read_melds(self) -> tuple[tuple, ...]:
         """讀到的對手副露（Meld），依 advisor 的座位編號排列；自己的欄位是空的。"""

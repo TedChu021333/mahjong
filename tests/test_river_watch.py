@@ -355,9 +355,8 @@ def test_meld_hints_list_claimed_tiles_not_yet_read():
 
 
 def test_concealed_kong_is_credited_to_the_player_after_the_last_discard():
-    from types import SimpleNamespace
-
     from game.rules import Meld
+    from hint.meld_watch import MeldWatch
 
     reader = FakeReader()
     watch, _ = watch_with(reader)
@@ -365,13 +364,40 @@ def test_concealed_kong_is_credited_to_the_player_after_the_last_discard():
     frames(watch, waiting())
     # 對家打完一張後金牌多一種：輪到上家，他沒有碰、也沒有推算的吃碰 → 上家暗槓
     watch.kong_started()
-    assert watch.kong_confirmed() == "left"
+    assert watch.kong_confirmed() == ("暗槓", "left")
     assert watch.hidden_kongs["left"] == 1 and watch.meld_counts()[3] == 1
-    # 那家已有碰：可能是加槓（10/29 02:33 上家加槓一條），不多算一組
-    watch.meld_watch = SimpleNamespace(melds={"left": (Meld("pung", (P("1s"),) * 3, 2),)},
-                                       new_hand=lambda: None)
+    # 那家只有一組碰：是加槓，把碰改成槓（10/29 02:06 下家加槓北，疊上去那張讀成二條）
+    melds = MeldWatch(None, template_dir=None, background=False)
+    pung = Meld("pung", (P("1s"),) * 3, -1)
+    melds._vote("left", 100, pung)
+    melds.melds = {"left": (pung,)}
+    watch.meld_watch = melds
     watch.kong_started()
-    assert watch.kong_confirmed() is None
+    assert watch.kong_confirmed() == ("加槓", "left")
+    assert watch.meld_watch.melds["left"] == (pung,)  # 先等讀副露，剛槓的可能是別組
+    melds.reads += 2
+    assert watch._resolve_added_kong()
+    assert watch.meld_watch.melds["left"] == (Meld("kong", (P("1s"),) * 4, -1),)
+    # 兩組碰分不出是哪組：不改
+    melds = MeldWatch(None, template_dir=None, background=False)
+    melds._vote("left", 100, pung)
+    melds._vote("left", 200, Meld("pung", (P("9s"),) * 3, -1))
+    melds.melds = {"left": tuple(melds._seat_melds("left"))}
+    watch.meld_watch = melds
+    watch.kong_started()
+    assert watch.kong_confirmed() == ("加槓", "left")
+    melds.reads += 2
+    assert not watch._resolve_added_kong()
+    assert all(meld.kind == "pung" for meld in melds.melds["left"])
+    # 等的期間讀到新的槓（例如 10/29 01:03 下家已有九萬碰，那次槓的是白）：不改碰
+    watch.kong_started()
+    assert watch.kong_confirmed() == ("加槓", "left")
+    white = Meld("kong", (P("7z"),) * 4, -1)
+    melds._vote("left", 300, white)
+    melds.melds = {"left": tuple(melds._seat_melds("left"))}
+    melds.reads += 2
+    assert not watch._resolve_added_kong()
+    assert sum(meld.kind == "kong" for meld in melds.melds["left"]) == 1
     # 下一家是自己：是自己槓的
     reader.current["left"] = [RiverTile(P("2p"), 0.9, (400, 300, 460, 380))]
     frames(watch, waiting())

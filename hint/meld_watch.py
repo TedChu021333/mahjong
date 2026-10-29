@@ -208,6 +208,23 @@ class MeldWatch:
             melds.append(meld)
         return melds[:5]
 
+    def mark_added_kong(self, seat: str) -> Meld | None:
+        """推算這家剛加槓（hint.river_watch.RiverWatch.kong_confirmed）：他只有一組碰時把它改成槓。疊上去的第四張常讀不到
+        （10/29 02:06 下家加槓北，疊起來那張讀成二條；上家起點的槓被「玩家槓牌加碼」提示條蓋住）。碰有兩組以上分不出是哪組，不改。"""
+        pungs = [slot for slot in self._slots.get(seat, []) if (slot[3] or slot[2]).kind == "pung"]
+        current = [meld for meld in self._seat_melds(seat) if meld.kind == "pung"]
+        if len(current) != 1:
+            return None
+        kong = Meld("kong", (current[0].tiles[0],) * 4, from_player=-1)
+        for slot in pungs:
+            if current[0] in slot[1]:
+                slot[1][kong] += 1
+        melds = self._seat_melds(seat)
+        if kong not in melds:
+            return None
+        self.melds = {**self.melds, seat: tuple(melds)}
+        return kong
+
     def count_concealed(self, image: np.ndarray) -> dict[str, int]:
         counter = getattr(self.reader, "concealed_kongs", None)
         return counter(image) if counter is not None else {}

@@ -300,10 +300,12 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                         if kong_shots.started:
                             rivers.kong_started()
                         if kong_shots.confirmed and clock() - own_kong_at > OWN_KONG_SECONDS:
-                            seat = rivers.kong_confirmed()
-                            if seat is not None:
-                                log(f"[{stamp}] 推算{MELD_SEAT_NAMES[seat]}暗槓（金牌多一種、最近打牌的下一家、"
-                                    f"他沒有碰可以加槓），副露數加 1", echo=False)
+                            found = rivers.kong_confirmed()
+                            if found is not None:
+                                kind, seat = found
+                                detail = "他沒有碰可以加槓，副露數加 1" if kind == "暗槓" else "他只有一組碰，改成槓"
+                                log(f"[{stamp}] 推算{MELD_SEAT_NAMES[seat]}{kind}（金牌多一種、最近打牌的下一家；{detail}）",
+                                    echo=False)
                 if observation.claim is not None and observation.claim.tile is not None:
                     last_claim = (observation.claim, clock())
                 elif observation.buttons is not None and not observation.my_turn \
