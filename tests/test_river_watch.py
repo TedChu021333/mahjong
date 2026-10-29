@@ -428,3 +428,45 @@ def test_concealed_kongs_seen_on_screen_count_as_melds():
     # 同一組推算也算到了：取較多的，不重複算
     watch.hidden_kongs["top"] = 1
     assert watch.meld_counts()[2] == 1
+
+
+def test_claim_seen_after_the_gold_changed_is_an_exposed_kong():
+    # 10/29 16:57 對家明槓我打的一筒：金牌先變多，牌河晚一點才報那張被拿走
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    reader.current["me"] = [RiverTile(P("1p"), 0.9, (700, 600, 760, 680))]
+    frames(watch, waiting())
+    watch.kong_started()
+    reader.current["me"] = []
+    frames(watch, waiting())
+    assert watch.kong_confirmed() is None
+
+
+def test_concealed_kong_waits_for_meld_reads():
+    from game.rules import Meld
+    from hint.meld_watch import MeldWatch
+
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    melds = MeldWatch(None, template_dir=None, background=False)
+    watch.meld_watch = melds
+    reader.current["top"] = [RiverTile(P("1p"), 0.9, (700, 200, 760, 280))]
+    frames(watch, waiting())
+    watch.kong_started()
+    assert watch.kong_confirmed() == ("暗槓", "left")
+    assert watch.hidden_kongs["left"] == 0 and watch.kong_pending()
+    melds.reads += 1
+    assert not watch._resolve_hidden_kong()
+    melds.reads += 1
+    assert watch._resolve_hidden_kong()
+    assert watch.hidden_kongs["left"] == 1 and not watch.kong_pending()
+    assert watch.kong_notes and "確認上家暗槓" in watch.kong_notes[-1]
+    # 10/29 15:51 對家的八筒馬上被下家明槓：之後讀到下家的槓，推算的暗槓取消
+    watch.kong_started()
+    assert watch.kong_confirmed() == ("暗槓", "left")
+    kong = Meld("kong", (P("8p"),) * 4, -1)
+    melds._vote("right", 100, kong)
+    melds.melds = {"right": (kong,)}
+    melds.reads += 2
+    assert not watch._resolve_hidden_kong()
+    assert watch.hidden_kongs["left"] == 1 and "取消推算的上家暗槓" in watch.kong_notes[-1]

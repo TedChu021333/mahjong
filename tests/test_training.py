@@ -229,6 +229,41 @@ def test_guard_takes_a_claim_the_network_passed_when_it_widens_the_hand():
     assert widening_claim(state, 0, legal_actions(state, 0)) is None
 
 
+def test_keep_tenpai_when_the_network_breaks_it_and_nobody_declared():
+    pytest.importorskip("torch")
+    from agent.nn_agent import keep_tenpai
+    from game.rules import Meld
+    from training.actions import legal_mask
+
+    # 10/29 17:17：六萬八萬九九九萬 一二三筒 五五六七八筒 九九九條，摸四筒；網路打六萬退成一向聽，打四筒聽嵌七萬
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("68999m123455678p999s"))
+    state = GameState([0] * 60, players, phase=Phase.DISCARD, last_drawn=parse("4p")[0])
+    _, lookup = legal_mask(legal_actions(state, 0))
+    logits = np.zeros(108, dtype=np.float32)
+    logits[DISCARD + parse("4p")[0]] = 1.0
+    action, note = keep_tenpai(state, 0, Action(ActionType.DISCARD, tile=parse("6m")[0]), lookup, logits)
+    assert action == Action(ActionType.DISCARD, tile=parse("4p")[0]) and "聽七萬（剩 4 張）" in note
+    assert keep_tenpai(state, 0, Action(ActionType.DISCARD, tile=parse("4p")[0]), lookup, logits) is None  # 本來就聽
+    players[1].discards = parse("7777m")  # 聽的牌全看得到：讓網路拆
+    assert keep_tenpai(state, 0, Action(ActionType.DISCARD, tile=parse("6m")[0]), lookup, logits) is None
+    players[1].discards = []
+    state.declared[2] = True  # 有人宣告：交給護欄的放槍檢查
+    assert keep_tenpai(state, 0, Action(ActionType.DISCARD, tile=parse("6m")[0]), lookup, logits) is None
+    state.declared[2] = False
+    state.declared[0] = True  # 自己已按聽
+    assert keep_tenpai(state, 0, Action(ActionType.DISCARD, tile=parse("6m")[0]), lookup, logits) is None
+    # 10/28 21:40：兩組副露，七萬九萬 八九筒 五六七條 九條 東東，摸七筒；網路打九萬，打九條聽嵌八萬
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("79m789p5679s11z"))
+    players[0].melds = [Meld("pung", tuple(parse("777z")), 1), Meld("pung", tuple(parse("555z")), 2)]
+    state = GameState([0] * 60, players, phase=Phase.DISCARD, last_drawn=parse("7p")[0])
+    _, lookup = legal_mask(legal_actions(state, 0))
+    action, _ = keep_tenpai(state, 0, Action(ActionType.DISCARD, tile=parse("9m")[0]), lookup,
+                            np.zeros(108, dtype=np.float32))
+    assert action == Action(ActionType.DISCARD, tile=parse("9s")[0])
+
+
 def test_wasteful_discard_switches_to_much_wider_waits_when_nobody_declared():
     pytest.importorskip("torch")
     from agent.nn_agent import wasteful_discard

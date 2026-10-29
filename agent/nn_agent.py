@@ -74,12 +74,16 @@ class NetworkPolicy:
                                            self.efficiency_turns)
             if self.guard:
                 try:
-                    wasteful = wasteful_discard(state, player, choice, lookup, logits.cpu().numpy())
+                    scores = logits.cpu().numpy()
+                    kept = keep_tenpai(state, player, choice, lookup, scores)
+                    if kept is not None:
+                        choice = kept[0]
+                    wasteful = wasteful_discard(state, player, choice, lookup, scores)
                     if wasteful is not None:
-                        choice, waste_note = wasteful
+                        choice = wasteful[0]
                     choice = self._guarded(state, player, choice, actions, rng)
-                    if wasteful is not None:
-                        self.last_note = "；".join(note for note in (waste_note, self.last_note) if note)
+                    self.last_note = "；".join(
+                        note for note in (kept and kept[1], wasteful and wasteful[1], self.last_note) if note) or None
                 except ValueError:  # 局面不合法（例如辨識出的張數不對）：照網路
                     self.last_note = None
             return choice
@@ -152,6 +156,47 @@ def widening_claim(state: GameState, player: int, actions: list[Action]) -> tupl
         return None
     word = "碰" if best[0].kind == ActionType.PUNG else "吃"
     return best[0], f"{word}了進張 {-before[1]} → {-best[1][1]} 張（一向聽）"
+
+
+def keep_tenpai(state: GameState, player: int, choice: Action, lookup: dict[int, Action],
+                logits: np.ndarray) -> tuple[Action, str] | None:
+    """沒人宣告時，網路打的牌讓聽牌退成一向聽以上，而別張打完能聽、聽的牌還有剩：改打保持聽牌的那張，回傳 (動作, 說明)。
+
+    10/29 17:17 六萬八萬九九九萬 一二三筒 五五六七八筒 九九九條 摸四筒，打四筒聽嵌七萬（一張都沒出現），網路打六萬退成一向聽。
+    台灣麻將沒有振聽、沒按聽手牌也不鎖，留著聽牌之後照樣能改聽、做大。10/28～29 沒人宣告又能聽牌的 647 手中網路拆了 5 手。
+    挑聽的牌剩最多張的；一樣時不打用得上的金牌，再照網路的偏好。有人宣告時由 agent.safety 管（RETREAT_MIN_DANGER）。"""
+    me = state.players[player]
+    if (choice.kind not in (ActionType.DISCARD, ActionType.DECLARE) or state.phase != Phase.DISCARD
+            or state.declared[player] or any(state.declared[seat] for seat in range(4) if seat != player)):
+        return None
+    options = [index - DISCARD for index in lookup if DISCARD <= index < DISCARD + 34]
+    if choice.tile not in options:
+        return None
+
+    def after(tile: int) -> list[int]:
+        hand = list(me.hand)
+        hand[tile] -= 1
+        return hand
+
+    if shanten(after(choice.tile), me.open_melds) <= 0:
+        return None
+    visible = visible_tile_counts(state, player)
+    live = {}
+    for tile in options:
+        hand = after(tile)
+        if shanten(hand, me.open_melds) == 0:
+            waits = effective_tiles(hand, me.open_melds)
+            count = sum(max(0, 4 - visible[t]) for t in waits)
+            if count > 0:
+                live[tile] = (count, waits)
+    if not live:
+        return None
+    pick = min(live, key=lambda tile: (-live[tile][0], tile in state.gold_tiles and gold_in_use(me.hand, tile),
+                                       -float(logits[DISCARD + tile])))
+    count, waits = live[pick]
+    return (lookup[DISCARD + pick],
+            f"保聽：打{tile_name(choice.tile)}退成一向聽 → 改打{tile_name(pick)} 聽"
+            f"{''.join(tile_name(t) for t in waits)}（剩 {count} 張）")
 
 
 WASTE_OUTS = 4

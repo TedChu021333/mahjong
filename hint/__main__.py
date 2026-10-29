@@ -301,9 +301,11 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                             rivers.kong_started()
                         if kong_shots.confirmed and clock() - own_kong_at > OWN_KONG_SECONDS:
                             found = rivers.kong_confirmed()
+                            meld_read_due = clock() + MELD_READ_DELAY  # 槓完讀一次副露，確認推算
                             if found is not None:
                                 kind, seat = found
-                                detail = "他沒有碰可以加槓，副露數加 1" if kind == "暗槓" else "他只有一組碰，改成槓"
+                                detail = ("他沒有碰可以加槓；讀兩次副露都沒有別的槓才算" if kind == "暗槓"
+                                          else "他有碰；讀兩次副露都沒有別的槓、又只有一組碰才改成槓")
                                 log(f"[{stamp}] 推算{MELD_SEAT_NAMES[seat]}{kind}（金牌多一種、最近打牌的下一家；{detail}）",
                                     echo=False)
                 if observation.claim is not None and observation.claim.tile is not None:
@@ -335,7 +337,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     if event.kind in ("claimed", "claimed_unseen"):
                         meld_read_due = clock() + MELD_READ_DELAY
                 counts = getattr(rivers, "meld_counts", None)
-                has_melds = counts is not None and any(counts())
+                has_melds = counts is not None and (any(counts()) or getattr(rivers, "kong_pending", bool)())
                 due = meld_read_due is not None and clock() >= meld_read_due
                 if due or (has_melds and clock() - meld_read_at >= MELD_READ_INTERVAL):
                     meld_read_due, meld_read_at = None, clock()
@@ -343,7 +345,12 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     if request is not None:
                         request(frame)  # 背景讀對手副露
                 collect = getattr(rivers, "collect_melds", None)
-                if collect is not None and collect():
+                collected = collect is not None and collect()
+                for note in getattr(rivers, "kong_notes", ())[:]:
+                    log(f"[{stamp}] {note}", echo=False)
+                if getattr(rivers, "kong_notes", None):
+                    rivers.kong_notes.clear()
+                if collected:
                     from hint.meld_watch import describe as describe_melds
                     shot = ""
                     if meld_shots_left > 0 and rivers.meld_watch.melds:
