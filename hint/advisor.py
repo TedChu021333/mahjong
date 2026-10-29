@@ -397,9 +397,10 @@ def _added_kong(observation: Observation, state: GameState) -> Action | None:
     """輪到自己時「槓」亮著、手上卻沒有 4 張一樣的：是加槓（碰過的刻子內容讀不到，規則引擎列不出
     這個選項），划算就槓。能加槓的只有自己碰過的牌（observation.my_pungs）：10/19 18:23 碰了七條、
     手上有六七八條，摸進中時「槓」亮著，原本一律當成摸進的中要加槓，按下去遊戲卻是把六七八裡的七條
-    加槓上去，拆了順子。沒有追蹤碰過哪些牌時才退回「摸進的牌」。"""
+    加槓上去，拆了順子。沒有追蹤碰過哪些牌時才退回「摸進的牌」。
+    「胡」亮著時不加槓、交給 AI（會選胡）：10/29 23:51 碰了七萬、摸進第四張七萬就自摸，原本先判斷加槓划算就槓。"""
     buttons = observation.buttons or frozenset()
-    if not observation.my_turn or observation.claimed or "kong" not in buttons:
+    if not observation.my_turn or observation.claimed or "kong" not in buttons or "win" in buttons:
         return None
     me = state.players[ME]
     if any(count >= 4 for count in me.hand):

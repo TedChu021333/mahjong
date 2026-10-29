@@ -24,6 +24,7 @@ MENU = [
     ("大老二：提示模式", ["-m", "bigtwo.live"]),
     ("麻將：今天戰績", ["-m", "eval.stats"]),
     ("麻將：自己 vs 三家電腦（一圈）", ["-m", "play", "--model", MODEL]),
+    ("麻將：四家電腦互打（手牌全開）", ["-m", "play", "--model", MODEL, "--watch"]),
 ]
 
 

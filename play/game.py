@@ -18,6 +18,8 @@ from game.tiles import tile_name
 
 HUMAN = 0
 SEAT_NAMES = ("自己", "下家", "對家", "上家")
+WATCH_NAMES = ("下方", "右方", "對面", "左方")
+"""觀戰模式（四家都是電腦）的座位名稱。"""
 WIND_NAMES = {27: "東", 28: "南", 29: "西", 30: "北"}
 MONEY_PER_TAI = 50
 """訓練場：底 100（= 2 台）、每台 50。"""
@@ -48,9 +50,9 @@ def seat_policy(human: PlayerPolicy, bot: PlayerPolicy) -> PlayerPolicy:
     return policy
 
 
-def describe_action(player: int, action: Action) -> str | None:
+def describe_action(player: int, action: Action, names: tuple[str, ...] = SEAT_NAMES) -> str | None:
     """牌局訊息（摸牌、過、換三張不顯示）。"""
-    who = SEAT_NAMES[player]
+    who = names[player]
     tile = tile_name(action.tile) if action.tile is not None else ""
     kind = action.kind
     if kind == ActionType.DISCARD:

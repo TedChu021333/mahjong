@@ -46,6 +46,8 @@ LABEL_MIN_SCORE = 0.7
 126 張全部讀對。門檻 0.7：正確的標註留下 99%、錯的擋下 91%。"""
 ADDED_KONG_READS = 2
 """推算加槓後等讀幾次副露（約 8 秒一次）才把碰改成槓。"""
+RECENT_KONG_READS = 2
+"""金牌變多前這麼多次讀副露之內才讀到的槓，算是這次金牌變多的那一組（有人吃碰後 1.5 秒就讀，槓常比金牌先讀到）。"""
 EMPTY_RESET_FRAMES = 10
 """四家牌河連續這麼多次都讀不到任何牌、追蹤器卻記著牌時，當成新的一局（沒有換三張的場、流局沒有結算畫面）。"""
 
@@ -122,6 +124,12 @@ class RiverWatch:
         疊上去的第四張常讀不到，明槓原本一直算成碰（10/28 使用者：對手的槓都被當成碰）。"""
         self.kong_notes: list[str] = []
         """暗槓推算確認或取消的說明，提示迴圈寫進記錄後清掉。"""
+        self._kong_seen: list[int] = []
+        """這局每次讀完副露時讀到的各家槓合計（_kong_total），找金牌變多前剛讀到的槓用。"""
+        self._kongs_explained = 0
+        """讀到的槓裡，已經拿來解釋某一次金牌變多的有幾組。"""
+        self._kong_baseline = 0
+        """金牌剛變多時「之前就有的槓」：比它多讀到的槓就是這次槓的那一組。"""
         self._declare_marks: dict[str, dict[str, int]] = {}
         """第一次認到某家宣告時，各家牌河（含被吃碰的）已有幾張；之後別家打出的牌他一定不聽
         （遊戲代打、自動胡），見 declared_safe。"""
@@ -148,6 +156,8 @@ class RiverWatch:
         self._last_mover = self._kong_from = self._added_pending = self._hidden_pending = None
         self._claimed_tile_since_kong = None
         self.open_kong_tiles = []
+        self._kong_seen = []
+        self._kongs_explained = self._kong_baseline = 0
         if getattr(self, "meld_watch", None) is not None:
             self.meld_watch.new_hand()
 
@@ -290,6 +300,8 @@ class RiverWatch:
         self._kong_from = self._last_mover
         self._claimed_since_kong = False
         self._claimed_tile_since_kong = None
+        earlier = self._kong_seen[-1 - RECENT_KONG_READS] if len(self._kong_seen) > RECENT_KONG_READS else 0
+        self._kong_baseline = max(self._kongs_explained, earlier)
 
     def kong_confirmed(self) -> tuple[str, str] | None:
         """金牌變多確認了、又不是自己槓的：推算是誰槓、哪一種，回傳 ("暗槓"／"加槓", 座位)，推算不出來回傳 None。
@@ -302,8 +314,15 @@ class RiverWatch:
         金牌變多到確認之間牌河才報「被拿走」的也是明槓：金牌一槓就變，牌河要那張不見 3 幀才報（10/29 16:57
         對家明槓我打的一筒，金牌變多時最近的事件還是我打牌，被當成下家暗槓）。
         暗槓先不算（_hidden_pending），等之後讀 ADDED_KONG_READS 次副露、哪一家都沒有多讀到槓才算：
-        10/29 15:51 對家打的八筒馬上被下家明槓、沒進牌河，最近的事件是更早的出牌，被當成上家暗槓。"""
+        10/29 15:51 對家打的八筒馬上被下家明槓、沒進牌河，最近的事件是更早的出牌，被當成上家暗槓。
+        金牌變多前後已經讀到新的槓（含畫面上看到的暗槓）就是那一組，什麼都不推算（_kong_baseline）：10/30 00:19 下家槓九萬、
+        00:59 對家槓五萬，金牌變多前一刻就讀到了，原本還多推算一組別家的暗槓；10/29 23:41、10/30 00:01 上家暗槓畫面上看到了，
+        同時牌河報被拿走，又記了一筆明槓。"""
         mover, self._kong_from = self._kong_from, None
+        if self.meld_watch is not None and self._kong_total() > self._kong_baseline:
+            self._kongs_explained = self._kong_baseline + 1
+            self.kong_notes.append("金牌變多前後讀到了新的槓，就是那一組，不另外推算")
+            return None
         if self._claimed_since_kong:
             tile = self._claimed_tile_since_kong
             if tile is not None and self.meld_watch is not None:
@@ -369,6 +388,7 @@ class RiverWatch:
             return False
         known = {seat: list(tiles) for seat, tiles in self.exposed.items() if seat != "me"}
         changed = self.meld_watch.collect(known, {seat: count for seat, count in self.melds.items() if seat != "me"})
+        self._kong_seen.append(self._kong_total())
         hidden = self._resolve_hidden_kong()
         opened = self._resolve_open_kongs()
         return self._resolve_added_kong() or hidden or opened or changed
@@ -380,6 +400,7 @@ class RiverWatch:
             seat = self.meld_watch.mark_kong(tile)
             if seat is not None:
                 self.open_kong_tiles.remove(tile)
+                self._kongs_explained += 1
                 self.kong_notes.append(f"{SEAT_NAMES[seat]}的{tile_name(tile)}碰改成明槓")
                 changed = True
         return changed
@@ -392,6 +413,7 @@ class RiverWatch:
         name = SEAT_NAMES[seat]
         if self._kong_total() > total:
             self._hidden_pending = None
+            self._kongs_explained += 1
             self.kong_notes.append(f"取消推算的{name}暗槓（之後讀到別的槓，金牌變多是那一組）")
             return False
         if self.meld_watch.reads - reads < ADDED_KONG_READS:
@@ -409,11 +431,15 @@ class RiverWatch:
         read = self.meld_watch.melds.get(seat, ())
         if sum(meld.kind == "kong" for meld in read) > kongs or self.meld_watch.concealed.get(seat, 0) > concealed:
             self._added_pending = None  # 讀到了新的槓（或畫面上看到暗槓）：不用改
+            self._kongs_explained += 1
             return False
         if self.meld_watch.reads - reads < ADDED_KONG_READS:
             return False
         self._added_pending = None
-        return self.meld_watch.mark_added_kong(seat) is not None
+        if self.meld_watch.mark_added_kong(seat) is None:
+            return False
+        self._kongs_explained += 1
+        return True
 
     def read_melds(self) -> tuple[tuple, ...]:
         """讀到的對手副露（Meld），依 advisor 的座位編號排列；自己的欄位是空的。"""

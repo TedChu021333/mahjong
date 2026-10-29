@@ -1,6 +1,10 @@
 """人機對戰：自己 vs 三家電腦（網路 AI，開實戰護欄），打一圈。
 
-    python -m play [--model models/rl3_0960.pt] [--seed N] [--bot rule]
+    python -m play [--model models/rl3_0960.pt] [--seed N] [--bot rule] [--watch]
+
+--watch 觀戰模式（10/30 使用者要求）：四家都是電腦、手牌全開，同一個畫面，每家出牌等 5 秒（WATCH_DELAY）。
+
+每圈記錄寫到 result/play_log_<日期_時間>.jsonl（含同一局面 AI 會怎麼打），`python -m play.analyze` 分析。
 
 規則同模擬器：換三張、金牌、按聽、花牌、連莊。打牌時不給提示；每局結束亮四家的牌與台數明細。
 操作：點手牌打出；換三張時點選 0～3 張再按「換牌」；能吃碰槓胡時右下出現按鈕；按「聽」後再點要打的牌就是打牌並宣告。
@@ -23,13 +27,16 @@ from PIL import Image, ImageTk
 from game.rules import Action, ActionType, GameState, Phase
 from game.tiles import tile_name
 from play import art
-from play.game import (HUMAN, MONEY_PER_TAI, SEAT_NAMES, WIND_NAMES, HandSummary, HumanSeat,
+from play.record import Recorder
+from play.game import (HUMAN, MONEY_PER_TAI, SEAT_NAMES, WATCH_NAMES, WIND_NAMES, HandSummary, HumanSeat,
                        describe_action, play_round, score_lines, seat_policy)
 
 MODEL = "models/rl3_0960.pt"
 WIDTH, HEIGHT = 1400, 900
 DISCARD_DELAY = 1.0
 """電腦輪到打牌時，從開始想到打出至少等這麼久（使用者 10/21 要求，2 秒→1 秒）。"""
+WATCH_DELAY = 5.0
+"""觀戰模式每家出牌等這麼久（使用者 10/30 要求）。"""
 CLAIM_DELAY = 0.7
 """電腦吃碰槓胡之後停一下，看得清楚。"""
 CLAIMS = {ActionType.CHOW, ActionType.PUNG, ActionType.KONG, ActionType.WIN}
@@ -75,6 +82,11 @@ class App:
     def __init__(self, root: tk.Tk, args) -> None:
         self.root = root
         self.args = args
+        self.watch = bool(getattr(args, "watch", False))
+        """觀戰模式：四家都是電腦、手牌全開。"""
+        self.names = WATCH_NAMES if self.watch else SEAT_NAMES
+        self.recorder: Recorder | None = None
+        """自己打的時候記錄每一步（play/record.py），觀戰模式不記。"""
         self.canvas = tk.Canvas(root, width=WIDTH, height=HEIGHT, highlightthickness=0, bg="#14502f")
         self.canvas.pack()
         self.photos: dict[int, ImageTk.PhotoImage] = {}
@@ -106,12 +118,20 @@ class App:
     def game_thread(self) -> None:
         try:
             bot = self.load_bot()
-            human = HumanSeat(self.ask)
-            policy = seat_policy(human, slow_bot(bot))
+            if self.watch:
+                policy = slow_bot(bot, WATCH_DELAY)
+            else:
+                policy = seat_policy(HumanSeat(self.ask), slow_bot(bot))
+                self.recorder = Recorder(bot, HUMAN, self.args.bot if self.args.bot == "rule"
+                                         else f"nn:{self.args.model}+護欄")
             rng = Random(self.args.seed)
             while True:
                 self.to_gui.put(("status", ""))
+                if self.recorder is not None:
+                    self.recorder.new_round()
                 totals = play_round(policy, rng, self.hand_end, observer=self.observe)
+                if self.recorder is not None:
+                    self.recorder.round_end(totals)
                 self.to_gui.put(("round_end", totals))
                 if self.from_gui.get() != "again":
                     return
@@ -127,15 +147,24 @@ class App:
         return NetworkPolicy.from_file(self.args.model, guard=True)
 
     def ask(self, state: GameState, actions: list[Action]) -> Action:
+        if self.recorder is not None:
+            self.recorder.thinking(state, actions)
         self.to_gui.put(("ask", state, actions))
-        return self.from_gui.get()
+        choice = self.from_gui.get()
+        if self.recorder is not None:
+            self.recorder.decided(choice)
+        return choice
 
     def observe(self, state: GameState, player: int, action: Action) -> None:
-        self.to_gui.put(("state", copy.deepcopy(state), describe_action(player, action)))
-        if player != HUMAN and action.kind in CLAIMS:
+        self.to_gui.put(("state", copy.deepcopy(state), describe_action(player, action, self.names)))
+        if self.recorder is not None:
+            self.recorder.event(player, action)
+        if (self.watch or player != HUMAN) and action.kind in CLAIMS:
             time.sleep(CLAIM_DELAY)
 
     def hand_end(self, summary: HandSummary) -> None:
+        if self.recorder is not None:
+            self.recorder.hand_end(summary)
         self.to_gui.put(("hand_end", summary))
         self.from_gui.get()
 
@@ -293,7 +322,7 @@ class App:
         ring = (255, 205, 60) if self.active(state, seat) else (235, 235, 235)
         self.image(x, y, art.avatar_image(size, WIND_NAMES[state.seat_winds[seat]], ring))
         tx = x + size + 10
-        self.text(tx, y + 4, SEAT_NAMES[seat], 15, bold=True,
+        self.text(tx, y + 4, self.names[seat], 15, bold=True,
                   color="#ffd84d" if self.active(state, seat) else "white")
         total = self.totals[seat]
         self.text(tx, y + 32, f"{total:+d} 台（{total * MONEY_PER_TAI:+d}）", 12,
@@ -349,7 +378,7 @@ class App:
         """左上角：局數、莊家、牌牆、金牌、最近的動作。"""
         x, y = 16, 10
         self.image(x, y, art.panel_image(340, 200))
-        dealer = SEAT_NAMES[state.dealer] + (f"（連 {state.dealer_streak}）" if state.dealer_streak else "")
+        dealer = self.names[state.dealer] + (f"（連 {state.dealer_streak}）" if state.dealer_streak else "")
         self.text(x + 18, y + 12, f"東風圈　第 {self.hand_number} 局", 16, bold=True, color="#ffe08a")
         self.text(x + 18, y + 42, f"莊家 {dealer}　·　牌牆剩 {state.drawable} 張", 11, color="#d8efe2")
         self.text(x + 18, y + 80, "金牌", 13, bold=True, color="#ffd84d")
@@ -382,7 +411,7 @@ class App:
         if self.actions[0].kind == ActionType.SWAP:
             return "換三張：點 0～3 張要換掉的牌，再按右下按鈕"
         if state.phase == Phase.RESPONSE:
-            return f"{SEAT_NAMES[state.discard_player]}打出 {tile_name(state.last_discard)}：要吃碰嗎？"
+            return f"{self.names[state.discard_player]}打出 {tile_name(state.last_discard)}：要吃碰嗎？"
         if self.declare_mode:
             return "聽牌：點藍框的牌打出並宣告"
         return "輪到你：點一張牌打出"
@@ -393,15 +422,33 @@ class App:
         gold = set(state.gold_tiles)
         self.plate(state, seat, *layout["avatar"])
         bx, by, per_row, bw, bh = layout["backs"]
+        tiles = self.hand_order(state, seat)
         for i in range(sum(player.hand)):
             row, col = divmod(i, per_row)
-            self.back(bx + col * (bw + 2), by + row * (bh + 4), bw, bh)
+            x, y = bx + col * (bw + 2), by + row * (bh + 4)
+            if self.watch:
+                self.tile(x, y, bw, bh, tiles[i], gold=tiles[i] in gold)
+            else:
+                self.back(x, y, bw, bh)
         mx, my, right = layout["melds"]
-        _, y = self.melds(mx, my, player.melds, MELD_W, MELD_H, right, show_concealed=False, gold=gold)
+        _, y = self.melds(mx, my, player.melds, MELD_W, MELD_H, right, show_concealed=self.watch, gold=gold)
         # 花牌另起一行（接在副露後面會伸進牌河）
         self.flowers(mx, y + MELD_H + 8 if player.melds else my, player.flowers, MELD_W, MELD_H)
         last = state.phase == Phase.RESPONSE and state.discard_player == seat
         self.river(*layout["river"], player.discards, gold, highlight_last=last)
+
+    @staticmethod
+    def just_drew(state: GameState, seat: int) -> bool:
+        return state.phase == Phase.DISCARD and state.current_player == seat and not state.claimed \
+            and state.last_drawn is not None and state.players[seat].hand[state.last_drawn] > 0
+
+    def hand_order(self, state: GameState, seat: int) -> list[int]:
+        """手牌排序，剛摸進的那張放最右邊。"""
+        tiles = [t for t in range(34) for _ in range(state.players[seat].hand[t])]
+        if self.just_drew(state, seat):
+            tiles.remove(state.last_drawn)
+            tiles.append(state.last_drawn)
+        return tiles
 
     def draw_me(self, state: GameState) -> None:
         me = state.players[HUMAN]
@@ -411,14 +458,8 @@ class App:
         self.plate(state, HUMAN, 20, 664)
         x, y = self.melds(300, 664, me.melds, 40, 66, 900, show_concealed=True, gold=gold)
         self.flowers(x, y, me.flowers, 40, 66)
-        # 手牌：排序，剛摸進的那張放最右邊
-        tiles = [t for t in range(34) for _ in range(me.hand[t])]
-        drawn = None
-        if state.phase == Phase.DISCARD and state.current_player == HUMAN and not state.claimed \
-                and state.last_drawn is not None and state.last_drawn in tiles:
-            tiles.remove(state.last_drawn)
-            drawn = state.last_drawn
-        self.hand_tiles = tiles + ([drawn] if drawn is not None else [])
+        self.hand_tiles = self.hand_order(state, HUMAN)
+        drawn = self.hand_tiles[-1] if self.just_drew(state, HUMAN) else None
         actions = self.actions or []
         swapping = bool(actions) and actions[0].kind == ActionType.SWAP
         playable = {a.tile for a in actions
@@ -482,14 +523,14 @@ class App:
         self.image(0, 0, art.panel_image(WIDTH, HEIGHT, alpha=120))
         px, py = 110, 40
         self.image(px, py, art.panel_image(1180, 820, alpha=235, border=(230, 190, 80)))
-        dealer = SEAT_NAMES[summary.dealer] + (f"（連 {summary.streak}）" if summary.streak else "")
+        dealer = self.names[summary.dealer] + (f"（連 {summary.streak}）" if summary.streak else "")
         self.text(px + 36, py + 24, f"第 {summary.number} 局　莊家：{dealer}", 16, color="#d8efe2")
         if result.winner is None:
             outcome = "流局"
         elif result.win_by_discard:
-            outcome = f"{SEAT_NAMES[result.winner]} 胡牌　{SEAT_NAMES[result.discarder]} 放槍"
+            outcome = f"{self.names[result.winner]} 胡牌　{self.names[result.discarder]} 放槍"
         else:
-            outcome = f"{SEAT_NAMES[result.winner]} 自摸"
+            outcome = f"{self.names[result.winner]} 自摸"
         if result.score is not None:
             outcome += f"　{result.score.tai} 台"
         self.text(px + 36, py + 54, outcome, 26, color="#ffd84d", bold=True)
@@ -505,7 +546,7 @@ class App:
             self.image(px + 36, y, art.avatar_image(56, WIND_NAMES[state.seat_winds[seat]], ring))
             pay = summary.pay[seat]
             color = "#bff5d3" if pay > 0 else "#ffb3b3" if pay < 0 else "white"
-            self.text(px + 104, y + 2, SEAT_NAMES[seat], 15, bold=True, color="#ffd84d" if winner else "white")
+            self.text(px + 104, y + 2, self.names[seat], 15, bold=True, color="#ffd84d" if winner else "white")
             self.text(px + 104, y + 30, f"這局 {pay:+d} 台（{pay * MONEY_PER_TAI:+d}）"
                                         f"　合計 {summary.totals[seat]:+d} 台", 12, color=color)
             if state.declared[seat]:
@@ -532,9 +573,9 @@ class App:
         order = sorted(range(4), key=lambda seat: -totals[seat])
         for rank, seat in enumerate(order):
             y = py + 100 + rank * 64
-            color = "#ffd84d" if seat == HUMAN else "white"
+            color = "#ffd84d" if seat == HUMAN and not self.watch else "white"
             self.text(px + 70, y, f"{rank + 1}", 24, bold=True, color=color)
-            self.text(px + 120, y + 4, SEAT_NAMES[seat], 20, bold=True, color=color)
+            self.text(px + 120, y + 4, self.names[seat], 20, bold=True, color=color)
             amount = totals[seat]
             self.text(px + pw - 60, y + 6, f"{amount:+d} 台（{amount * MONEY_PER_TAI:+d}）", 18, anchor="ne",
                       color="#bff5d3" if amount >= 0 else "#ffb3b3")
@@ -547,9 +588,10 @@ def main() -> None:
     parser.add_argument("--model", default=MODEL)
     parser.add_argument("--bot", choices=("nn", "rule"), default="nn")
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--watch", action="store_true", help="四家電腦互打、手牌全開")
     args = parser.parse_args()
     root = tk.Tk()
-    root.title("麻將：自己 vs 三家電腦")
+    root.title("麻將：四家電腦互打（手牌全開）" if args.watch else "麻將：自己 vs 三家電腦")
     root.resizable(False, False)
     App(root, args)
     root.mainloop()

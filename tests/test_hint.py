@@ -268,6 +268,17 @@ def test_added_kong_does_not_break_a_run():
     assert action.kind != ActionType.KONG
 
 
+def test_win_comes_before_an_added_kong():
+    from hint.advisor import decide
+
+    # 10/29 23:51：碰了七萬，摸進第四張七萬就自摸（四五六、七八九、五五萬 三四五、四五六條），「槓」「胡」都亮著；
+    # 原本先判斷加槓划算就槓，靠「胡亮著照樣按」才沒錯過
+    hand = T("4555689m344556s7m")
+    assert len(hand) == 14
+    observation = Observation(hand, frozenset({"declare", "kong", "win"}), None, (), my_pungs=(parse("7m")[0],))
+    assert decide(observation).kind == ActionType.WIN
+
+
 def test_loop_survives_errors_and_reports_stuck_screens(monkeypatch):
     import hint.__main__ as hint_main
 
@@ -495,7 +506,8 @@ def test_dealer_streak_on_real_screens():
         pytest.skip("缺少連莊數字模板")
     # 經典_連莊3、經典_連莊1_偏：10/22 03:39、10/20 17:33 原本認不出的（3 沒有模板、1 只有 0.66）
     expected = {"經典_上家第二欄吃": 1, "經典_上家第二欄吃2": 2, "經典_碰": 0, "經典_牌河290": 0,
-                "經典_連莊3": 3, "經典_連莊1_偏": 1, "經典_連莊4": 4}  # 10/29 06:32 上家連 4
+                "經典_連莊3": 3, "經典_連莊1_偏": 1, "經典_連莊4": 4,  # 10/29 06:32 上家連 4
+                "經典_連莊5": 5}  # 10/30 01:05 對家連 5：沒有 5 的模板時有幾幀和 3 像到 0.55，被當成 3
     for name, streak in expected.items():
         path = TRAIN_DIR / f"{name}.png"
         if path.exists():

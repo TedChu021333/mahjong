@@ -125,3 +125,70 @@ def test_bot_waits_before_discarding():
                               sleep=slept.append, clock=iter([0.0, 0.1]).__next__)
     passing(None, 1, None)
     assert slept == []
+
+
+
+def test_watch_mode_names_and_hand_order():
+    import play.__main__ as window
+    from play.game import WATCH_NAMES
+    assert describe_action(2, Action(ActionType.DISCARD, tile=0), WATCH_NAMES) == "對面 打 一萬"
+    state = initial_state(Random(3))
+    seat = 2
+    hand = state.players[seat].hand
+    low = min(t for t in range(34) if hand[t])
+    # 剛摸進最小的那張：放最右邊
+    state.phase, state.current_player, state.claimed, state.last_drawn = Phase.DISCARD, seat, False, low
+    app = SimpleNamespace(just_drew=window.App.just_drew)
+    order = window.App.hand_order(app, state, seat)
+    assert order[-1] == low and sorted(order) == [t for t in range(34) for _ in range(hand[t])]
+    state.current_player = 1  # 不是他剛摸的：照順序排
+    assert window.App.hand_order(app, state, seat) == sorted(order)
+
+
+def test_recorder_logs_decisions_and_analyze_reads_them(tmp_path):
+    from game.simulator import payments, play_game
+    from play.analyze import judge, load_rounds, report
+    from play.game import HandSummary
+    from play.record import Recorder
+
+    recorder = Recorder(choose_rule_action_for_player, HUMAN, "rule", directory=tmp_path)
+    recorder.new_round()
+
+    def ask(state, actions):
+        recorder.thinking(state, actions)
+        choice = choose_rule_action_for_player(state, HUMAN, Random(0))
+        recorder.decided(choice)
+        return choice
+
+    policy = seat_policy(HumanSeat(ask), choose_rule_action_for_player)
+    result = play_game(Random(7), player_policy=policy, swap=True,
+                       observer=lambda state, player, action: recorder.event(player, action))
+    pay = payments(result)
+    recorder.hand_end(HandSummary(1, result, pay, list(pay), 0, 0))
+    recorder.round_end(list(pay))
+
+    rounds = load_rounds([recorder.path])
+    hand = rounds[0][0]
+    assert hand.end["pay"] == list(pay) and hand.events
+    discards = [d for d in hand.decisions if d["view"]["phase"] == "DISCARD"]
+    assert discards and all("options" in d and "error" not in d for d in discards)
+    # 自己和 AI 是同一個規則式：每一步都一樣，打牌也不會退向聽
+    assert all(d["ai"] == d["choice"] for d in hand.decisions)
+    assert not any(p.startswith("退向聽") for d in discards for p in judge(d))
+    assert "1 圈 1 局" in report(rounds, show_all=False)
+
+
+def test_judge_flags_missed_win_and_retreat():
+    from play.analyze import judge
+    view = {"phase": "DISCARD", "declared": [False, True, False, False], "hand": [0] * 34, "melds": [[]] * 4}
+    decision = {
+        "view": view,
+        "actions": [{"kind": "WIN"}, {"kind": "DISCARD", "tile": 0}, {"kind": "DISCARD", "tile": 1}],
+        "choice": {"kind": "DISCARD", "tile": 0, "tiles": []},
+        "ai": {"kind": "DISCARD", "tile": 1, "tiles": []},
+        "options": {"0": {"shanten": 1, "outs": 20, "danger": 0.2}, "1": {"shanten": 0, "outs": 8, "danger": 0.02}},
+    }
+    problems = judge(decision)
+    assert any(p.startswith("漏胡") for p in problems)
+    assert any(p.startswith("退向聽") for p in problems)
+    assert any(p.startswith("危險牌") for p in problems)
