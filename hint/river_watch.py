@@ -101,6 +101,11 @@ class RiverWatch:
         """牌河最近一次出現自己出牌（或被拿走）時的更新次數。"""
         self.unseen_claimed: list[int] = []
         """自己打出、牌河還沒確認就被吃碰拿走的牌（由手牌變化＋吃碰大字得知），算進自己打過的牌。"""
+        self.hidden_kongs = {seat: 0 for seat in SEATS}
+        """推算的各家暗槓數（kong_confirmed）：牌背朝上、讀不到牌，只算一組副露。"""
+        self._last_mover: tuple[str, str] | None = None
+        """牌河最近一個事件：(座位, "discard"／"claimed")，推算槓的是誰用。"""
+        self._kong_from: tuple[str, str] | None = None
         self._declare_marks: dict[str, dict[str, int]] = {}
         """第一次認到某家宣告時，各家牌河（含被吃碰的）已有幾張；之後別家打出的牌他一定不聽
         （遊戲代打、自動胡），見 declared_safe。"""
@@ -123,6 +128,8 @@ class RiverWatch:
         self.my_pungs = []
         self._own_pending = None
         self.unseen_claimed = []
+        self.hidden_kongs = {seat: 0 for seat in SEATS}
+        self._last_mover = self._kong_from = None
         if getattr(self, "meld_watch", None) is not None:
             self.meld_watch.new_hand()
 
@@ -152,6 +159,8 @@ class RiverWatch:
             if event.seat == "me" and event.kind in ("discard", "claimed"):
                 self._own_pending = None
                 self._own_seen_at = self._frame
+            if event.kind in ("discard", "claimed"):
+                self._last_mover = (event.seat, event.kind)
             if event.kind == "discard":
                 self._apply_label(frame, event)
                 self._save_unknown(frame, event)
@@ -195,6 +204,7 @@ class RiverWatch:
         claimer, kind, _ = banner
         self._own_pending = self._banner = None
         self._own_seen_at = self._frame
+        self._last_mover = ("me", "claimed")
         self._credit("me", claimer, (tile, tile) if kind == "pung" and tile is not None else (), tile, kind)
         if tile is not None:
             self.unseen_claimed.append(tile)
@@ -236,13 +246,39 @@ class RiverWatch:
         return tuple(result)
 
     def meld_counts(self) -> tuple[int, int, int, int]:
-        """依 advisor 的座位編號排列；自己的欄位為 0。讀到的副露組數比推算的多就用讀到的。"""
+        """依 advisor 的座位編號排列；自己的欄位為 0。讀到的副露組數比推算的多就用讀到的，再加推算的暗槓。"""
         result = [0] * 4
         read = self.meld_watch.melds if self.meld_watch is not None else {}
         for seat, count in self.melds.items():
             if seat != "me":
-                result[RIVER_SEAT[seat]] = min(max(count, len(read.get(seat, ()))), 5)
+                result[RIVER_SEAT[seat]] = min(max(count, len(read.get(seat, ()))) + self.hidden_kongs[seat], 5)
         return tuple(result)
+
+    def kong_started(self) -> None:
+        """金牌剛變多（有人槓）：記下當時牌河最近的事件，槓的是那之後輪到的人。"""
+        self._kong_from = self._last_mover
+
+    def kong_confirmed(self) -> str | None:
+        """金牌變多確認了、又不是自己槓的：推算是不是別家暗槓，是的話副露數加 1、回傳座位。
+        暗槓牌背朝上、副露辨識讀不到，原本整組漏掉（10/29 對手的槓 33 次只讀到 9 次，抽看的多是暗槓）。
+        槓的人＝最近一張打出的牌的下一家（自己 → 下家 → 對家 → 上家）。保守起見這些不算：
+        最近的事件是有牌被拿走（明槓，已由吃碰推算）、輪到自己、那家已有碰（可能是加槓，不多一組；
+        10/29 02:33 上家加槓一條）、那家推算的吃碰裡有還沒讀到、可能是碰的。
+        重放 10/29 一晚 40 次槓：算成暗槓 8 次，看了其中 5 張截圖都是暗槓（三張牌背、中間疊一張）。"""
+        mover, self._kong_from = self._kong_from, None
+        if mover is None or mover[1] != "discard":
+            return None
+        seat = NEXT_SEAT[mover[0]]
+        if seat == "me":
+            return None
+        read = self.meld_watch.melds.get(seat, ()) if self.meld_watch is not None else ()
+        if any(meld.kind != "chow" for meld in read):
+            return None
+        claims = self.claims[seat]
+        if len(claims) > len(read) and any(kind != "chow" for _, kind in claims):
+            return None
+        self.hidden_kongs[seat] += 1
+        return seat
 
     def meld_hints(self) -> dict[str, list[tuple[int, str | None]]]:
         """推算有吃碰、讀到的副露裡還沒有的：各家 (被拿走的牌, "chow"／"pung"／None 分不出)，引導讀副露用。"""
@@ -310,6 +346,7 @@ class RiverWatch:
             key = (claim.source, claim.tile)
             if key != self._last_circle:  # 新的放大圓框：這家剛打出一張
                 self._last_circle = key
+                self._last_mover = (claim.source, "discard")
                 self._someone_discarded(claim.source)
         if observation.my_turn:
             self._turn_hand = observation.hand

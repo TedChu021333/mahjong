@@ -75,6 +75,9 @@ def test_seat_labels_list_claims_and_unread_melds():
     assert labels["left"] == "上家　碰 白　吃 七八九筒　槓 二筒"
     assert labels["top"] == "對家　另有 1 組沒讀到"
     assert labels["right"] is None
+    # 推算的暗槓（牌背朝上讀不到）另外列，不算成「沒讀到」
+    labels = seat_labels(melds, {"left": 3, "top": 1, "right": 0}, {"top": 1})
+    assert labels["top"] == "對家　暗槓　另有 1 組沒讀到"
 
 
 def test_melds_do_not_disappear_within_a_hand():

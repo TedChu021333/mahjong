@@ -29,3 +29,16 @@ def test_limit():
     assert shots.update(3, 1.0)
     shots.update(4, 2.0)
     assert not shots.update(4, 2.0)
+
+
+def test_start_and_confirm_flags_ignore_the_screenshot_limit():
+    shots = KongShots(delay=2.0, limit=0)
+    shots.update(2, 0.0)
+    shots.update(3, 1.0)
+    assert shots.started and not shots.confirmed
+    shots.update(3, 2.0)
+    assert not shots.started and not shots.confirmed
+    assert not shots.update(3, 3.5)      # 張數用完不存圖
+    assert shots.confirmed
+    shots.update(3, 4.0)
+    assert not shots.confirmed

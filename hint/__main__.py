@@ -26,7 +26,7 @@ from typing import Iterator
 import cv2
 import numpy as np
 
-from game.rules import ActionType, forbidden_after_claim
+from game.rules import Action, ActionType, forbidden_after_claim
 from game.tiles import tile_name
 from hint.advisor import (
     POLICIES,
@@ -44,6 +44,7 @@ from hint.advisor import (
 from hint.hand_end import HandBook
 from hint.kong_shots import KongShots
 from hint.meld_check import MeldCheck
+from hint.meld_watch import SEAT_NAMES as MELD_SEAT_NAMES
 from hint.river_watch import RiverWatch
 from hint.river_watch import summary as river_summary
 from perception.continue_button import ContinueButton
@@ -73,6 +74,8 @@ TABLE_INTERVAL = 1.0
 """別人的回合時放槍表最多幾秒重算一次（每次約 0.1 秒）。"""
 
 CLAIM_MEMORY = 10.0
+OWN_KONG_SECONDS = 6.0
+"""自己決定槓之後這麼久內金牌變多，算是自己槓的，不推算別家暗槓。"""
 """能吃碰時放大的牌可能先縮進牌河、按鈕卻還亮著；這段時間內沿用最近讀到的那張。"""
 RESULT_DIR = Path("result")
 """每局結算畫面的截圖。"""
@@ -197,6 +200,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
     decided_for = decided_action = decided_note = None
     stuck_for = None
     win_pressed_at = float("-inf")
+    own_kong_at = float("-inf")
     river_updated_at = float("-inf")
     claim_prompt_since = None
     popup_closed_at = float("-inf")
@@ -289,8 +293,17 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             if observation is not None:
                 if observation.swap_prompt is not None:
                     kong_shots.new_hand()
-                elif kong_shots.update(len(observation.gold_tiles), clock()):
-                    log(f"[{stamp}] 金牌多一種（有人槓），截圖存到 {save_result(frame, '槓_')}", echo=False)
+                else:
+                    if kong_shots.update(len(observation.gold_tiles), clock()):
+                        log(f"[{stamp}] 金牌多一種（有人槓），截圖存到 {save_result(frame, '槓_')}", echo=False)
+                    if rivers is not None and hasattr(rivers, "kong_started"):
+                        if kong_shots.started:
+                            rivers.kong_started()
+                        if kong_shots.confirmed and clock() - own_kong_at > OWN_KONG_SECONDS:
+                            seat = rivers.kong_confirmed()
+                            if seat is not None:
+                                log(f"[{stamp}] 推算{MELD_SEAT_NAMES[seat]}暗槓（金牌多一種、最近打牌的下一家、"
+                                    f"他沒有碰可以加槓），副露數加 1", echo=False)
                 if observation.claim is not None and observation.claim.tile is not None:
                     last_claim = (observation.claim, clock())
                 elif observation.buttons is not None and not observation.my_turn \
@@ -338,7 +351,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                 watch = getattr(rivers, "meld_watch", None)
                 if show_melds is not None and watch is not None:
                     from hint.meld_watch import seat_labels
-                    labels = seat_labels(watch.melds, {seat: count for seat, count in rivers.melds.items()})
+                    labels = seat_labels(watch.melds, {seat: count for seat, count in rivers.melds.items()},
+                                         getattr(rivers, "hidden_kongs", None))
                     if labels != meld_labels:
                         meld_labels = labels
                         show_melds(labels)
@@ -347,6 +361,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                                       melds=rivers.meld_counts(),
                                       exposed=rivers.exposed_tiles(),
                                       my_discards=rivers.my_discards,
+                                      hidden_kongs=sum(getattr(rivers, "hidden_kongs", {}).values()),
                                       declared_safe=rivers.declared_safe(),
                                       my_pungs=tuple(rivers.my_pungs),
                                       opponent_melds=getattr(rivers, "read_melds", lambda: ())())
@@ -461,6 +476,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             # 同一個畫面只決定一次：蒙地卡羅 AI 每次要約 2 秒且有隨機性，重算會讓建議閃動
             if decision_key(observation) != decided_for:
                 decided_for, decided_action = decision_key(observation), decide(observation)
+                if decided_action is not None and decided_action.kind == ActionType.KONG:
+                    own_kong_at = clock()
                 decided_note = last_note()
             action = decided_action
             if action is not None and action.kind in (ActionType.CHOW, ActionType.PUNG):
@@ -472,10 +489,15 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             buttons = observation.buttons or frozenset()
             # 吃法選項框會蓋在「胡」按鈕上被誤認成亮著（10/3 20:58 誤報），選吃法時不算
             if "win" in buttons and (action is None or action.kind != ActionType.WIN) \
-                    and not observation.chow_panels and observation != missed_for:
-                missed_for = observation
-                log(f"[{stamp}] 「胡」按鈕亮著但 AI 沒選胡，截圖存到 {save_result(frame, '未胡_')}",
-                    hand_text(observation))
+                    and not observation.chow_panels:
+                # 遊戲亮「胡」就一定能胡，照樣按。10/29 02:33 上家加槓、遊戲提示「可搶槓胡多一台」，加槓的牌讀不到，
+                # 沿用 10 秒內的舊牌（對家打的八萬、胡不了），AI 選了「不要」，錯過搶槓
+                action = Action(ActionType.WIN, tile=observation.claim.tile if observation.claim else None)
+                advice = describe(action)
+                if observation != missed_for:
+                    missed_for = observation
+                    log(f"[{stamp}] 「胡」按鈕亮著但 AI 沒選胡（可能是搶槓或讀錯的牌），照樣按胡，"
+                        f"截圖存到 {save_result(frame, '未胡_')}", hand_text(observation))
             if advice != last_advice:
                 if advice is not None:
                     note = f"（{decided_note}）" if decided_note else ""

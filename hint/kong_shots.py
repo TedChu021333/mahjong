@@ -18,6 +18,10 @@ class KongShots:
         """這局目前認定的金牌種類數。"""
         self.pending: tuple[int, float] | None = None
         """(變多後的種類數, 第一次看到的時間)。"""
+        self.started = False
+        """這次 update 剛看到金牌變多（還沒確認）：當下輪到誰，就是誰槓的。"""
+        self.confirmed = False
+        """這次 update 確認有人槓（變多持續了 delay 秒；不受截圖張數限制）。"""
 
     def new_hand(self) -> None:
         self.base = None
@@ -25,6 +29,7 @@ class KongShots:
 
     def update(self, gold_count: int, now: float) -> bool:
         """每讀到一次手牌畫面呼叫；回傳 True 表示現在該存一張截圖。"""
+        self.started = self.confirmed = False
         if self.base is None:
             self.base = gold_count
             return False
@@ -32,11 +37,13 @@ class KongShots:
             self.pending = None
             return False
         if self.pending is None or self.pending[0] != gold_count:
+            self.started = self.pending is None
             self.pending = (gold_count, now)
             return False
         if now - self.pending[1] < self.delay:
             return False
         self.base, self.pending = gold_count, None
+        self.confirmed = True
         if self.left <= 0:
             return False
         self.left -= 1

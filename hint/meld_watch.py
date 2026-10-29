@@ -376,14 +376,17 @@ def _short(meld: Meld) -> str:
     return tile_name(meld.tiles[0])
 
 
-def seat_labels(melds: dict[str, tuple[Meld, ...]], counts: dict[str, int]) -> dict[str, str | None]:
-    """三家旁邊小標籤的文字（沒有副露時 None）：「碰 白　吃 七八九筒　槓 二筒」；counts 是推算的副露組數，
-    比讀到的多時補「另有 N 組沒讀到」。"""
+def seat_labels(melds: dict[str, tuple[Meld, ...]], counts: dict[str, int],
+                hidden: dict[str, int] | None = None) -> dict[str, str | None]:
+    """三家旁邊小標籤的文字（沒有副露時 None）：「碰 白　吃 七八九筒　槓 二筒　暗槓」；counts 是推算的副露組數，
+    比讀到的多時補「另有 N 組沒讀到」；hidden 是推算的暗槓數（RiverWatch.hidden_kongs）。"""
     labels: dict[str, str | None] = {}
     words = {"chow": "吃", "pung": "碰", "kong": "槓"}
     for seat in SEATS:
         group = melds.get(seat, ())
         parts = [f"{words[meld.kind]} {_short(meld)}" for meld in group]
+        kongs = (hidden or {}).get(seat, 0)
+        parts += ["暗槓"] * kongs
         missing = counts.get(seat, 0) - len(group)
         if missing > 0:
             parts.append(f"另有 {missing} 組沒讀到")

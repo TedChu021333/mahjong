@@ -87,6 +87,9 @@ class Observation:
     """各家宣告後別家打出、他沒胡的牌（座位同 discards；RiverWatch.declared_safe）：一定不是他要胡的。"""
     opponent_melds: tuple[tuple[Meld, ...], ...] = field(default=(), compare=False)
     """畫面上讀到的對手副露（座位同 discards；RiverWatch.read_melds，10/22 起）：內容已知，對手模型會算進他的台數。"""
+    hidden_kongs: int = field(default=0, compare=False)
+    """推算的對手暗槓總數（已算在 melds 裡；RiverWatch.hidden_kongs）。暗槓的人沒有吃別人的牌、還多摸一張補牌，
+    估計牌牆時要扣回來。"""
     my_discards: int = field(default=0, compare=False)
     """這局自己已打出幾張（提示迴圈由手牌變化數出）。牌河追蹤只記到約八成的出牌（10/5 分析 1436 局），
     每位對手打過的張數至少算這麼多，聽牌率與牌牆剩餘才不會低估。"""
@@ -209,22 +212,32 @@ def _known_melds(observation: Observation, rivers: list[list[int]]) -> list[tupl
     return result
 
 
-def _exposed(observation: Observation, rivers: list[list[int]],
-             melds: list[int]) -> list[tuple[int, ...]]:
-    """副露裡已知的牌；沒有副露組數可放、或加上手牌與牌河會超過 4 張的丟掉（推算可能有誤）。"""
+def _exposed(observation: Observation, rivers: list[list[int]], melds: list[int],
+             read: list[tuple[Meld, ...]]) -> list[tuple[int, ...]]:
+    """副露裡已知的牌；沒有副露組數可放、或加上手牌、牌河、讀到的副露會超過 4 張的丟掉（推算可能有誤）。
+    同一家讀到的副露裡已有的牌是同一張、不重複算。10/29 09:19 推算下家碰了七筒（另外兩張），讀到下家吃七八九筒、
+    對家碰七筒，七筒算成 5 張，整手 20 幀程式錯誤（之前只和手牌、牌河比）。"""
     seen = [0] * NUM_TILE_TYPES
     for tile in observation.hand:
         seen[tile] += 1
     for tiles in rivers:
         for tile in tiles:
             seen[tile] += 1
+    for seat_melds in read:
+        for meld in seat_melds:
+            for tile in meld.tiles:
+                seen[tile] += 1
     result = []
     for seat in range(4):
         kept = []
         known = observation.exposed[seat] if seat < len(observation.exposed) else ()
+        covered = Counter(tile for meld in read[seat] for tile in meld.tiles)
         if melds[seat]:
             for tile in known:
-                if seen[tile] < 4:
+                if covered[tile]:
+                    covered[tile] -= 1
+                    kept.append(tile)
+                elif seen[tile] < 4:
                     seen[tile] += 1
                     kept.append(tile)
         result.append(tuple(kept))
@@ -239,11 +252,11 @@ START_DRAWABLE = 60
 
 def estimate_wall(observation: Observation) -> int:
     """剩餘可摸張數 ≈ 60 − 總出牌數 + 吃碰次數（吃碰的人不摸牌）；補花讀不到，未扣。
-    牌河漏記的出牌以「自己打了幾張」補：每家至少算這麼多。"""
+    牌河漏記的出牌以「自己打了幾張」補：每家至少算這麼多。暗槓不是吃碰、還多摸一張補牌：每組扣 2。"""
     rivers = list(observation.discards) + [()] * (4 - len(observation.discards))
     discards = sum(max(len(tiles), observation.my_discards) for tiles in rivers)
     claims = sum(observation.melds) + observation.meld_count
-    return max(0, START_DRAWABLE - discards + claims)
+    return max(0, START_DRAWABLE - discards + claims - 2 * observation.hidden_kongs)
 
 
 def build_state(observation: Observation, waiting: bool = False) -> GameState | None:
@@ -254,8 +267,8 @@ def build_state(observation: Observation, waiting: bool = False) -> GameState | 
     rivers = _rivers(observation, source, claim.tile if responding else None)
     melds = list(observation.melds) + [0] * (4 - len(observation.melds))
     melds[ME] = observation.meld_count
-    exposed = _exposed(observation, rivers, melds)
     known = _known_melds(observation, rivers)
+    exposed = _exposed(observation, rivers, melds, known)
     players = []
     for seat in range(4):
         read = known[seat]

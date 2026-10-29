@@ -132,13 +132,15 @@ def test_loop_saves_a_screenshot_when_win_is_lit_but_not_chosen(monkeypatch):
     waiting = Observation(T("11223789m99m4p56779s"), frozenset({"pung", "win"}),
                           ClaimTile(parse("2m")[0], 0.9, "left"), ())
     monkeypatch.setattr(hint_main, "decide", lambda observation: None)  # 模擬 AI 沒選胡
-    saved, lines = [], []
+    saved, lines, shown = [], [], []
     hint_main.run(((str(i), "frame") for i in range(4)), readers=None,
-                  observe_fn=lambda frame, readers: waiting,
+                  observe_fn=lambda frame, readers: waiting, show=shown.append,
                   save_result=lambda frame, prefix="": saved.append(prefix) or "x.png",
                   log=lambda line, detail=None: lines.append((line, detail)))
     assert saved == ["未胡_"]  # 同一個畫面只存一次
     assert "手牌 一萬一萬二萬" in lines[0][1] and "win" in lines[0][1]
+    # 遊戲亮「胡」就照樣胡（10/29 02:33 搶槓：加槓的牌讀不到，沿用舊的牌，AI 選了不要）
+    assert shown == ["胡！"]
 
 
 def test_game_log_writes_detail_to_file(tmp_path):
@@ -223,6 +225,8 @@ def test_wall_is_estimated_from_discards_and_claims():
     # 牌河漏記：自己已打 10 手，每家至少算 10 張；對手聽牌率也照 10 張查
     missed = replace(later, my_discards=10)
     assert estimate_wall(missed) == 60 - 40 + 2 and build_state(missed).min_discards == 10
+    # 暗槓：沒吃別人的牌、還多摸一張補牌（副露數已含這組，扣 2）
+    assert estimate_wall(replace(later, melds=(0, 2, 0, 1), hidden_kongs=1)) == 60 - 35 + 2 - 1
 
 
 def test_added_kong_when_the_kong_button_is_lit():
@@ -541,6 +545,21 @@ def test_exposed_tiles_count_as_visible():
     state = build_state(wrong)
     assert visible_tile_counts(state, 0)[parse("1z")[0]] == 4
     assert state.players[1].melds == []
+
+
+def test_inferred_tiles_do_not_overflow_read_melds_of_other_seats():
+    from agent.rule_agent import visible_tile_counts
+    from game.rules import Meld
+    from hint.advisor import build_state
+
+    # 10/29 09:19：推算下家碰了七筒（另外兩張），讀到下家吃七八九筒、對家碰七筒——七筒算成 5 張，20 幀程式錯誤
+    hand = T("13678m244p13357s9s")
+    read = ((), (Meld("chow", tuple(parse("789p")), 0), Meld("chow", tuple(parse("456m")), 0)),
+            (Meld("chow", tuple(parse("789m")), 1), Meld("pung", tuple(parse("777p")), 0)), ())
+    observation = Observation(hand, None, None, (), discards=(tuple(parse("96m")), (), (), ()),
+                              melds=(0, 3, 2, 0), opponent_melds=read,
+                              exposed=((), tuple(parse("77p")), (), ()))
+    assert visible_tile_counts(build_state(observation), 0)[parse("7p")[0]] == 4
 
 
 def test_move_seconds_scale_the_monte_carlo_budget():

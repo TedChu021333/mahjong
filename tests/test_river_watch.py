@@ -352,3 +352,41 @@ def test_meld_hints_list_claimed_tiles_not_yet_read():
     watch.meld_watch = None
     watch.new_hand()
     assert watch.meld_hints() == {}
+
+
+def test_concealed_kong_is_credited_to_the_player_after_the_last_discard():
+    from types import SimpleNamespace
+
+    from game.rules import Meld
+
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    reader.current["top"] = [RiverTile(P("1p"), 0.9, (700, 200, 760, 280))]
+    frames(watch, waiting())
+    # 對家打完一張後金牌多一種：輪到上家，他沒有碰、也沒有推算的吃碰 → 上家暗槓
+    watch.kong_started()
+    assert watch.kong_confirmed() == "left"
+    assert watch.hidden_kongs["left"] == 1 and watch.meld_counts()[3] == 1
+    # 那家已有碰：可能是加槓（10/29 02:33 上家加槓一條），不多算一組
+    watch.meld_watch = SimpleNamespace(melds={"left": (Meld("pung", (P("1s"),) * 3, 2),)},
+                                       new_hand=lambda: None)
+    watch.kong_started()
+    assert watch.kong_confirmed() is None
+    # 下一家是自己：是自己槓的
+    reader.current["left"] = [RiverTile(P("2p"), 0.9, (400, 300, 460, 380))]
+    frames(watch, waiting())
+    watch.kong_started()
+    assert watch.kong_confirmed() is None
+    watch.new_hand()
+    assert watch.hidden_kongs["left"] == 0
+
+
+def test_kong_right_after_a_claim_is_not_a_concealed_kong():
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    reader.current["right"] = [RiverTile(P("5s"), 0.9, (1300, 300, 1360, 380))]
+    frames(watch, waiting())
+    reader.current["right"] = []
+    frames(watch, waiting())  # 那張被拿走：明槓，吃碰推算已經算過
+    watch.kong_started()
+    assert watch.kong_confirmed() is None
