@@ -3,7 +3,7 @@
 python -m bigtwo.live                      提示模式：輪到自己時印出建議並顯示浮動小視窗，人來點
 python -m bigtwo.live --no-overlay         只印在終端機
 python -m bigtwo.live --demo-overlay       預覽小視窗、拖曳調整位置
-python -m bigtwo.live --auto               自動點擊：只在對手全是電腦的場使用，啟動時要輸入 y 確認
+python -m bigtwo.live --auto               自動點擊：只在對手全是電腦的場使用
 python -m bigtwo.live --video <mp4> [--start 秒] [--step 0.5]   用錄影回放測試
 
 每一步建議寫進 result/bigtwo_log_<日期>.txt。滑鼠甩到螢幕左上角會中止自動點擊（pyautogui FAILSAFE）。
@@ -408,11 +408,6 @@ class Advisor:
             self.acted()
 
 
-def confirm_training_room(ask=input) -> bool:
-    answer = ask("自動點擊只能在對手全是電腦的場使用。目前的大老二場對手都是電腦嗎？(y/N) ")
-    return answer.strip().lower() == "y"
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="大老二提示／自動模式")
     parser.add_argument("--auto", action="store_true", help="自動點擊（只在對手全是電腦的場）")
@@ -437,9 +432,8 @@ def main() -> None:
         return
     clicker = None
     if args.auto:
-        if not confirm_training_room():
-            print("已取消。真人場請用提示模式（不加 --auto）。")
-            return
+        # 10/29 使用者：打的都是電腦場，不用每次輸入 y 確認；只留提醒
+        print("自動點擊只能在對手全是電腦的場使用；真人場請用提示模式（不加 --auto）。", flush=True)
         clicker = Clicker()
     def worker(show=lambda text: None, show_counts=lambda text: None) -> None:
         advisor = Advisor(Log(), clicker, args.samples, show=show, live=True, show_counts=show_counts)

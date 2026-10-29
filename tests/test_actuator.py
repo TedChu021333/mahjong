@@ -136,13 +136,6 @@ def test_single_chow_option_needs_no_panel():
     assert actuator.pending_chow is None
 
 
-def test_auto_mode_requires_confirming_a_computer_only_room():
-    from hint.__main__ import confirm_training_room
-    assert confirm_training_room(ask=lambda _: "y")
-    assert confirm_training_room(ask=lambda _: " Y ")
-    assert not confirm_training_room(ask=lambda _: "")
-    assert not confirm_training_room(ask=lambda _: "n")
-
 
 def test_auto_loop_only_presses_recognised_buttons_between_hands():
     # 打一圈時按完「繼續」會直接發下一局：讀不到手牌的期間不能盲點任何座標

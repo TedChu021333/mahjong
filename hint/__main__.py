@@ -615,18 +615,11 @@ def main() -> None:
         live(args.interval, overlay=not args.no_overlay, auto=args.auto)
 
 
-def confirm_training_room(ask=input) -> bool:
-    """經典版一般場是與真人配桌，自動點擊只能用在對手全是電腦的訓練場。"""
-    print("自動模式只能在「訓練場」（三家對手都是電腦）使用；與真人配桌的場請用提示模式。")
-    answer = ask("確認目前是對手全為電腦的訓練場？輸入 y 繼續：")
-    return answer.strip().lower() == "y"
-
-
 def live(interval: float, overlay: bool, auto: bool) -> None:
     actuator = None
     if auto:
-        if not confirm_training_room():
-            raise SystemExit("已取消自動模式。")
+        # 10/29 使用者：打的都是電腦場，不用每次輸入 y 確認；只留提醒
+        print("自動模式只能在「訓練場」（三家對手都是電腦）使用；與真人配桌的場請用提示模式。", flush=True)
         from control.actuator import Actuator
 
         actuator = Actuator()

@@ -7,7 +7,7 @@ from bigtwo.cards import parse_cards
 from bigtwo.combos import classify
 from bigtwo.counts import DIGIT_DIR, read_counts
 from bigtwo.hand_reader import TEMPLATE_DIR
-from bigtwo.live import Clicker, confirm_training_room
+from bigtwo.live import Clicker
 from bigtwo.hand_reader import HandCard
 from bigtwo.screen import read_image
 from bigtwo.table_reader import read_plays
@@ -97,11 +97,6 @@ def test_clicker_clicks_card_and_buttons_without_randomness():
     clicker.card(HandCard(card=1, x=228, raised=True, score=1.0))
     clicker.button("出牌")
     assert clicks == [(167, 960), (298, 895), (1438, 670)]
-
-
-def test_auto_mode_requires_explicit_yes():
-    assert confirm_training_room(lambda prompt: "y")
-    assert not confirm_training_room(lambda prompt: "")
 
 
 # ---------- 畫面（需要 train/bigtwo/ 的截圖） ----------
