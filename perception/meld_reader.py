@@ -69,6 +69,23 @@ class MeldTile:
     """這張是槓的一部分（看到第四張疊在中間那張上，見 _side_kongs、_top_kongs）。"""
 
 
+TOP_SKEW = 0.001
+TOP_SKEW_CENTER = (960, 185)
+"""對家那排的透視：牌的直邊往畫面中央上方收，越靠兩端越斜（最右的起點那張上緣比下緣偏左約 14 像素）。
+拉正：那一列 y 的 x 以 TOP_SKEW_CENTER 為中心縮放 1 + TOP_SKEW × (y − 185)，y＝185 那一列不動（位置照舊）。
+10/29 18:43 對家最右那組八筒碰，最右那張只有 0.47（讀成一萬 0.57）湊不成碰；已知答案 9 張截圖 39 張牌：
+不拉正對 37 錯 2，TOP_SKEW 0.0005 對 38 錯 0、0.0008～0.0013 全對（負的方向變差）。"""
+
+
+def top_row(image: np.ndarray) -> np.ndarray:
+    """拉正後的對家那排（TOP_MELD_ROW 的範圍，x 從 TOP_MELD_ROW 左緣起算）。"""
+    left, top, right, bottom = TOP_MELD_ROW
+    center_x, center_y = TOP_SKEW_CENTER
+    ys, xs = np.mgrid[top:bottom, left:right].astype(np.float32)
+    map_x = center_x + (xs - center_x) * (1 + TOP_SKEW * (ys - center_y))
+    return cv2.remap(image, map_x, ys, cv2.INTER_LINEAR)
+
+
 def _strip_transform(seat: str) -> np.ndarray:
     first_left, first_right, last_right, last_left = MELD_COLUMN_CORNERS[seat]
     width, height = MELD_STRIP_SIZE
@@ -264,13 +281,14 @@ class MeldReader:
         return hits if seat == "left" else hits[::-1]
 
     def _top(self, image: np.ndarray) -> list[MeldTile]:
-        left, top, right, bottom = TOP_MELD_ROW
+        left, _, right, _ = TOP_MELD_ROW
+        row = top_row(image)
         start = max(left, right - SEARCH_TILES * TOP_PITCH)  # 對家從右邊開始擺
-        scan = Scan(image[top:bottom, start:right], self.top, axis=0)
+        scan = Scan(row[:, start - left:], self.top, axis=0)
         hits = _peaks(scan.best, scan.label, TOP_MIN_SCORE, TOP_SPACING, start)
         if hits and hits[0].position - start < TOP_PITCH:
             start = left
-            scan = Scan(image[top:bottom, left:right], self.top, axis=0)
+            scan = Scan(row, self.top, axis=0)
             hits = _peaks(scan.best, scan.label, TOP_MIN_SCORE, TOP_SPACING, left)
         return _top_kongs(image, _refine_manzu(scan, hits, start, "top", self.top_base))[::-1]
 
@@ -292,8 +310,7 @@ class MeldReader:
         if not runs:
             return None
         if seat == "top":
-            left, top, right, bottom = TOP_MELD_ROW
-            area, templates, axis, offset = image[top:bottom, left:right], self.top, 0, left
+            area, templates, axis, offset = top_row(image), self.top, 0, TOP_MELD_ROW[0]
             pitches = GUIDED_PITCHES["top"]
         else:
             area, templates, axis, offset = straighten(image, seat), self.side[seat], 1, 0

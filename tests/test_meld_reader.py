@@ -25,6 +25,8 @@ def test_group_melds_finds_kongs_pungs_and_chows_in_order():
     ("經典_副露_上家碰白_下家碰一筒.png", {"left": "777z", "right": "111p", "top": ""}),
     ("經典_副露_下家吃四五六筒.png", {"left": "", "right": "654p", "top": ""}),
     ("經典_副露_對家碰發.png", {"left": "", "right": "", "top": "666z"}),
+    # 10/29 18:43 對家起點（最右）那組八筒碰牌很斜，不拉正時最右那張讀成一萬
+    ("經典_副露_對家碰八筒最右.png", {"left": "", "right": "777z345s", "top": "888p333z"}),
 ])
 def test_reads_opponent_melds_from_screenshots(name, expected):
     from perception.capture import read_image
@@ -40,7 +42,7 @@ def test_reads_opponent_melds_from_screenshots(name, expected):
 
 
 def test_top_seat_reading_stays_accurate_on_labelled_screenshots(tmp_path):
-    """對家（倒著擺）的已知答案截圖（10/22 目視核對）：33 張牌至少對 32、錯不超過 1（TOP_ASPECT 0.9 時只對 22、錯 8；
+    """對家（倒著擺）的已知答案截圖（10/22 目視核對）：33 張牌至少對 32、錯不超過 1；10/29 加對家最右那組八筒碰共 39 張，對家那排拉正後全對（TOP_ASPECT 0.9 時只對 22、錯 8；
     10/28 萬子數字只和牌河模板比、容許偏幾像素之前對 30、錯 3）。人工標註的模板就是從這幾張切的，不讀。"""
     import shutil
     from collections import Counter
@@ -51,7 +53,8 @@ def test_top_seat_reading_stays_accurate_on_labelled_screenshots(tmp_path):
     truth = {"經典_副露_驗證_202741.png": "444m", "經典_副露_驗證_203038.png": "222p",
              "經典_副露_驗證_203436.png": "789p111s", "經典_副露_驗證_203544.png": "123m111s",
              "經典_副露_驗證_200831.png": "789m111s666z", "經典_副露_驗證_193456.png": "456p",
-             "經典_副露_對家碰發.png": "666z", "經典_副露_上家碰白_下家碰一筒.png": ""}
+             "經典_副露_對家碰發.png": "666z", "經典_副露_上家碰白_下家碰一筒.png": "",
+             "經典_副露_對家碰八筒最右.png": "888p333z"}
     paths = {name: Path("train") / name for name in truth}
     seat_dir = tmp_path / "meld_templates"
     if Path("train/meld_templates").exists():
@@ -65,7 +68,7 @@ def test_top_seat_reading_stays_accurate_on_labelled_screenshots(tmp_path):
         want = Counter(parse(answer)) if answer else Counter()
         good += sum((got & want).values())
         wrong += sum((got - want).values())
-    assert good >= 32 and wrong <= 1, (good, wrong)
+    assert good >= 38 and wrong <= 1, (good, wrong)
 
 
 @pytest.mark.parametrize("name, seat, tile", [
