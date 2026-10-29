@@ -347,12 +347,14 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     if meld_shots_left > 0 and rivers.meld_watch.melds:
                         meld_shots_left -= 1
                         shot = f"（截圖 {Path(str(save_result(frame, '副露_'))).name}）"
-                    log(f"[{stamp}] 對手副露：{describe_melds(rivers.meld_watch.melds)}{shot}", echo=False)
+                    seen = "".join(f"；{MELD_SEAT_NAMES[seat]}暗槓 {count} 組"
+                                   for seat, count in rivers.meld_watch.concealed.items() if count)
+                    log(f"[{stamp}] 對手副露：{describe_melds(rivers.meld_watch.melds)}{seen}{shot}", echo=False)
                 watch = getattr(rivers, "meld_watch", None)
                 if show_melds is not None and watch is not None:
                     from hint.meld_watch import seat_labels
                     labels = seat_labels(watch.melds, {seat: count for seat, count in rivers.melds.items()},
-                                         getattr(rivers, "hidden_kongs", None))
+                                         rivers.concealed_counts() if hasattr(rivers, "concealed_counts") else None)
                     if labels != meld_labels:
                         meld_labels = labels
                         show_melds(labels)
@@ -361,7 +363,8 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                                       melds=rivers.meld_counts(),
                                       exposed=rivers.exposed_tiles(),
                                       my_discards=rivers.my_discards,
-                                      hidden_kongs=sum(getattr(rivers, "hidden_kongs", {}).values()),
+                                      hidden_kongs=sum(rivers.concealed_counts().values())
+                                      if hasattr(rivers, "concealed_counts") else 0,
                                       declared_safe=rivers.declared_safe(),
                                       my_pungs=tuple(rivers.my_pungs),
                                       opponent_melds=getattr(rivers, "read_melds", lambda: ())())

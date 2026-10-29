@@ -251,8 +251,16 @@ class RiverWatch:
         read = self.meld_watch.melds if self.meld_watch is not None else {}
         for seat, count in self.melds.items():
             if seat != "me":
-                result[RIVER_SEAT[seat]] = min(max(count, len(read.get(seat, ()))) + self.hidden_kongs[seat], 5)
+                result[RIVER_SEAT[seat]] = min(max(count, len(read.get(seat, ()))) + self.concealed(seat), 5)
         return tuple(result)
+
+    def concealed(self, seat: str) -> int:
+        """這家的暗槓組數：畫面上看到的（MeldWatch.concealed）和金牌變多推算的（hidden_kongs）取較多的。"""
+        seen = self.meld_watch.concealed.get(seat, 0) if self.meld_watch is not None else 0
+        return max(seen, self.hidden_kongs[seat])
+
+    def concealed_counts(self) -> dict[str, int]:
+        return {seat: self.concealed(seat) for seat in SEATS if seat != "me"}
 
     def kong_started(self) -> None:
         """金牌剛變多（有人槓）：記下當時牌河最近的事件，槓的是那之後輪到的人。"""

@@ -325,9 +325,67 @@ class MeldReader:
             return None
         return hits
 
+    @staticmethod
+    def concealed_kongs(image: np.ndarray) -> dict[str, int]:
+        return concealed_kongs(image)
+
     def read(self, image: np.ndarray) -> dict[str, list[MeldTile]]:
         """三家正面朝上的牌，依擺放順序（從副露起點那端開始）。"""
         return {"left": self._side(image, "left"), "right": self._side(image, "right"), "top": self._top(image)}
+
+
+FACE_DOWN_SIDE_SHARE = 0.8
+"""直條上一列（橫跨整個寬度）藍色牌背至少佔這麼多＝平躺的牌背（暗槓）。立著的手牌只佔一邊、另一邊露出深綠桌面，
+明牌副露是白的。"""
+FACE_DOWN_SIDE_MIN = 30
+"""直條上連著的平躺牌背（間隔不到 FACE_DOWN_SIDE_GAP 的合併）至少這麼長才算一組暗槓（一張約 30）。"""
+FACE_DOWN_SIDE_GAP = 30
+TOP_FLAT_ROWS = ((146, 157), (178, 204))
+"""對家那排：平躺的牌背在下面那段是藍的、上面那段不是（立著的手牌兩段都藍、疊在中間那張也是）。"""
+TOP_FLAT_WIDTH = (35, 65)
+TOP_FLAT_PAIR = (90, 130)
+"""對家的暗槓：兩段平躺牌背（各約 50 寬）、中間隔一張疊高的，兩段起點相距約 107。"""
+
+
+def _blue_backs(image: np.ndarray) -> np.ndarray:
+    pixels = image.astype(np.int16)
+    blue, red = pixels[..., 0], pixels[..., 2]
+    return (blue > 150) & (red < 90) & (blue - red > 100)
+
+
+def _runs(flags: np.ndarray, min_length: int, merge_gap: int = 0) -> list[tuple[int, int]]:
+    runs: list[list[int]] = []
+    for index, flag in enumerate(flags):
+        if not flag:
+            continue
+        if runs and index - runs[-1][1] <= merge_gap:
+            runs[-1][1] = index + 1
+        else:
+            runs.append([index, index + 1])
+    return [(start, end) for start, end in runs if end - start >= min_length]
+
+
+def concealed_kongs(image: np.ndarray) -> dict[str, int]:
+    """三家桌邊的暗槓（三張牌背平躺、第四張疊在中間）有幾組。牌背朝上讀不到是哪張，只數組數。
+    10/29 槓截圖：對家 5 張、上家下家 7 張看得到暗槓的都抓到；其他 60 多張牌局截圖沒有誤判（結算等牌局外畫面不算）。"""
+    counts = {}
+    for seat in ("left", "right"):
+        cover = _blue_backs(straighten(image, seat)).mean(axis=1)
+        counts[seat] = len(_runs(cover >= FACE_DOWN_SIDE_SHARE, FACE_DOWN_SIDE_MIN, FACE_DOWN_SIDE_GAP))
+    left, _, right, _ = TOP_MELD_ROW
+    blue = _blue_backs(image[:, left:right])
+    (upper_top, upper_bottom), (lower_top, lower_bottom) = TOP_FLAT_ROWS
+    flat = (blue[lower_top:lower_bottom].mean(axis=0) > 0.8) & (blue[upper_top:upper_bottom].mean(axis=0) < 0.2)
+    pieces = [run for run in _runs(flat, 1) if TOP_FLAT_WIDTH[0] <= run[1] - run[0] <= TOP_FLAT_WIDTH[1]]
+    pairs, used = 0, set()
+    for index, (start, _) in enumerate(pieces):
+        partner = next((other for other in range(index + 1, len(pieces)) if other not in used
+                        and TOP_FLAT_PAIR[0] <= pieces[other][0] - start <= TOP_FLAT_PAIR[1]), None)
+        if index not in used and partner is not None:
+            pairs += 1
+            used |= {index, partner}
+    counts["top"] = pairs
+    return counts
 
 
 def _band_rows(strip: np.ndarray) -> np.ndarray:

@@ -55,6 +55,12 @@ RAKE_PERCENT = 15
 """贏的錢遊戲抽 15%（無條件捨去）：結算畫面寫 +130、+3900，金幣只多 111、3315（10/1 由畫面下方的
 金幣餘額逐局對出）。輸的錢照畫面扣。"""
 ROUND_END = {"繼續戰鬥", "再玩一局", "再贏一局", "破產再玩一局", "再拚一局", "大結算"}
+END_REASON_TEMPLATES = {name: Path(__file__).with_name(f"round_end_{name}.png") for name in ("破產", "財產不足", "斷線")}
+"""大結算下方「有人破產，／有人財產不足，／有人斷線，繼續再來一局？」那行字（灰階切圖）。10/29 有幾圈只有 1～2 局、
+自己沒輸贏，看截圖是第一局後就有人財產不足、破產，整圈提前結束，不是分圈分錯。右下按鈕字不固定（再拚一局、
+再贏一局、繼續戰鬥都看過），所以認這行字。10/29 的 64 張大結算：這三種 1.0，一般的最高 0.41。"""
+END_REASON_REGION = (780, 860, 1350, 1020)
+END_REASON_MIN_SCORE = 0.9
 FILE_PATTERN = re.compile(r"^(\d{8})_(\d{6})(?:_\d+)?$")
 
 
@@ -182,10 +188,29 @@ def classify(rows: list[Row]) -> tuple[int, str]:
 @dataclass
 class Round:
     hands: list[Hand]
+    reason: str | None = None
+    """大結算寫的結束原因（破產／財產不足／斷線）；正常打完是 None。"""
 
     @property
     def net(self) -> int:
         return sum(hand.net for hand in self.hands)
+
+
+def load_end_reasons() -> dict[str, np.ndarray]:
+    templates = {}
+    for name, path in END_REASON_TEMPLATES.items():
+        if path.exists():
+            templates[name] = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_GRAYSCALE)
+    return templates
+
+
+def end_reason(image: np.ndarray, templates: dict[str, np.ndarray]) -> str | None:
+    left, top, right, bottom = END_REASON_REGION
+    gray = cv2.cvtColor(image[top:bottom, left:right], cv2.COLOR_BGR2GRAY)
+    scores = {name: float(cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED).max())
+              for name, template in templates.items()}
+    best = max(scores, key=scores.get, default=None)
+    return best if best is not None and scores[best] >= END_REASON_MIN_SCORE else None
 
 
 def collect(directory: Path, date: str, since: str | None, until: str | None,
@@ -193,6 +218,7 @@ def collect(directory: Path, date: str, since: str | None, until: str | None,
     buttons = ContinueButtons.from_directory()
     digits = load_digits()
     my_name = load_names(name)
+    reasons = load_end_reasons()
     rounds, current = [], Round([])
     for path in sorted(directory.glob(f"{date}_*.png")):
         match = FILE_PATTERN.match(path.stem)
@@ -206,9 +232,13 @@ def collect(directory: Path, date: str, since: str | None, until: str | None,
         if found is None:
             continue
         if found.name in ROUND_END:
+            reason = end_reason(image, reasons)
             if current.hands:
+                current.reason = reason
                 rounds.append(current)
                 current = Round([])
+            elif rounds and reason is not None:
+                rounds[-1].reason = reason
             continue
         rows = [read_row(image, top, digits, my_name) for top in ROW_TOPS]
         if sum(row.is_me for row in rows) != 1:
@@ -253,8 +283,9 @@ def report(rounds: list[Round], draws: int = 0, missed: int = 0) -> str:
     lines = []
     for index, rnd in enumerate(rounds, 1):
         first, last = rnd.hands[0].stamp[-6:], rnd.hands[-1].stamp[-6:]
+        reason = f"（有人{rnd.reason}）" if rnd.reason else ""
         lines.append(f"第 {index} 圈 {first[:2]}:{first[2:4]}–{last[:2]}:{last[2:4]}  "
-                     f"{len(rnd.hands)} 局  {rnd.net:+d}")
+                     f"{len(rnd.hands)} 局  {rnd.net:+d}{reason}")
     total = len(hands)
     counts = {name: sum(1 for h in hands if h.outcome == name)
               for name in ("胡牌", "自摸", "放槍", "被自摸", "沒輸贏", "未知")}

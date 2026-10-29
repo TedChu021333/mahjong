@@ -390,3 +390,15 @@ def test_kong_right_after_a_claim_is_not_a_concealed_kong():
     frames(watch, waiting())  # 那張被拿走：明槓，吃碰推算已經算過
     watch.kong_started()
     assert watch.kong_confirmed() is None
+
+
+def test_concealed_kongs_seen_on_screen_count_as_melds():
+    from types import SimpleNamespace
+
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    watch.meld_watch = SimpleNamespace(melds={}, concealed={"top": 1}, new_hand=lambda: None)
+    assert watch.meld_counts()[2] == 1 and watch.concealed_counts() == {"left": 0, "top": 1, "right": 0}
+    # 同一組推算也算到了：取較多的，不重複算
+    watch.hidden_kongs["top"] = 1
+    assert watch.meld_counts()[2] == 1

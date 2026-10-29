@@ -495,7 +495,7 @@ def test_dealer_streak_on_real_screens():
         pytest.skip("缺少連莊數字模板")
     # 經典_連莊3、經典_連莊1_偏：10/22 03:39、10/20 17:33 原本認不出的（3 沒有模板、1 只有 0.66）
     expected = {"經典_上家第二欄吃": 1, "經典_上家第二欄吃2": 2, "經典_碰": 0, "經典_牌河290": 0,
-                "經典_連莊3": 3, "經典_連莊1_偏": 1}
+                "經典_連莊3": 3, "經典_連莊1_偏": 1, "經典_連莊4": 4}  # 10/29 06:32 上家連 4
     for name, streak in expected.items():
         path = TRAIN_DIR / f"{name}.png"
         if path.exists():

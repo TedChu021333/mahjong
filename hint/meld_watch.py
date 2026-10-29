@@ -163,6 +163,8 @@ class MeldWatch:
         """各家副露的位置：[位置, 這個位置讀到各種組的票數, 最近一次讀到的組, 引導搜尋確認後固定的組]。"""
 
         self.reads = 0
+        self.concealed: dict[str, int] = {}
+        """畫面上看到的各家暗槓組數（perception.meld_reader.concealed_kongs）；同一局只增不減（會被動畫擋住）。"""
 
     def new_hand(self) -> None:
         with self._lock:
@@ -170,6 +172,7 @@ class MeldWatch:
             self._pending = None
         self.melds = {}
         self._slots = {}
+        self.concealed = {}
 
     def _vote(self, seat: str, position: int, meld: Meld) -> None:
         """副露依桌上的位置記：每一組擺在固定的地方，同一個位置讀到的算一票。"""
@@ -205,6 +208,10 @@ class MeldWatch:
             melds.append(meld)
         return melds[:5]
 
+    def count_concealed(self, image: np.ndarray) -> dict[str, int]:
+        counter = getattr(self.reader, "concealed_kongs", None)
+        return counter(image) if counter is not None else {}
+
     def busy(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
@@ -220,6 +227,7 @@ class MeldWatch:
 
         def work() -> None:
             read = self.reader.read(image)
+            hidden = self.count_concealed(image)
             found_chows: list[tuple[str, list[MeldTile], bool]] = []
             guided = getattr(self.reader, "guided_meld", None)
             for seat, items in hints.items():
@@ -241,7 +249,7 @@ class MeldWatch:
                         found_chows.append((seat, found, replace))
             with self._lock:
                 if generation == self._generation:
-                    self._pending = (generation, read, found_chows)
+                    self._pending = (generation, read, found_chows, hidden)
 
         if self.background:
             self._thread = threading.Thread(target=work, daemon=True)
@@ -259,6 +267,10 @@ class MeldWatch:
             return False
         self.reads += 1
         read = pending[1]
+        before = dict(self.concealed)
+        for seat, count in pending[3].items():
+            if count > self.concealed.get(seat, 0):
+                self.concealed[seat] = count
         result: dict[str, tuple[Meld, ...]] = {}
         for seat in SEATS:
             hits = sorted(fill_gaps(read.get(seat, [])), key=lambda hit: hit.position, reverse=seat != "left")
@@ -278,7 +290,7 @@ class MeldWatch:
                 result[seat] = tuple(melds[:5])
             self._harvest(seat, hits, tiles, known.get(seat, []), [hit.tile for hit in hits])
         self._harvest_guided(pending[2])
-        changed = result != self.melds
+        changed = result != self.melds or self.concealed != before
         self.melds = result
         return changed
 

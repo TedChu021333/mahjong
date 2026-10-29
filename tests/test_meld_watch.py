@@ -288,3 +288,26 @@ def test_stacked_pung_is_shown_as_a_kong_and_stays_one():
     reader.result = {"left": [], "top": [], "right": hits("888m")}
     watch.request(frame); watch.collect({})
     assert watch.melds["right"] == (Meld("kong", (P("8m"),) * 4, -1),)
+
+
+def test_concealed_kongs_seen_on_screen_stay_for_the_hand():
+    class Reader(FakeReader):
+        def __init__(self, read, concealed):
+            super().__init__(read)
+            self.concealed = concealed
+
+        def concealed_kongs(self, image):
+            return self.concealed
+
+    reader = Reader({"left": [], "top": [], "right": []}, {"top": 1})
+    watch = MeldWatch(reader, template_dir=None, background=False)
+    frame = np.zeros((1080, 1920, 3), np.uint8)
+    watch.request(frame)
+    watch.collect({})
+    assert watch.concealed == {"top": 1}
+    reader.concealed = {"top": 0}  # 被動畫擋住：不會變少
+    watch.request(frame)
+    watch.collect({})
+    assert watch.concealed == {"top": 1}
+    watch.new_hand()
+    assert watch.concealed == {}

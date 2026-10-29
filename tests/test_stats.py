@@ -38,6 +38,35 @@ def test_report_counts():
     assert "第 1 圈 18:00–18:05  2 局  +125" in text
 
 
+def test_rounds_ended_by_a_broke_player_are_marked():
+    # 10/29 03:43 第一局後有人「財產不足」：大結算右下是「再拚一局」，整圈只有 1 局
+    rounds = [Round([Hand("20261029_034349", 0, "沒輸贏")], reason="財產不足")]
+    assert "第 1 圈 03:43–03:43  1 局  +0（有人財產不足）" in report(rounds)
+
+
+def test_collect_on_real_screens_marks_the_early_end():
+    from eval.stats import RESULT_DIR, collect
+
+    if not (RESULT_DIR / "20261029_034352.png").exists():
+        pytest.skip("沒有 10/29 的結算截圖")
+    rounds = collect(RESULT_DIR, "20261029", "034200", "034400")
+    assert [len(r.hands) for r in rounds] == [1, 1]
+    assert [r.reason for r in rounds] == ["破產", "財產不足"]
+
+
+def test_end_reason_on_real_grand_settlements():
+    from eval.stats import RESULT_DIR, end_reason, load_end_reasons
+
+    # 10/29：破產時按鈕是「再贏一局」、財產不足有時是「繼續戰鬥」，按鈕字不能用；一般打完一圈的大結算沒有原因
+    expected = {"20261029_090140": "破產", "20261029_111045": "財產不足", "20261029_024517": "斷線",
+                "20261029_110745": None, "20261029_001056": None}
+    templates = load_end_reasons()
+    for stem, reason in expected.items():
+        path = RESULT_DIR / f"{stem}.png"
+        if path.exists():
+            assert end_reason(read_image(path), templates) == reason, stem
+
+
 def test_rake_rounds_down_like_the_game():
     # 實測：+130 → 金幣 +111、+310 → +264、+3900 → +3315；輸的照扣
     assert [Hand("x", a, "").net for a in (130, 310, 3900, -700)] == [111, 264, 3315, -700]

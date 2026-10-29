@@ -100,3 +100,22 @@ def test_no_kong_on_screens_without_one():
     for path in paths:
         read = reader.read(read_image(path))
         assert not any(hit.stacked for hits in read.values() for hit in hits), path.name
+
+
+def test_concealed_kongs_are_counted_from_face_down_tiles():
+    from perception.capture import read_image
+    from perception.meld_reader import concealed_kongs
+
+    # 10/29 槓截圖：三張牌背平躺、第四張疊在中間（牌背朝上讀不到是哪張，只數組數）
+    expected = {"經典_暗槓_對家.png": "top", "經典_暗槓_上家.png": "left", "經典_暗槓_下家.png": "right"}
+    # 明槓／加槓、一般的副露、立著的手牌都不算
+    clean = ["經典_槓_對家八萬.png", "經典_槓_上家八萬.png", "經典_副露_對家碰發.png", "經典_副露_下家吃四五六筒.png",
+             "經典_副露_驗證_193456.png", "經典_副露_驗證_203436.png", "經典_碰.png", "經典_牌河290.png"]
+    paths = [Path("train") / name for name in [*expected, *clean]]
+    if not all(path.exists() for path in paths):
+        pytest.skip("缺少訓練截圖")
+    for name, seat in expected.items():
+        counts = concealed_kongs(read_image(Path("train") / name))
+        assert counts == {"left": 0, "right": 0, "top": 0} | {seat: 1}, name
+    for name in clean:
+        assert not any(concealed_kongs(read_image(Path("train") / name)).values()), name
