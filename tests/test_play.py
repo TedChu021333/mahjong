@@ -192,3 +192,23 @@ def test_judge_flags_missed_win_and_retreat():
     assert any(p.startswith("漏胡") for p in problems)
     assert any(p.startswith("退向聽") for p in problems)
     assert any(p.startswith("危險牌") for p in problems)
+
+
+def test_human_is_asked_once_per_discard():
+    """沒人吃碰時模擬器一步只收第一家的「過」，自己排在後面也只問一次。"""
+    from game.simulator import play_game
+    asked = []
+
+    def ask(state, actions):
+        if state.phase == Phase.RESPONSE:
+            # 被吃碰的牌會從牌河拿掉，所以連副露數一起當作「哪一張打出的牌」
+            key = (state.discard_player, tuple(len(p.discards) for p in state.players),
+                   tuple(len(p.melds) for p in state.players))
+            assert key not in asked
+            asked.append(key)
+            return next(a for a in actions if a.kind == ActionType.PASS)
+        return choose_rule_action_for_player(state, HUMAN, Random(0))
+
+    for seed in range(6):
+        asked.clear()
+        play_game(Random(seed), player_policy=seat_policy(HumanSeat(ask), choose_rule_action_for_player))

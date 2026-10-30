@@ -33,6 +33,9 @@ class HumanSeat:
 
     def __init__(self, ask: Ask) -> None:
         self.ask = ask
+        self._passed: tuple | None = None
+        """已經說「不要」的那張打出的牌。模擬器每一步會問所有還沒回應的人，但沒人吃碰時一次只收下第一家的「過」，
+        沒輪到的人下一步會再被問：10/30 04:17 同一張七條問了三次（說了兩次不要、第三次碰了）。"""
 
     def __call__(self, state: GameState, player: int, rng: Random) -> Action | None:
         actions = legal_actions(state, player)
@@ -40,7 +43,15 @@ class HumanSeat:
             return None
         if state.phase != Phase.SWAP and len(actions) == 1:
             return actions[0]
-        return self.ask(copy.deepcopy(state), actions)
+        key = None
+        if state.phase == Phase.RESPONSE:
+            key = (state.discard_player, state.last_discard, state.robbing_kong,
+                   tuple(len(p.discards) for p in state.players), tuple(len(p.melds) for p in state.players))
+            if key == self._passed:
+                return next(a for a in actions if a.kind == ActionType.PASS)
+        choice = self.ask(copy.deepcopy(state), actions)
+        self._passed = key if key is not None and choice.kind == ActionType.PASS else None
+        return choice
 
 
 def seat_policy(human: PlayerPolicy, bot: PlayerPolicy) -> PlayerPolicy:
