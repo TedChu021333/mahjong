@@ -46,8 +46,10 @@ LABEL_MIN_SCORE = 0.7
 126 張全部讀對。門檻 0.7：正確的標註留下 99%、錯的擋下 91%。"""
 ADDED_KONG_READS = 2
 """推算加槓後等讀幾次副露（約 8 秒一次）才把碰改成槓。"""
-RECENT_KONG_READS = 2
-"""金牌變多前這麼多次讀副露之內才讀到的槓，算是這次金牌變多的那一組（有人吃碰後 1.5 秒就讀，槓常比金牌先讀到）。"""
+RECENT_KONG_SECONDS = 6.0
+"""金牌變多前這麼多秒內才讀到的槓，算是這次金牌變多的那一組（有人吃碰後 1.5 秒就讀，槓常比金牌先讀到）。
+原本用「前 2 次讀副露」：10/30 14:42:58 讀到下家暗槓、14:43 金牌變多，還推算了一組上家暗槓
+（讀副露較頻繁或金牌讀數跳動、重新起算時，剛讀到的槓會落在 2 次之外）。讀副露約 8 秒一次，6 秒前的讀取一定在槓之前。"""
 EMPTY_RESET_FRAMES = 10
 """四家牌河連續這麼多次都讀不到任何牌、追蹤器卻記著牌時，當成新的一局（沒有換三張的場、流局沒有結算畫面）。"""
 
@@ -59,8 +61,9 @@ def _read_banner(frame):
 class RiverWatch:
     def __init__(self, reader: RiverReader, template_dir: Path = RIVER_TEMPLATE_DIR,
                  save=write_image, read_banner=None, unknown_dir: Path | None = UNKNOWN_DIR,
-                 meld_watch=None) -> None:
+                 meld_watch=None, clock=time.monotonic) -> None:
         self.reader = reader
+        self.clock = clock
         self.meld_watch = meld_watch
         """讀對手副露（hint.meld_watch.MeldWatch，可為 None）。"""
         self.unknown_dir = unknown_dir
@@ -124,8 +127,8 @@ class RiverWatch:
         疊上去的第四張常讀不到，明槓原本一直算成碰（10/28 使用者：對手的槓都被當成碰）。"""
         self.kong_notes: list[str] = []
         """暗槓推算確認或取消的說明，提示迴圈寫進記錄後清掉。"""
-        self._kong_seen: list[int] = []
-        """這局每次讀完副露時讀到的各家槓合計（_kong_total），找金牌變多前剛讀到的槓用。"""
+        self._kong_seen: list[tuple[float, int]] = []
+        """這局每次讀完副露的 (時間, 讀到的各家槓合計 _kong_total)，找金牌變多前剛讀到的槓用。"""
         self._kongs_explained = 0
         """讀到的槓裡，已經拿來解釋某一次金牌變多的有幾組。"""
         self._kong_baseline = 0
@@ -300,7 +303,8 @@ class RiverWatch:
         self._kong_from = self._last_mover
         self._claimed_since_kong = False
         self._claimed_tile_since_kong = None
-        earlier = self._kong_seen[-1 - RECENT_KONG_READS] if len(self._kong_seen) > RECENT_KONG_READS else 0
+        cutoff = self.clock() - RECENT_KONG_SECONDS
+        earlier = next((total for seen, total in reversed(self._kong_seen) if seen <= cutoff), 0)
         self._kong_baseline = max(self._kongs_explained, earlier)
 
     def kong_confirmed(self) -> tuple[str, str] | None:
@@ -388,7 +392,7 @@ class RiverWatch:
             return False
         known = {seat: list(tiles) for seat, tiles in self.exposed.items() if seat != "me"}
         changed = self.meld_watch.collect(known, {seat: count for seat, count in self.melds.items() if seat != "me"})
-        self._kong_seen.append(self._kong_total())
+        self._kong_seen.append((self.clock(), self._kong_total()))
         hidden = self._resolve_hidden_kong()
         opened = self._resolve_open_kongs()
         return self._resolve_added_kong() or hidden or opened or changed

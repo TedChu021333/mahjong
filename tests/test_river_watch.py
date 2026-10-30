@@ -507,16 +507,45 @@ def test_kong_read_just_before_the_gold_changed_explains_it():
     watch.meld_watch = melds
     reader.current["top"] = [RiverTile(P("1p"), 0.9, (700, 200, 760, 280))]
     frames(watch, waiting())
-    watch._kong_seen.append(watch._kong_total())
+    watch._kong_seen.append((watch.clock(), watch._kong_total()))
     kong = Meld("kong", (P("9m"),) * 4, -1)
     melds._vote("right", 100, kong)
     melds.melds = {"right": (kong,)}
-    watch._kong_seen.append(watch._kong_total())
+    watch._kong_seen.append((watch.clock(), watch._kong_total()))
     watch.kong_started()
     assert watch.kong_confirmed() is None
     assert not watch.kong_pending() and "就是那一組" in watch.kong_notes[-1]
     # 那組已經用掉了：之後再有金牌變多照樣推算
-    watch._kong_seen += [1, 1, 1]
+    watch._kong_seen += [(watch.clock(), 1)] * 3
+    watch.kong_started()
+    assert watch.kong_confirmed() == ("暗槓", "left")
+
+
+def test_kong_read_several_reads_before_the_gold_changed_still_explains_it():
+    # 10/30 14:42:58 讀到下家暗槓，之後又讀了幾次副露、14:43 金牌才確認變多，原本還推算了一組上家暗槓
+    from hint.meld_watch import MeldWatch
+
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    now = [100.0]
+    watch.clock = lambda: now[0]
+    melds = MeldWatch(None, template_dir=None, background=False)
+    watch.meld_watch = melds
+    reader.current["top"] = [RiverTile(P("1p"), 0.9, (700, 200, 760, 280))]
+    frames(watch, waiting())
+    watch._kong_seen.append((watch.clock(), watch._kong_total()))
+    now[0] += 8
+    melds.concealed = {"right": 1}
+    for _ in range(3):
+        now[0] += 1
+        watch._kong_seen.append((watch.clock(), watch._kong_total()))
+    watch.kong_started()
+    assert watch.kong_confirmed() is None
+    assert "就是那一組" in watch.kong_notes[-1]
+    # 槓是 6 秒以前就讀到的：不是這次金牌變多的那一組，照樣推算
+    now[0] += 20
+    watch._kong_seen.append((watch.clock(), watch._kong_total()))
+    watch._kongs_explained = 0
     watch.kong_started()
     assert watch.kong_confirmed() == ("暗槓", "left")
 
@@ -532,7 +561,7 @@ def test_concealed_kong_on_screen_is_not_also_an_exposed_kong():
     reader.current["me"] = [RiverTile(P("6p"), 0.9, (700, 600, 760, 680))]
     frames(watch, waiting())
     melds.concealed = {"left": 1}
-    watch._kong_seen.append(watch._kong_total())
+    watch._kong_seen.append((watch.clock(), watch._kong_total()))
     watch.kong_started()
     reader.current["me"] = []
     frames(watch, waiting())
