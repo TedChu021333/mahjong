@@ -26,7 +26,7 @@ from agent.rule_agent import (
 from agent.safety import claim_is_worse, safer_discard
 from agent.shanten import effective_tiles, improvement_count, next_step_outs, shanten
 from game.rules import Action, ActionType, GameState, Phase, legal_actions
-from game.tiles import tile_name
+from game.tiles import is_honor, is_suited, suit_of, tile_name
 from training.actions import DISCARD, legal_mask
 from training.encoding import encode
 from training.model import MahjongNet, load, masked_logits
@@ -81,9 +81,13 @@ class NetworkPolicy:
                     wasteful = wasteful_discard(state, player, choice, lookup, scores)
                     if wasteful is not None:
                         choice = wasteful[0]
+                    flush = flush_discard(state, player, choice, lookup, scores)
+                    if flush is not None:
+                        choice = flush[0]
                     choice = self._guarded(state, player, choice, actions, rng)
                     self.last_note = "；".join(
-                        note for note in (kept and kept[1], wasteful and wasteful[1], self.last_note) if note) or None
+                        note for note in (kept and kept[1], wasteful and wasteful[1], flush and flush[1], self.last_note)
+                        if note) or None
                 except ValueError:  # 局面不合法（例如辨識出的張數不對）：照網路
                     self.last_note = None
             return choice
@@ -277,6 +281,100 @@ def _better_shape(state: GameState, player: int, choice: Action, lookup: dict[in
     return (lookup[DISCARD + pick],
             f"牌型：打{tile_name(choice.tile)}改良牌 {base_improve}、牌型 {base_next} → "
             f"改打{tile_name(pick)} {improve}、{next_outs}")
+
+
+FLUSH_MIN_TILES = 13
+"""手牌加副露（每組算 3 張）裡同一種數牌加字牌有這麼多張以上，才往混一色／清一色做（flush_discard）。"""
+FLUSH_MAX_OFF = 3
+"""手上別色的數牌最多這麼多張（10/20 07:24 一三七萬 一筒 二三四五八八條 南西西東＋一組副露，字牌多就湊到 13 張，
+但別色還有 4 張、離混一色很遠）。"""
+FLUSH_RETREAT_MAX_LIVE = 2
+"""聽的牌扣掉看得到的只剩這麼多張以下，才准拆聽牌改做清一色。"""
+FLUSH_RETREAT_MIN_OUTS = 12
+"""拆聽牌後清一色一向聽要有這麼多張（看不到的、同一色的）進張。10/31 00:06 那手打掉八筒後萬子進張 13 張
+（二四五六七八九萬，手上都已有 1～3 張），原本想的 20 張會把它擋掉。"""
+FLUSH_RETREAT_MIN_WALL = 20
+"""牌牆還剩這麼多張以上才准拆聽牌做清一色。"""
+
+
+def flush_suit(state: GameState, player: int) -> int | None:
+    """手牌與副露往混一色／清一色靠攏時回傳那一種數牌（0 萬、1 筒、2 條），否則 None。
+    副露要全是那一色或字牌；實戰讀不到自己副露的內容（只知道吃碰時用掉的手牌，見 state_parser 的佔位副露），
+    知道的牌少於每組 2 張就不算，免得把別色的副露當成一色。"""
+    me = state.players[player]
+    meld_tiles = [tile for meld in me.melds for tile in meld.tiles]
+    if len(meld_tiles) < 2 * len(me.melds):
+        return None
+    counts = [0, 0, 0]
+    honors = 0
+    for tile in range(34):
+        if me.hand[tile]:
+            if is_honor(tile):
+                honors += me.hand[tile]
+            else:
+                counts[suit_of(tile)] += me.hand[tile]
+    suit = max(range(3), key=lambda s: counts[s])
+    if any(not is_honor(tile) and suit_of(tile) != suit for tile in meld_tiles):
+        return None
+    if counts[suit] + honors + 3 * len(me.melds) < FLUSH_MIN_TILES or sum(counts) - counts[suit] > FLUSH_MAX_OFF:
+        return None
+    return suit
+
+
+def flush_discard(state: GameState, player: int, choice: Action, lookup: dict[int, Action],
+                  logits: np.ndarray) -> tuple[Action, str] | None:
+    """往混一色／清一色做（10/31 使用者：萬子 14 張只剩兩張筒，感覺該做清一色），回傳 (動作, 說明)：
+    ① 網路打的是那一色或字牌，而打掉別色的牌向聽一樣：改打別色的牌（進張最多的；之後放槍檢查照樣管）。
+    ② 網路那張打完聽牌、但聽的牌只剩 FLUSH_RETREAT_MAX_LIVE 張以下，而打掉別色的牌後手上只剩一張別色、
+       同一色的進張有 FLUSH_RETREAT_MIN_OUTS 張以上（牌牆還剩 FLUSH_RETREAT_MIN_WALL 張以上）：拆聽牌做清一色（8 台）。
+       10/31 00:06 二二四四四五五六六六七七七八九萬 六筒八筒，網路打九萬聽嵌七筒（上家、對家都吃了七八九筒，只剩 2 張）。
+    混一色只有 4 台，不為它拆聽牌。湊牌、保聽、牌型比較都在這之前，所以改了不會被它們改回去。"""
+    me = state.players[player]
+    if (choice.kind not in (ActionType.DISCARD, ActionType.DECLARE) or state.phase != Phase.DISCARD
+            or state.declared[player]):
+        return None
+    suit = flush_suit(state, player)
+    if suit is None:
+        return None
+    options = [index - DISCARD for index in lookup if DISCARD <= index < DISCARD + 34]
+    off = [tile for tile in options if is_suited(tile) and suit_of(tile) != suit]
+    if choice.tile not in options or choice.tile in off or not off:
+        return None
+    visible = visible_tile_counts(state, player)
+
+    def after(tile: int) -> list[int]:
+        hand = list(me.hand)
+        hand[tile] -= 1
+        return hand
+
+    def outs(hand: list[int], only_suit: bool = False) -> int:
+        return sum(max(0, 4 - visible[t]) for t in effective_tiles(hand, me.open_melds)
+                   if not only_suit or (is_suited(t) and suit_of(t) == suit))
+
+    level = shanten(after(choice.tile), me.open_melds)
+    same = [tile for tile in off if shanten(after(tile), me.open_melds) == level]
+    if same:
+        pick = max(same, key=lambda tile: (outs(after(tile)), float(logits[DISCARD + tile])))
+        return lookup[DISCARD + pick], f"一色：打{tile_name(choice.tile)} → 改打{tile_name(pick)}（同向聽，做一色）"
+    if level != 0 or state.drawable < FLUSH_RETREAT_MIN_WALL:
+        return None
+    live = outs(after(choice.tile))
+    if live > FLUSH_RETREAT_MAX_LIVE:
+        return None
+    best = None
+    for tile in off:
+        hand = after(tile)
+        others = sum(hand[t] for t in range(34) if is_honor(t) or suit_of(t) != suit)
+        if others > 1 or shanten(hand, me.open_melds) != 1:
+            continue
+        flush_outs = outs(hand, only_suit=True)
+        if flush_outs >= FLUSH_RETREAT_MIN_OUTS and (best is None or flush_outs > best[1]):
+            best = (tile, flush_outs)
+    if best is None:
+        return None
+    pick, flush_outs = best
+    return (lookup[DISCARD + pick],
+            f"一色：打{tile_name(choice.tile)}聽牌只剩 {live} 張 → 改打{tile_name(pick)} 做清一色（一向聽、進張 {flush_outs} 張）")
 
 
 def efficient_discard(state: GameState, player: int, choice: Action, lookup: dict[int, Action],

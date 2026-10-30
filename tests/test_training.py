@@ -316,3 +316,65 @@ def test_same_outs_but_clearly_worse_shape_is_switched():
     action, note = wasteful_discard(state, 0, Action(ActionType.DISCARD, tile=parse("4s")[0]), lookup, logits)
     assert action.tile in (parse("1p")[0], parse("1s")[0]) and note.startswith("牌型：打四條")
     assert wasteful_discard(state, 0, Action(ActionType.DISCARD, tile=parse("1s")[0]), lookup, logits) is None
+
+
+def test_flush_discard_prefers_off_suit_tiles_at_the_same_shanten():
+    pytest.importorskip("torch")
+    from agent.nn_agent import flush_discard
+    from training.actions import legal_mask
+
+    # 萬子 13 張、孤張九筒、一條、東、南：網路打南，打九筒、一條向聽一樣 → 改打別色（做一色）
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("1234567891155m9p1s12z"))
+    state = GameState([0] * 60, players, phase=Phase.DISCARD, last_drawn=parse("2z")[0])
+    _, lookup = legal_mask(legal_actions(state, 0))
+    logits = np.zeros(108, dtype=np.float32)
+    action, note = flush_discard(state, 0, Action(ActionType.DISCARD, tile=parse("2z")[0]), lookup, logits)
+    assert action.tile in (parse("9p")[0], parse("1s")[0]) and note.startswith("一色：")
+    # 網路本來就打別色：不改
+    assert flush_discard(state, 0, Action(ActionType.DISCARD, tile=parse("1s")[0]), lookup, logits) is None
+    # 一色的牌不夠多：不做
+    players[0].hand = to_counts(parse("1234567m1155p9p1s12z"))
+    assert flush_discard(state, 0, Action(ActionType.DISCARD, tile=parse("2z")[0]), lookup, logits) is None
+
+
+def test_flush_discard_breaks_a_dead_tenpai_for_a_pure_flush():
+    pytest.importorskip("torch")
+    from agent.nn_agent import flush_discard
+    from game.rules import Meld
+    from training.actions import legal_mask
+
+    # 10/31 00:06：二二四四四五五六六六七七七八九萬 六筒八筒；網路打九萬聽嵌七筒，上家、對家都吃了七八九筒（只剩 2 張）
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("224445566677789m68p"))
+    players[1].melds = [Meld("chow", tuple(parse("789p")), 0)]
+    players[2].melds = [Meld("chow", tuple(parse("789p")), 1)]
+    state = GameState([0] * 60, players, phase=Phase.DISCARD, last_drawn=parse("6m")[0])
+    _, lookup = legal_mask(legal_actions(state, 0))
+    logits = np.zeros(108, dtype=np.float32)
+    action, note = flush_discard(state, 0, Action(ActionType.DISCARD, tile=parse("9m")[0]), lookup, logits)
+    assert action.tile in (parse("6p")[0], parse("8p")[0]) and "做清一色" in note and "只剩 2 張" in note
+    # 七筒沒人用掉（剩 4 張）：照網路的聽牌
+    players[1].melds, players[2].melds = [], []
+    assert flush_discard(state, 0, Action(ActionType.DISCARD, tile=parse("9m")[0]), lookup, logits) is None
+    # 牌牆快沒了：不拆聽
+    players[1].melds = [Meld("chow", tuple(parse("789p")), 0)]
+    players[2].melds = [Meld("chow", tuple(parse("789p")), 1)]
+    state = GameState([0] * 10, players, phase=Phase.DISCARD, last_drawn=parse("6m")[0])
+    assert flush_discard(state, 0, Action(ActionType.DISCARD, tile=parse("9m")[0]), lookup, logits) is None
+
+
+def test_flush_suit_needs_melds_of_the_same_suit():
+    pytest.importorskip("torch")
+    from agent.nn_agent import flush_suit
+    from game.rules import Meld
+
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("2244455667778m8p"))
+    players[0].melds = [Meld("pung", tuple(parse("999m")), 1)]
+    state = GameState([0] * 60, players, phase=Phase.DISCARD)
+    assert flush_suit(state, 0) == 0
+    players[0].melds = [Meld("pung", tuple(parse("999s")), 1)]  # 別色的副露
+    assert flush_suit(state, 0) is None
+    players[0].melds = [Meld("unknown", ())]  # 實戰讀不到副露內容：不做
+    assert flush_suit(state, 0) is None
