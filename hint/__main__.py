@@ -50,6 +50,7 @@ from hint.river_watch import summary as river_summary
 from perception.continue_button import ContinueButton
 from perception.river_reader import RiverReader
 from perception.capture import grab_screen, read_image, write_image
+from perception.hand_reader import locate_hand_tiles
 from perception.config import (
     ACTION_BUTTON_CENTERS,
     CONTINUE_BUTTONS,
@@ -181,8 +182,10 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
         actuator=None, observe_fn=observe, clock=time.monotonic, show=None,
         find_continue=None, save_result=save_result, log=print_log, rivers=None,
         find_win=None, find_buttons=None, find_popup=None, find_autoplay=None,
-        window=None, show_danger=None, stop_requested=None, show_melds=None) -> None:
+        window=None, show_danger=None, stop_requested=None, show_melds=None,
+        hand_on_screen=None) -> None:
     """show_danger(text) 更新放槍表小視窗（輪到自己時手上放槍機率最高的幾張）。
+    hand_on_screen(frame) 為手牌那一排看不看得到牌面：流局後換局擲骰子時整排沒有牌，讀不到手牌是正常的、不存截圖。
     find_win(frame) 為「胡」按鈕是否亮著、find_buttons(frame) 讀按鈕列（都不依賴手牌辨識）；
     find_popup(frame) 找會蓋住牌桌的彈出面板（自動模式按關閉）。window（control.window.GameWindow）
     讓自動模式在看不到遊戲、使用者又沒在用電腦時把遊戲切回前面。"""
@@ -418,9 +421,14 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                   and not (decided_action is not None
                            and decided_action.kind == ActionType.DECLARE)):
                 last_readable = None  # 每段讀不到的期間只存一張
-                unknown_saved_for = game_seen_at  # 已經有截圖，不必再存「不明畫面」
-                log(f"[{stamp}] 連續 {UNREADABLE_AFTER:.0f} 秒讀不到手牌，截圖存到 "
-                    f"{save_result(frame, '讀不到_')}")
+                if hand_on_screen is not None and not hand_on_screen(frame):
+                    # 10/30 05:35、08:26 兩張都是流局後的擲骰子畫面（沒有結算，換局前讀不到手牌）
+                    log(f"[{stamp}] 連續 {UNREADABLE_AFTER:.0f} 秒讀不到手牌（手牌那排沒有牌，多半是換局），不存截圖",
+                        echo=False)
+                else:
+                    unknown_saved_for = game_seen_at  # 已經有截圖，不必再存「不明畫面」
+                    log(f"[{stamp}] 連續 {UNREADABLE_AFTER:.0f} 秒讀不到手牌，截圖存到 "
+                        f"{save_result(frame, '讀不到_')}")
             # 吃碰槓按鈕亮著卻一直沒處理：存截圖查原因（手牌變暗讀不到、放大的牌讀不到…）
             lit = observation.buttons if observation is not None else \
                 (find_buttons(frame) if find_buttons is not None else None)
@@ -676,7 +684,7 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
         run(screen_frames(interval), readers, actuator=actuator, find_continue=find_continue,
             log=log, rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
             find_popup=popups.find, find_autoplay=autoplay_active, window=game_window,
-            stop_requested=esc_pressed)
+            stop_requested=esc_pressed, hand_on_screen=hand_on_screen)
         return
     from hint.overlay import Overlay
 
@@ -687,7 +695,13 @@ def live(interval: float, overlay: bool, auto: bool) -> None:
                            rivers=rivers, find_win=win_is_lit, find_buttons=read_buttons,
                            find_popup=popups.find, find_autoplay=autoplay_active,
                            window=game_window, show_danger=window.show_table,
-                           stop_requested=esc_pressed, show_melds=window.show_melds))
+                           stop_requested=esc_pressed, show_melds=window.show_melds,
+                           hand_on_screen=hand_on_screen))
+
+
+def hand_on_screen(frame: np.ndarray) -> bool:
+    """手牌那一排有沒有牌面（擲骰子、發牌前是空的桌面）。"""
+    return bool(locate_hand_tiles(frame))
 
 
 ROUND_END_SCREENS = frozenset({"大結算", "繼續戰鬥", "破產再玩一局", "再拚一局", "再玩一局"})

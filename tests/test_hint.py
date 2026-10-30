@@ -331,6 +331,42 @@ def test_long_unreadable_stretch_saves_one_screenshot():
     assert saved == ["讀不到_"]
 
 
+def test_no_unreadable_screenshot_when_the_hand_row_is_empty():
+    import hint.__main__ as hint_main
+
+    hand = T("123456789m12345p9s17z")
+    screens = [Observation(hand, None, None, ())] * 2 + [None] * 30
+    saved, lines = [], []
+    now = [0.0]
+
+    def frames():
+        for step, screen in enumerate(screens):
+            now[0] = step * 0.5
+            yield str(step), screen
+
+    hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: frame,
+                  clock=lambda: now[0], save_result=lambda frame, prefix="": saved.append(prefix) or "x",
+                  log=lambda line, detail=None, echo=True: lines.append(line),
+                  hand_on_screen=lambda frame: False)
+    assert "讀不到_" not in saved
+    assert any("手牌那排沒有牌" in line for line in lines)
+
+
+def test_hand_on_screen():
+    import hint.__main__ as hint_main
+
+    import numpy as np
+
+    path = TRAIN_DIR / "經典_碰.png"
+    if not path.exists():
+        pytest.skip("沒有測試截圖")
+    image = read_image(path)
+    assert hint_main.hand_on_screen(image)
+    table = np.zeros_like(image)
+    table[:] = (40, 90, 30)  # 綠色桌面，擲骰子時手牌那排是空的
+    assert not hint_main.hand_on_screen(table)
+
+
 def test_settlement_does_not_count_as_unreadable():
     import hint.__main__ as hint_main
     from perception.continue_button import ContinueButton
