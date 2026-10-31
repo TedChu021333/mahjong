@@ -1,5 +1,5 @@
 from game.tiles import parse
-from hint.advisor import Observation
+from hint.advisor import RIVER_SEAT, Observation
 from hint.river_watch import RiverWatch, summary
 from perception.river_reader import SEATS, RiverTile
 from perception.river_tracker import CONFIRM_FRAMES
@@ -567,3 +567,42 @@ def test_concealed_kong_on_screen_is_not_also_an_exposed_kong():
     frames(watch, waiting())
     assert watch.kong_confirmed() is None
     assert watch.open_kong_tiles == []
+
+
+def test_inferred_added_kong_is_undone_when_a_concealed_kong_shows_up():
+    # 10/31 04:49:47 推算對家七萬碰加槓，04:49:53 才看到對家暗槓（兩張平躺牌背中間疊一張），同一個槓算了兩次
+    from game.rules import Meld
+    from hint.meld_watch import MeldWatch
+
+    reader = FakeReader()
+    watch, _ = watch_with(reader)
+    now = [100.0]
+    watch.clock = lambda: now[0]
+    melds = MeldWatch(None, template_dir=None, background=False)
+    pung = Meld("pung", (P("7m"),) * 3, -1)
+    melds._vote("top", 100, pung)
+    melds.melds = {"top": (pung,)}
+    watch.meld_watch = melds
+    reader.current["right"] = [RiverTile(P("1p"), 0.9, (1300, 300, 1360, 380))]
+    frames(watch, waiting())
+    watch.kong_started()
+    assert watch.kong_confirmed() == ("加槓", "top")
+    melds.reads += 2
+    assert watch._resolve_added_kong()
+    assert melds.melds["top"] == (Meld("kong", (P("7m"),) * 4, -1),)
+    now[0] += 6
+    melds.concealed = {"top": 1}
+    assert watch._undo_added_kong()
+    assert melds.melds["top"] == (pung,) and "撤回" in watch.kong_notes[-1]
+    assert watch.meld_counts()[RIVER_SEAT["top"]] == 2
+    # 超過 15 秒才看到的暗槓是另一個槓：加槓不撤回
+    melds.concealed = {}
+    watch._kongs_explained = 0
+    watch.kong_started()
+    assert watch.kong_confirmed() == ("加槓", "top")
+    melds.reads += 2
+    assert watch._resolve_added_kong()
+    now[0] += 20
+    melds.concealed = {"top": 1}
+    assert not watch._undo_added_kong()
+    assert melds.melds["top"][0].kind == "kong"

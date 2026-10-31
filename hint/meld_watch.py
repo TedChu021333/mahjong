@@ -225,6 +225,21 @@ class MeldWatch:
         self.melds = {**self.melds, seat: tuple(melds)}
         return kong
 
+    def unmark_added_kong(self, seat: str, kong: Meld) -> bool:
+        """撤回 mark_added_kong 加的那一票（推算的加槓其實是暗槓，畫面上之後才看到）；碰回到碰，回傳有沒有變。"""
+        changed = False
+        for slot in self._slots.get(seat, []):
+            if slot[1].get(kong, 0) > 0:
+                slot[1][kong] -= 1
+                if not slot[1][kong]:
+                    del slot[1][kong]
+                    if slot[2] == kong:
+                        slot[2] = max(slot[1], key=slot[1].get)
+                changed = True
+        if changed:
+            self.melds = {**self.melds, seat: tuple(self._seat_melds(seat))}
+        return changed
+
     def mark_kong(self, tile: int) -> str | None:
         """推算有人明槓了 tile（hint.river_watch.RiverWatch.kong_confirmed）：讀到 tile 的碰的那家改成槓，回傳座位；
         還沒有人讀到這個碰（或已經是槓）時回傳 None。"""

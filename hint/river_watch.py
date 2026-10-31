@@ -50,6 +50,9 @@ RECENT_KONG_SECONDS = 6.0
 """金牌變多前這麼多秒內才讀到的槓，算是這次金牌變多的那一組（有人吃碰後 1.5 秒就讀，槓常比金牌先讀到）。
 原本用「前 2 次讀副露」：10/30 14:42:58 讀到下家暗槓、14:43 金牌變多，還推算了一組上家暗槓
 （讀副露較頻繁或金牌讀數跳動、重新起算時，剛讀到的槓會落在 2 次之外）。讀副露約 8 秒一次，6 秒前的讀取一定在槓之前。"""
+ADDED_KONG_UNDO_SECONDS = 15.0
+"""推算加槓後這麼多秒內，畫面上在同一家數到新的暗槓，就撤回加槓：槓的是暗槓、不是那組碰（10/31 04:49:47 推算對家
+七萬碰加槓，04:49:53 才看到對家暗槓，同一個槓算了兩次）。"""
 EMPTY_RESET_FRAMES = 10
 """四家牌河連續這麼多次都讀不到任何牌、追蹤器卻記著牌時，當成新的一局（沒有換三張的場、流局沒有結算畫面）。"""
 
@@ -115,6 +118,7 @@ class RiverWatch:
         """牌河最近一個事件：(座位, "discard"／"claimed")，推算槓的是誰用。"""
         self._kong_from: tuple[str, str] | None = None
         self._added_pending: tuple[str, int, int, int] | None = None
+        self._added_done: tuple[str, Meld, int, float] | None = None
         """推算某家加槓、等讀副露確認：(座位, 當時讀到他的槓數, 畫面上看到他的暗槓數, 當時讀副露的次數)。"""
         self._hidden_pending: tuple[str, int, int] | None = None
         """推算某家暗槓、等讀副露確認：(座位, 當時讀到的各家槓合計, 當時讀副露的次數)。"""
@@ -157,6 +161,7 @@ class RiverWatch:
         self.unseen_claimed = []
         self.hidden_kongs = {seat: 0 for seat in SEATS}
         self._last_mover = self._kong_from = self._added_pending = self._hidden_pending = None
+        self._added_done = None
         self._claimed_tile_since_kong = None
         self.open_kong_tiles = []
         self._kong_seen = []
@@ -395,7 +400,8 @@ class RiverWatch:
         self._kong_seen.append((self.clock(), self._kong_total()))
         hidden = self._resolve_hidden_kong()
         opened = self._resolve_open_kongs()
-        return self._resolve_added_kong() or hidden or opened or changed
+        undone = self._undo_added_kong()
+        return self._resolve_added_kong() or hidden or opened or undone or changed
 
     def _resolve_open_kongs(self) -> bool:
         """推算被明槓的牌：哪一家讀到這種牌的碰就改成槓（MeldWatch.mark_kong）；還沒讀到的留著等下次讀副露。"""
@@ -440,9 +446,27 @@ class RiverWatch:
         if self.meld_watch.reads - reads < ADDED_KONG_READS:
             return False
         self._added_pending = None
-        if self.meld_watch.mark_added_kong(seat) is None:
+        kong = self.meld_watch.mark_added_kong(seat)
+        if kong is None:
             return False
+        self._added_done = (seat, kong, self.meld_watch.concealed.get(seat, 0), self.clock())
         self._kongs_explained += 1
+        return True
+
+    def _undo_added_kong(self) -> bool:
+        """推算的加槓 ADDED_KONG_UNDO_SECONDS 秒內畫面上在同一家多看到暗槓：其實是暗槓，碰改回碰。"""
+        if self._added_done is None:
+            return False
+        seat, kong, concealed, since = self._added_done
+        if self.clock() - since > ADDED_KONG_UNDO_SECONDS:
+            self._added_done = None
+            return False
+        if self.meld_watch.concealed.get(seat, 0) <= concealed:
+            return False
+        self._added_done = None
+        if not self.meld_watch.unmark_added_kong(seat, kong):
+            return False
+        self.kong_notes.append(f"撤回推算的{SEAT_NAMES[seat]}加槓（之後看到{SEAT_NAMES[seat]}暗槓，槓的是暗槓）")
         return True
 
     def read_melds(self) -> tuple[tuple, ...]:
