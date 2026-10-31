@@ -297,8 +297,12 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
             if observation is not None:
                 if observation.swap_prompt is not None:
                     hands.gold = ()
-                elif observation.gold_tiles:
+                elif observation.gold_tiles and (set(hands.gold) <= set(observation.gold_tiles)
+                                                 or len(observation.gold_tiles) > len(hands.gold)):
                     hands.gold = observation.gold_tiles
+                elif hands.gold and set(observation.gold_tiles) != set(hands.gold):
+                    # 同一局金牌只會變多：讀到比較少（10/31 01:58 五種只讀到七條）沿用之前的
+                    observation = replace(observation, gold_tiles=hands.gold)
                 elif hands.gold:
                     observation = replace(observation, gold_tiles=hands.gold)  # 這一幀讀不到：沿用這局之前讀到的
                 else:

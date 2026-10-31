@@ -69,6 +69,24 @@ def test_real_screenshots():
         assert read_gold_tiles(image, gold) == parse(gold_tiles), name
 
 
+# 金牌超過 4 種時面板往上移約 5 像素（10/31 01:58）
+GOLD_SCREENSHOTS = {
+    "經典_金牌四種": "7m7s3m1p",
+    "經典_金牌五種": "7m7s3m1p1m",
+}
+
+
+@pytest.mark.skipif(
+    not all((TRAIN_DIR / f"{name}.png").exists() for name in GOLD_SCREENSHOTS)
+    or not TEMPLATE_DIR.exists(),
+    reason="缺少訓練截圖或模板",
+)
+def test_gold_panel_with_two_rows():
+    gold = TileClassifier.from_directory(template_box=GOLD_TEMPLATE_BOX, min_score=GOLD_MIN_SCORE)
+    for name, gold_tiles in GOLD_SCREENSHOTS.items():
+        assert read_gold_tiles(read_image(TRAIN_DIR / f"{name}.png"), gold) == parse(gold_tiles), name
+
+
 def test_chow_panels_are_found_only_on_the_choice_screen():
     from perception.table_reader import read_chow_panels
     blank = np.full((SCREEN_HEIGHT, SCREEN_WIDTH, 3), 60, np.uint8)

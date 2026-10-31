@@ -150,20 +150,33 @@ def read_claim_tile(image: np.ndarray, classifier: TileClassifier) -> ClaimTile 
     return None
 
 
-def gold_slot_box(index: int) -> tuple[int, int, int, int]:
+def gold_slot_box(index: int, shift: int = 0) -> tuple[int, int, int, int]:
     x0, y0 = GOLD_SLOT_ORIGIN
     pitch_x, pitch_y = GOLD_SLOT_PITCH
     width, height = GOLD_SLOT_SIZE
     left = round(x0 + pitch_x * (index % 4))
-    top = round(y0 + pitch_y * (index // 4))
+    top = round(y0 + pitch_y * (index // 4)) + shift
     return (left, top, left + width, top + height)
+
+
+# 金牌超過 4 種（面板兩排）時整個面板往上移約 5 像素（10/31 01:58 五種金牌只讀到七條，
+# 固定格位分數從 0.9 掉到 0.2）；用第一格找面板的上下位移
+GOLD_PANEL_SHIFTS = range(-8, 3)
+
+
+def _gold_panel_shift(image: np.ndarray, gold_classifier: TileClassifier) -> int:
+    def score(shift: int) -> float:
+        left, top, right, bottom = gold_slot_box(0, shift)
+        return gold_classifier.classify(image[top:bottom, left:right])[1]
+    return max(GOLD_PANEL_SHIFTS, key=lambda shift: (score(shift), -abs(shift)))
 
 
 def read_gold_tiles(image: np.ndarray, gold_classifier: TileClassifier) -> list[int | None]:
     """讀出金牌面板；gold_classifier 需以 GOLD_TEMPLATE_BOX 建立。"""
     tiles = []
+    shift = _gold_panel_shift(image, gold_classifier)
     for index in range(GOLD_MAX_SLOTS):
-        box = gold_slot_box(index)
+        box = gold_slot_box(index, shift)
         left, top, right, bottom = box
         # 空格是藍色面板底色；有牌時整格白色比例高（圖案可能貼近邊緣，不能只看上緣）
         if _face_ratio(image, box) < GOLD_MIN_FACE_RATIO:
