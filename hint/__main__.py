@@ -434,6 +434,15 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     # 10/30 05:35、08:26 兩張都是流局後的擲骰子畫面（沒有結算，換局前讀不到手牌）
                     log(f"[{stamp}] 連續 {UNREADABLE_AFTER:.0f} 秒讀不到手牌（手牌那排沒有牌，多半是換局），不存截圖",
                         echo=False)
+                    if rivers is not None and rivers.has_discards():
+                        # 手牌那排整排空著只會在換局（流局後擲骰子）：沒有換三張的場，新的一局莊家馬上打牌，
+                        # 牌河等不到連續清空就有牌（10/31 23:21 流局後新的一局照上一局的宣告者在擋牌、放槍表沒更新）
+                        log(f"[{stamp}] 新的一局（手牌那排空了 {UNREADABLE_AFTER:.0f} 秒），重設牌河："
+                            f"{river_summary(rivers)}", echo=False)
+                        rivers.new_hand()
+                        kong_shots.new_hand()
+                        hands.hand_ended(settled=False)
+                        declared_seen = set()
                 else:
                     unknown_saved_for = game_seen_at  # 已經有截圖，不必再存「不明畫面」
                     log(f"[{stamp}] 連續 {UNREADABLE_AFTER:.0f} 秒讀不到手牌，截圖存到 "

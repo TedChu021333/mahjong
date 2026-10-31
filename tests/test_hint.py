@@ -909,3 +909,57 @@ def test_swap_keeps_pairs_of_any_wind():
     for text, kept in (("13579m2468p135s22z44z", "4z"), ("1357m2468p13s22z33z44z", "3z")):
         action = decide(Observation(T(text), None, None, (), swap_prompt=True))
         assert action.kind == ActionType.SWAP and parse(kept)[0] not in action.tiles
+
+
+def test_empty_hand_row_starts_a_new_hand(monkeypatch):
+    # 10/31 23:21 沒有換三張的場流局後，新的一局照上一局的宣告者在擋牌：手牌那排空著就是換局，重設牌河
+    import hint.__main__ as hint_main
+
+    hand = T("123456789m12345p9s17z")
+    screens = [Observation(hand, None, None, ())] * 2 + [None] * 30
+    lines = []
+    now = [0.0]
+
+    class Rivers:
+        resets = 0
+        my_discards = 0
+        my_pungs = []
+
+        def update(self, frame, observation):
+            return []
+
+        def request_melds(self, frame):
+            return False
+
+        def discards(self):
+            return ((), (), (), ())
+
+        def meld_counts(self):
+            return (0, 0, 0, 0)
+
+        def exposed_tiles(self):
+            return ((), (), (), ())
+
+        def declared_safe(self):
+            return ((), (), (), ())
+
+        def has_discards(self):
+            return self.resets == 0
+
+        def new_hand(self):
+            self.resets += 1
+
+    rivers = Rivers()
+
+    def frames():
+        for step, screen in enumerate(screens):
+            now[0] = step * 0.5
+            yield str(step), screen
+
+    monkeypatch.setattr(hint_main, "river_summary", lambda rivers: "")
+    hint_main.run(frames(), readers=None, observe_fn=lambda frame, readers: frame,
+                  clock=lambda: now[0], save_result=lambda frame, prefix="": "x", rivers=rivers,
+                  log=lambda line, detail=None, echo=True: lines.append(line),
+                  hand_on_screen=lambda frame: False)
+    assert rivers.resets == 1
+    assert any("新的一局（手牌那排空了" in line for line in lines)
