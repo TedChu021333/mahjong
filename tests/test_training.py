@@ -318,6 +318,23 @@ def test_same_outs_but_clearly_worse_shape_is_switched():
     assert wasteful_discard(state, 0, Action(ActionType.DISCARD, tile=parse("1s")[0]), lookup, logits) is None
 
 
+def test_isolated_honor_goes_before_breaking_a_pair_shape():
+    pytest.importorskip("torch")
+    from agent.nn_agent import wasteful_discard
+    from game.rules import Meld
+    from training.actions import legal_mask
+
+    # 11/1 01:32 碰九條後 一三六七七萬 一二三筒 一三條 六七八條 西：網路打六萬（定七萬當眼），打西進張一樣、改良牌 34 對 30
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("13677m123p13678s3z"))
+    players[0].melds = [Meld("pung", tuple(parse("999s")), 1)]
+    state = GameState([0] * 60, players, phase=Phase.DISCARD, last_drawn=parse("3z")[0])
+    _, lookup = legal_mask(legal_actions(state, 0))
+    logits = np.zeros(108, dtype=np.float32)
+    action, note = wasteful_discard(state, 0, Action(ActionType.DISCARD, tile=parse("6m")[0]), lookup, logits)
+    assert action.tile == parse("3z")[0] and note.startswith("牌型：打六萬")
+
+
 def test_flush_discard_prefers_off_suit_tiles_at_the_same_shanten():
     pytest.importorskip("torch")
     from agent.nn_agent import flush_discard

@@ -213,7 +213,10 @@ SHAPE_NEXT_MARGIN = 0.10
 """進張一樣時比牌型：別的牌改良牌、牌型（next_step_outs）都不比網路那張差，而且改良牌多 SHAPE_IMPROVEMENT_MARGIN 張以上、
 又是 SHAPE_IMPROVEMENT_RATIO 倍以上，或牌型好 SHAPE_NEXT_MARGIN 以上就改打（10/20～10/28 記錄重放：門檻只有「多 4 張或好 5%」時
 沒人宣告的出牌改 4.6%，很多是 29→33 這種小差距）。10/28 使用者：一二四打四（留一二邊張）——10/20 起這種形狀 45 次有 16 次打四，
-進張全都一樣、網路照自己的偏好留么九；打一留二四，摸五變成二＋四五兩面（23:15 改良牌 16 對 8）。"""
+進張全都一樣、網路照自己的偏好留么九；打一留二四，摸五變成二＋四五兩面（23:15 改良牌 16 對 8）。
+孤張字牌只要改良牌多就打（不看差距）：11/1 01:32 碰九條後 一三六七七萬 一二三筒 一三條 六七八條 西，網路打六萬（拆六七七萬、
+定七萬當眼），打西進張一樣 8 張、改良牌 34 對 30，使用者：眼睛定太早。10/20～11/1 兩台沒人宣告的 14312 手重放改 55 手
+（打字牌的改良牌和網路那張完全一樣的 81 手照網路，可能是留安全牌）。"""
 
 
 def wasteful_discard(state: GameState, player: int, choice: Action, lookup: dict[int, Action],
@@ -273,7 +276,8 @@ def _better_shape(state: GameState, player: int, choice: Action, lookup: dict[in
         next_outs, improve = shape(tile)
         if next_outs >= base_next and improve >= base_improve and (
                 (improve - base_improve >= SHAPE_IMPROVEMENT_MARGIN and improve >= base_improve * SHAPE_IMPROVEMENT_RATIO)
-                or next_outs >= base_next * (1 + SHAPE_NEXT_MARGIN)):
+                or next_outs >= base_next * (1 + SHAPE_NEXT_MARGIN)
+                or (tile >= 27 and me.hand[tile] == 1 and improve > base_improve)):
             better.append((next_outs, improve, -keep_value(me.hand, tile, state.gold_tiles), tile))
     if not better:
         return None
