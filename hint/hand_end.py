@@ -22,6 +22,8 @@ class HandBook:
         """這一局最近讀到的金牌：某一幀讀不到時沿用（金牌只會變多，10/28～29 打牌 3627 手有 61 手沒讀到）。"""
         self.gold_missing_frames = 0
         """這一局讀得到手牌、卻還沒讀到過金牌的幀數。"""
+        self.no_panel_frames = 0
+        """這一局讀得到手牌、畫面上卻沒有金牌面板的幀數（沒有金牌的場）。"""
         self._last_dealer: str | None = None
         self.streak: int | None = None
         """這一局的連莊數：同一家連續當莊幾局（莊家換了歸 0）。剛啟動、還沒看過換莊也沒讀到數字時不知道（None）。
@@ -33,6 +35,7 @@ class HandBook:
         self.dealer = None
         self.gold = ()
         self.gold_missing_frames = 0
+        self.no_panel_frames = 0
 
     def see_dealer(self, dealer: str | None) -> list[str]:
         """這一局第一次認到莊家時回傳要記錄的訊息。"""

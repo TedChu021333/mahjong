@@ -42,3 +42,12 @@ def test_start_and_confirm_flags_ignore_the_screenshot_limit():
     assert shots.confirmed
     shots.update(3, 4.0)
     assert not shots.confirmed
+
+
+def test_confirmed_kong_remembers_when_the_gold_first_changed():
+    # 10/31 16:46:03 自己暗槓九萬，16:46:10 才確認（手牌讀不到的幀不算）：要拿第一次看到變多的時間和自己槓的時間比
+    shots = KongShots(delay=2.0)
+    shots.update(2, 0.0)
+    shots.update(3, 4.0)
+    shots.update(3, 7.0)
+    assert shots.confirmed and shots.started_at == 4.0

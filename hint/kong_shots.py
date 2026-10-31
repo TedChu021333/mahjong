@@ -22,6 +22,8 @@ class KongShots:
         """這次 update 剛看到金牌變多（還沒確認）：當下輪到誰，就是誰槓的。"""
         self.confirmed = False
         """這次 update 確認有人槓（變多持續了 delay 秒；不受截圖張數限制）。"""
+        self.started_at: float | None = None
+        """最近一次確認的槓，金牌第一次看到變多的時間（和自己決定槓的時間比，確認要多等 delay 秒以上）。"""
 
     def new_hand(self) -> None:
         self.base = None
@@ -42,6 +44,7 @@ class KongShots:
             return False
         if now - self.pending[1] < self.delay:
             return False
+        self.started_at = self.pending[1]
         self.base, self.pending = gold_count, None
         self.confirmed = True
         if self.left <= 0:

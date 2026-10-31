@@ -169,3 +169,11 @@ def test_no_claim_banner_on_ordinary_screens():
         path = TRAIN_DIR / f"{name}.png"
         if path.exists():
             assert read_claim_banner(read_image(path)) is None, name
+
+
+@pytest.mark.skipif(not (TRAIN_DIR / "經典_沒有金牌.png").exists() or not TEMPLATE_DIR.exists(),
+                    reason="缺少訓練截圖或模板")
+def test_table_without_gold_panel_reads_no_slots():
+    # 10/31 21:10 起的場沒有金牌面板也沒有換三張：一格都不算，提示迴圈就不會每局存「金牌_」截圖
+    gold = TileClassifier.from_directory(template_box=GOLD_TEMPLATE_BOX, min_score=GOLD_MIN_SCORE)
+    assert read_gold_tiles(read_image(TRAIN_DIR / "經典_沒有金牌.png"), gold) == []

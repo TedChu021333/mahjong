@@ -76,7 +76,8 @@ TABLE_INTERVAL = 1.0
 
 CLAIM_MEMORY = 10.0
 OWN_KONG_SECONDS = 6.0
-"""自己決定槓之後這麼久內金牌變多，算是自己槓的，不推算別家暗槓。"""
+"""自己決定槓之後這麼久內金牌開始變多，算是自己槓的，不推算別家暗槓。比的是金牌第一次看到變多的時間
+（KongShots.started_at），不是確認的時間：10/31 16:46:03 副電腦自己暗槓九萬，確認時已過 7 秒，被推算成下家暗槓。"""
 """能吃碰時放大的牌可能先縮進牌河、按鈕卻還亮著；這段時間內沿用最近讀到的那張。"""
 RESULT_DIR = Path("result")
 """每局結算畫面的截圖。"""
@@ -305,11 +306,15 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     observation = replace(observation, gold_tiles=hands.gold)
                 elif hands.gold:
                     observation = replace(observation, gold_tiles=hands.gold)  # 這一幀讀不到：沿用這局之前讀到的
-                else:
+                elif observation.gold_panel:
                     hands.gold_missing_frames += 1
                     if hands.gold_missing_frames == GOLD_MISSING_FRAMES and gold_missing_shots < GOLD_MISSING_SHOT_LIMIT:
                         gold_missing_shots += 1  # 整局都讀不到：存一張查原因（10/28 18:27 那局 10 手都沒有）
                         log(f"[{stamp}] 這局一直讀不到金牌，截圖存到 {save_result(frame, '金牌_')}", echo=False)
+                else:
+                    hands.no_panel_frames += 1  # 沒有金牌面板：這個場沒有金牌（10/31 21:10 起每局都存了一張）
+                    if hands.no_panel_frames == GOLD_MISSING_FRAMES:
+                        log(f"[{stamp}] 這局沒有金牌面板（這個場沒有金牌）", echo=False)
                 if observation.swap_prompt is not None:
                     kong_shots.new_hand()
                 else:
@@ -318,7 +323,7 @@ def run(frames: Iterator[tuple[str, np.ndarray]], readers: Readers,
                     if rivers is not None and hasattr(rivers, "kong_started"):
                         if kong_shots.started:
                             rivers.kong_started()
-                        if kong_shots.confirmed and clock() - own_kong_at > OWN_KONG_SECONDS:
+                        if kong_shots.confirmed and kong_shots.started_at - own_kong_at > OWN_KONG_SECONDS:
                             found = rivers.kong_confirmed()
                             meld_read_due = clock() + MELD_READ_DELAY  # 槓完讀一次副露，確認推算
                             if found is not None:

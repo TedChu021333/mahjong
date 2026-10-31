@@ -93,6 +93,9 @@ class Observation:
     my_discards: int = field(default=0, compare=False)
     """這局自己已打出幾張（提示迴圈由手牌變化數出）。牌河追蹤只記到約八成的出牌（10/5 分析 1436 局），
     每位對手打過的張數至少算這麼多，聽牌率與牌牆剩餘才不會低估。"""
+    gold_panel: bool = field(default=True, compare=False)
+    """畫面上有金牌面板（第一格是白色牌面，認不認得出都算）。有的場沒有金牌也沒有換三張（10/31 21:10 起），
+    整局讀不到金牌是正常的，不用存截圖。"""
 
     @property
     def my_turn(self) -> bool:
@@ -129,7 +132,8 @@ def observe(image: np.ndarray, readers: Readers) -> Observation | None:
         return None
     if not _consistent_layout(reading.boxes):
         return None
-    gold = tuple(t for t in read_gold_tiles(image, readers.gold) if t is not None)
+    slots = read_gold_tiles(image, readers.gold)
+    gold = tuple(t for t in slots if t is not None)
     return Observation(reading.known_tiles(), buttons,
                        read_claim_tile(image, readers.claim), gold, reading.boxes,
                        read_swap_prompt(image),
@@ -137,7 +141,8 @@ def observe(image: np.ndarray, readers: Readers) -> Observation | None:
                        read_chow_panels(image),
                        declared=read_declared(image, readers.declare),
                        dealer=read_dealer(image),
-                       dealer_streak=read_dealer_streak(image, readers.streak))
+                       dealer_streak=read_dealer_streak(image, readers.streak),
+                       gold_panel=bool(slots))
 
 
 def _consistent_layout(boxes) -> bool:
