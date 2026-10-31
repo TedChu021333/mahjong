@@ -499,9 +499,11 @@ CLAIM_MODE = "improve"
 improve 另外允許「一向聽、向聽不變但進張大增」的吃碰（claim_widens，10/21 起）。"""
 
 WIDEN_SHANTEN = 1
-WIDEN_RATIO = 2.0
-WIDEN_EXTRA = 12
-"""claim_widens：吃碰前後都是 WIDEN_SHANTEN 向聽以內，進張至少變 WIDEN_RATIO 倍、而且多 WIDEN_EXTRA 張以上。"""
+WIDEN_RATIO = 1.5
+WIDEN_EXTRA = 8
+"""claim_widens：吃碰前後都是 WIDEN_SHANTEN 向聽以內，進張至少變 WIDEN_RATIO 倍、而且多 WIDEN_EXTRA 張以上。
+11/1 使用者覺得吃碰太保守，由 2 倍、多 12 張放寬：10/29～10/31 兩台約 1500 局重放，網路不要、改了會吃碰的多 56 次
+（沒人宣告 36 次）；擴大到兩向聽會多放掉門清（58 次，多半是第一組副露），沒有採用。"""
 
 
 def claim_widens(before: tuple[int, int], after: tuple[int, int]) -> bool:

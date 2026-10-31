@@ -84,11 +84,13 @@ def test_rule_agent_skips_a_pung_that_does_not_help():
 
 
 def test_rule_agent_pungs_when_it_widens_the_hand(monkeypatch):
-    # 經典_碰.png：碰二萬向聽不變，但有效進張由 7 張增加為 15 張；舊標準（loose）會碰，
-    # 預設（improve）向聽沒變好就不碰
+    # 經典_碰.png：一向聽碰二萬向聽不變，但有效進張由 7 張增加為 15 張（2 倍多、多 8 張）：
+    # 11/1 放寬後預設（improve）也碰；門檻還是 2 倍、多 12 張時不碰
     import agent.rule_agent
 
     state = response_state("11223789m99m4p56779s", "2m")
+    assert choose_rule_action(state, Random(1))[1].kind == ActionType.PUNG
+    monkeypatch.setattr(agent.rule_agent, "WIDEN_EXTRA", 12)
     assert choose_rule_action(state, Random(1))[1].kind == ActionType.PASS
     monkeypatch.setattr(agent.rule_agent, "CLAIM_MODE", "loose")
     _, action = choose_rule_action(state, Random(1))
@@ -379,10 +381,11 @@ def test_ties_discard_the_most_isolated_tile():
 
 
 def test_claim_modes():
-    # 經典_碰.png：碰二萬向聽不變、進張變多 → 只有 loose 會碰
+    # 經典_碰.png：一向聽碰二萬向聽不變、進張 7 → 15 張 → loose 會碰；improve 也碰（claim_widens，11/1 放寬）
     state = response_state("11223789m99m4p56779s", "2m")
     assert choose_rule_action_for_player(state, 1, claim_mode="loose").kind == ActionType.PUNG
-    assert choose_rule_action_for_player(state, 1, claim_mode="improve").kind == ActionType.PASS
+    assert choose_rule_action_for_player(state, 1, claim_mode="improve").kind == ActionType.PUNG
+    assert choose_rule_action_for_player(state, 1, claim_mode="near").kind == ActionType.PASS
     # 碰完聽牌（一向聽 → 聽牌）：near 也碰
     state = response_state("111222333m44p77p5s89s", "4p", source=2)
     assert choose_rule_action_for_player(state, 1, claim_mode="near").kind == ActionType.PUNG
@@ -471,7 +474,9 @@ def test_claim_that_widens_a_one_shanten_hand_is_taken():
     assert before == (1, -4) and after[0] == 1 and -after[1] >= 30
     assert claim_widens(before, after) and network_claim_is_worth(state, 0, pung)
     # 向聽不變、只多幾張進張的照舊不吃碰
-    assert not claim_widens((1, -16), (1, -24))
+    assert claim_widens((1, -16), (1, -24))       # 1.5 倍、多 8 張（11/1 放寬）
+    assert not claim_widens((1, -16), (1, -22))
+    assert not claim_widens((1, -4), (1, -10))     # 2.5 倍但只多 6 張
     assert not claim_widens((2, -4), (2, -40))
 
 
