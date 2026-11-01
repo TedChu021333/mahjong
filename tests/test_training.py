@@ -229,6 +229,21 @@ def test_guard_takes_a_claim_the_network_passed_when_it_widens_the_hand():
     assert widening_claim(state, 0, legal_actions(state, 0)) is None
 
 
+def test_guard_pungs_a_scoring_honor_the_network_passed_when_it_improves_shanten():
+    pytest.importorskip("torch")
+    from agent.nn_agent import widening_claim
+    from game.rules import GameState, Phase, PlayerState, legal_actions
+
+    # 11/1 00:25 一四八九九九萬 一筒 五條 東南西西白發發中，網路不碰發（碰了 6 → 5 向聽）
+    players = [PlayerState() for _ in range(4)]
+    players[0].hand = to_counts(parse("148999m1p5s12335667z"))
+    players[2].discards = parse("6z")
+    state = GameState([0] * 60, players, phase=Phase.RESPONSE, last_discard=parse("6z")[0],
+                      discard_player=2, response_players=[0])
+    action, note = widening_claim(state, 0, legal_actions(state, 0))
+    assert action.kind == ActionType.PUNG and note.startswith("碰發")
+
+
 def test_keep_tenpai_when_the_network_breaks_it_and_nobody_declared():
     pytest.importorskip("torch")
     from agent.nn_agent import keep_tenpai

@@ -16,6 +16,7 @@ from agent.rule_agent import (
     claim_value,
     claim_widens,
     hand_value,
+    honor_tai,
     declare_is_worth,
     gold_in_use,
     network_claim_is_worth,
@@ -144,11 +145,19 @@ class NetworkPolicy:
 
 def widening_claim(state: GameState, player: int, actions: list[Action]) -> tuple[Action, str] | None:
     """網路不吃碰、但有吃碰能讓一向聽的進張大增（rule_agent.claim_widens）時改成吃碰：(動作, 記錄說明)。
-    10/21 23:43 一二二條 四五五條，只等三條 4 張，碰二條後 32 張，網路自己不碰。"""
+    10/21 23:43 一二二條 四五五條，只等三條 4 張，碰二條後 32 張，網路自己不碰。
+    會加台的字牌碰了向聽變好也碰（規則式與 network_claim_is_worth 都是這個原則）：11/1 00:25 一四八九九九萬 一筒 五條
+    東南西西白發發中，網路不碰發、不碰西（碰了 6 → 5 向聽），一天 3 次。"""
     if state.last_discard is None or state.declared[player]:
         return None
     me = state.players[player]
     before = hand_value(me.hand, me.open_melds)
+    if honor_tai(state, player, state.last_discard):
+        pung = next((action for action in actions if action.kind == ActionType.PUNG), None)
+        if pung is not None:
+            after = claim_value(me.hand, me.open_melds, pung, state.last_discard)
+            if after[0] < before[0]:
+                return pung, f"碰{tile_name(state.last_discard)}（加台，向聽 {before[0]} → {after[0]}）"
     best = None
     for action in actions:
         if action.kind not in (ActionType.CHOW, ActionType.PUNG):
